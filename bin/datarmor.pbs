@@ -1,0 +1,42 @@
+#!/bin/bash
+#PBS -l walltime=02:40:00
+#PBS -l select=1:ncpus=28:mem=120GB
+#PBS -q mpi_1
+#PBS -e ../log/
+
+
+bash
+source .bashrc
+#conda activate /home/datawork-lops-iaocea/conda-env/pangeo-fish_1222
+conda activate /home/datawork-lops-iaocea/conda-env/pangeo-fish_0323
+#notebook=marc_emission
+#notebook=marc_diff
+#notebook=estimator
+#notebook=REPIX_HEALPIX_rang1
+#notebook=REPIX_HEALPIX_rang0
+which python
+tag=${PBS_JOBID}
+
+set -xv
+ulimit -s
+ulimit -s unlimited
+cd $PBS_O_WORKDIR
+
+pwd
+
+mkdir -p ../log
+mkdir -p ../results
+
+cd $PBS_O_WORKDIR/../notebooks
+basepath="/home/datawork-lops-iaocea/work/fish/marc/"
+
+echo 'submitted job with'  'tag_id' $tag_id  'model' $model 'year' $year 'notebook' $notebook 'basepath' $basepath
+outbook=${notebook}-${model}-${tag_id}-${tag}-${year}
+env  model=$model healpy=$healpy tag_id=$tag_id year=$year basepath=$basepath time jupyter nbconvert --allow-errors --to notebook --execute ${notebook}.ipynb --output ../log/${outbook}.ipynb --debug >& ../log/submitnotebook_${outbook}.log
+cd ../log
+
+time jupyter nbconvert --allow-errors ${outbook}.ipynb --to html  >& ${outbook}.converthtml.log
+mv ${outbook}.html /home/datawork-taos-s/public/fish/marc/result/.
+
+#cd ../bin
+#qsub  syncresult_dat.pbs
