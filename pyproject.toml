@@ -13,6 +13,9 @@ dependencies = [
     "pandas",
     "numpy",
     "more_itertools",
+    "opt_einsum",
+    "sparse",
+    "healpy",
 ]
 dynamic = ["version"]
 
