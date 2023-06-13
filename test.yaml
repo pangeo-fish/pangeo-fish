@@ -1,0 +1,55 @@
+dependencies:
+  - python=3.11
+  # development
+  - jupyterlab
+  - ipykernel
+  - ipython
+  - jupyterlab_code_formatter
+  - black
+  - isort
+  - rich
+  - pre-commit
+  - graphviz
+  - python-graphviz
+  # general computing
+  - xarray
+  - more-itertools
+  - scipy
+  - flox
+  - numba
+  # units, bounds, and cf-conventions
+  - pint-xarray
+  - cf_xarray
+  # geographic manipulations
+  - pyproj
+  - cartopy
+  - shapely
+  - odc-geo
+  #- regionmask
+  #- geopandas
+  # I/O
+  #- pystac
+  #- pystac-client
+  - netcdf4
+  - h5netcdf
+  - zarr
+  - fsspec
+  - pooch
+  # machine learning
+  #- scikit-learn
+  #- optuna
+  # distributed computing
+  - dask
+  - distributed
+  - dask-labextension
+  - dask-image
+  #- dask-ml
+  # plotting
+  - hvplot
+  - holoviews
+  - geoviews
+  - datashader
+  #- panel
+  #- selenium
+  #- folium
+  - cmocean
