@@ -1,3 +1,4 @@
+import numpy as np
 import xarray as xr
 
 from ... import utils
@@ -64,7 +65,7 @@ class EagerScoreEstimator:
             final_dims,
         ]
 
-        return xr.apply_ufunc(
+        value = xr.apply_ufunc(
             _algorithm,
             X.pdf.fillna(0),
             X.mask,
@@ -75,6 +76,7 @@ class EagerScoreEstimator:
             output_core_dims=[()],
             dask="allowed",
         )
+        return value.fillna(np.inf)
 
     def _forward_algorithm(self, X, *, spatial_dims=None, temporal_dims=None):
         def _algorithm(emission, mask, initial, final, *, sigma, truncate):
@@ -197,7 +199,7 @@ class EagerScoreEstimator:
             The computed state probabilities
         """
         state = self._forward_backward_algorithm(
-            X, spatial_dims=spatial_dims, temporal_dims=temporal_dims
+            X.fillna(0), spatial_dims=spatial_dims, temporal_dims=temporal_dims
         )
         return state
 
@@ -225,4 +227,6 @@ class EagerScoreEstimator:
         score : float
             The score for the fit with the current parameters.
         """
-        return self._score(X, spatial_dims=spatial_dims, temporal_dims=temporal_dims)
+        return self._score(
+            X.fillna(0), spatial_dims=spatial_dims, temporal_dims=temporal_dims
+        )
