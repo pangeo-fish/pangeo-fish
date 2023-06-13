@@ -8,7 +8,7 @@ from .utils import _detect_spatial_dims, clear_attrs, normalize
 
 # also try: multivariate_normal, gaussian_kde
 # TODO: use numba to vectorize (using `guvectorize`?)
-def normal(samples, mean, std, *, dim):
+def normal(samples, mean, std, *, dims):
     """compute the combined pdf of independent layers
 
     Parameters
@@ -19,7 +19,7 @@ def normal(samples, mean, std, *, dim):
         The mean of the distribution
     std : float
         The standard deviation of the distribution
-    dim : hashable or list of hashable
+    dims : list of hashable
         The dimension to compute the pdf along
 
     Returns
@@ -31,14 +31,21 @@ def normal(samples, mean, std, *, dim):
     def _pdf(samples, mean, std):
         return scipy.stats.norm.pdf(samples, mean, std)
 
+    if isinstance(std, (int, float)) or std.size == 1:
+        param_dims = []
+    else:
+        param_dims = mean.dims
+
     result = xr.apply_ufunc(
         _pdf,
         samples,
         mean,
         std**2,
         dask="parallelized",
-        input_core_dims=[[dim], [dim], [dim]],
-        output_core_dims=[[dim]],
+        input_core_dims=[dims, param_dims, param_dims],
+        output_core_dims=[dims],
+        exclude_dims=set(param_dims),
+        vectorize=True,
     )
     return result.rename("pdf").pipe(clear_attrs)
 
