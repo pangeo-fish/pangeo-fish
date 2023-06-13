@@ -201,12 +201,14 @@ def create_grid(nside, rot={"lat": 0, "lon": 0}):
     lat = lat_ - rot["lat"]
     lon = lon_ + rot["lon"]
 
+    resolution = hp.nside2resol(nside)
     coords = xr.Dataset(
         {
-            "latitude": (["cells"], lat),
-            "longitude": (["cells"], lon),
+            "latitude": (["cells"], lat, {"units": "deg"}),
+            "longitude": (["cells"], lon, {"units": "deg"}),
             "cell_ids": (["cells"], cell_ids),
-        }
+        },
+        coords={"resolution": ((), resolution, {"units": "rad"})},
     )
 
     return HealpyGridInfo(nside=nside, rot=rot, indices=indices, coords=coords)
