@@ -1,0 +1,41 @@
+[project]
+name = "pangeo-fish"
+authors = [{name = "TAOS"}]
+description = "Utilities for fish geolocation"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+]
+dependencies = [
+    "xarray",
+    "pandas",
+    "numpy",
+    "more_itertools",
+]
+dynamic = ["version"]
+
+[project.urls]
+"Homepage" = "https://gitlab.ifremer.fr/iaocea/pangeo-fish"
+
+[tool.setuptools]
+packages = ["pangeo_fish"]
+
+[build-system]
+requires = [
+    "setuptools>=64.0",
+    "wheel",
+    "setuptools_scm[toml]>=3.4",
+]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+fallback_version = "999"
+
+[tool.isort]
+profile = "black"
+skip_gitignore = true
+float_to_top = true
+default_section = "THIRDPARTY"
+known_first_party = "pangeo_fish"

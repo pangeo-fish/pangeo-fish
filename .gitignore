@@ -1,0 +1,20 @@
+# python compiled files
+*.py[cdo]
+__pycache__/
+
+# jupyter files
+.ipynb_checkpoints/
+
+# dask files
+dask-worker-space/
+/*.egg-info/
+
+
+# data storage
+data*/*
+non-comitted*/*
+
+#
+bin/*.o*
+log/*
+results/*
