@@ -83,7 +83,7 @@ def normal_at(grid, *, pos, cov, axes=["X", "Y"], normalize=False):
         input_core_dims=[list(coords.dims) + ["axes"]],
         output_core_dims=[list(coords.dims)],
         keep_attrs=False,
-    )
+    ).assign_coords(grid_coords)
     if normalize:
         pdf = pdf / pdf.sum()
 
