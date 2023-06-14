@@ -5,6 +5,20 @@ from scipy.special import ive
 from scipy.stats import multivariate_normal
 
 
+def create_covariances(cov, coord_names):
+    if isinstance(cov, (int, float)) or cov.size == 1:
+        # only for 2D, so we have to repeat
+        cov_ = cov * np.eye(2)
+    elif cov.size == 2:
+        cov_ = np.eye(2) @ cov
+    else:
+        cov_ = cov
+
+    return xr.DataArray(
+        cov_, dims=["i", "j"], coords={"i": coord_names, "j": coord_names}
+    )
+
+
 def normal_at(grid, *, pos, cov, axes=["X", "Y"], normalize=False):
     """multivariate normal distribution
 
@@ -52,9 +66,10 @@ def normal_at(grid, *, pos, cov, axes=["X", "Y"], normalize=False):
         ]
         coords = coords_.reset_coords(coord_names)
 
+    variable_name = "normal_pdf"
     input_grid = (
         coords.to_array(dim="axes")
-        .to_dataset(name="normal_pdf")
+        .to_dataset(name=variable_name)
         .compute()
         .assign_coords(grid_coords.coords)
     )
@@ -68,11 +83,11 @@ def normal_at(grid, *, pos, cov, axes=["X", "Y"], normalize=False):
         input_core_dims=[list(coords.dims) + ["axes"]],
         output_core_dims=[list(coords.dims)],
         keep_attrs=False,
-    )
+    ).assign_coords(grid_coords)
     if normalize:
         pdf = pdf / pdf.sum()
 
-    return pdf
+    return pdf[variable_name]
 
 
 def zeros(coords, dtype=float):
