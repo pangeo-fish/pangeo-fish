@@ -5,6 +5,20 @@ from scipy.special import ive
 from scipy.stats import multivariate_normal
 
 
+def create_covariances(cov, coord_names):
+    if isinstance(cov, (int, float)) or cov.size == 1:
+        # only for 2D, so we have to repeat
+        cov_ = cov * np.eye(2)
+    elif cov.size == 2:
+        cov_ = np.eye(2) @ cov
+    else:
+        cov_ = cov
+
+    return xr.DataArray(
+        cov_, dims=["i", "j"], coords={"i": coord_names, "j": coord_names}
+    )
+
+
 def normal_at(grid, *, pos, cov, axes=["X", "Y"], normalize=False):
     """multivariate normal distribution
 
