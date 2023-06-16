@@ -114,18 +114,34 @@ find "$workflow_root" -maxdepth 1 -type f -name "0[1-3]_*.ipynb" | sort -h | whi
               -f "$configuration_root/$conf_id/$(basename "$notebook" .ipynb).yaml"
 done
 
+script_dir="$(dirname "$(readlink -f -- "${BASH_SOURCE[0]}")")"
+
+
 # execute the notebooks
 mkdir -p "$executed_root/$conf_id"
 find "$parametrized_root/$conf_id" -maxdepth 1 -type f -name "*.ipynb" | sort -h | while read -r notebook; do
     executed_path="$executed_root/$conf_id/$(basename "$notebook")"
     html_path="$(basename "$executed_path" .ipynb).html"
-    /usr/bin/time -v jupyter nbconvert --execute --allow-errors \
-            "$notebook" \
-            --to notebook \
-            --output "$executed_path"
 
-    /usr/bin/time -v jupyter nbconvert --allow-errors \
+    if which qsub; then
+        # automatically use qsub if available
+        output=$(
+            qsub -N "$conf_id" \
+                 -V -W "depend=afterany:$after" \
+                 "$script_dir/execute-notebook.sh" \
+                 --conda-path "$conda_path" \
+                 --environment "$environment" \
+                 "$notebook" \
+                 "$executed_path" \
+                 "$html_path"
+              )
+        after=$(echo "$output" | awk '{print $1}')
+    else
+        echo "$script_dir/execute-notebook.sh" \
+            --conda-path "$conda_path" \
+            --environment "$environment" \
+            "$notebook" \
             "$executed_path" \
-            --to html \
-            --output "$html_path"
+            "$html_path"
+    fi
 done
