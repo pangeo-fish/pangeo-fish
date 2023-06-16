@@ -15,9 +15,10 @@ Options:
  -w, --workflow-root        the root of the workflow notebooks
  -c, --configuration-root   the root of the configuration files
  -p, --parametrized-root    the root of the parametrized notebooks
+     --executed-root        the root of the executed directories
 EOF
 
-if ! normalized=$(getopt -o hw:c:p:e: --long help,conda-path:,environment:,workflow-root:,configuration-root:,parametrized-root: -n "run-workflow" -- "$@"); then
+if ! normalized=$(getopt -o hw:c:p:e: --long help,conda-path:,environment:,workflow-root:,configuration-root:,parametrized-root:,executed-root: -n "run-workflow" -- "$@"); then
     echo "failed to parse arguments" >&2
     exit 1
 fi
@@ -48,6 +49,11 @@ while true; do
 
         -p|--parametrized-root)
             parametrized_root="$2"
+            shift 2
+            ;;
+
+        --executed-root)
+            executed_root="$2"
             shift 2
             ;;
 
