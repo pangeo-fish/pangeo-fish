@@ -108,6 +108,7 @@ mkdir -p "$parametrized_root/$conf_id"
 
 find "$workflow_root" -maxdepth 1 -type f -name "0[1-3]_*.ipynb" | sort -h | while read -r notebook; do
     papermill --prepare-only \
+              --kernel python3 \
               "$notebook" \
               "$parametrized_root/$conf_id/$(basename "$notebook")" \
               -f "$configuration_root/$conf_id/$(basename "$notebook" .ipynb).yaml"
