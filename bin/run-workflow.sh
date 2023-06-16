@@ -10,12 +10,14 @@ notebooks are written to (parametrized-root)/(confname).
 
 Options:
  -h, --help                 display this help
+ -e, --environment          activate this environment before running papermill
+     --conda-path           path to the conda executable
  -w, --workflow-root        the root of the workflow notebooks
  -c, --configuration-root   the root of the configuration files
  -p, --parametrized-root    the root of the parametrized notebooks
 EOF
 
-if ! normalized=$(getopt -o hw:c:p: --long help,workflow-root:,configuration-root:,parametrized-root: -n "run-workflow" -- "$@"); then
+if ! normalized=$(getopt -o hw:c:p:e: --long help,conda-path:,environment:,workflow-root:,configuration-root:,parametrized-root: -n "run-workflow" -- "$@"); then
     echo "failed to parse arguments" >&2
     exit 1
 fi
@@ -49,6 +51,16 @@ while true; do
             shift 2
             ;;
 
+        -e|--environment)
+            environment="$2"
+            shift 2
+            ;;
+
+        --conda-path)
+            conda_path="$2"
+            shift 2
+            ;;
+
         --)
             shift
             break
@@ -70,6 +82,18 @@ conf_id="$1"
 if [ ! -d "$configuration_root/$conf_id" ]; then
     echo "configuration $configuration_root/$conf_id does not exist"
     exit 2
+fi
+
+# conda
+if [[ "$environment" != "" && "$conda_path" == "" ]]; then
+    echo "need to provide the path to conda when activating a environment";
+    exit 3
+elif [[ "$environment" != "" && "$conda_path" != "" ]]; then
+    conda_root="$(dirname "$(dirname "$conda_path")")"
+    # shellcheck source=/dev/null
+    source "$conda_root/etc/profile.d/conda.sh"
+
+    conda activate "$environment"
 fi
 
 # parametrize the notebooks
