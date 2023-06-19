@@ -123,7 +123,7 @@ find "$parametrized_root/$conf_id" -maxdepth 1 -type f -name "*.ipynb" | sort -h
     executed_path="$executed_root/$conf_id/$(basename "$notebook")"
     html_path="$(basename "$executed_path" .ipynb).html"
 
-    if which qsub; then
+    if which qsub >/dev/null; then
         # automatically use qsub if available
         output=$(
             qsub -N "$conf_id" \
