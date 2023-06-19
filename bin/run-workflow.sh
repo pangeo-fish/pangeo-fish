@@ -138,7 +138,7 @@ find "$parametrized_root/$conf_id" -maxdepth 1 -type f -name "*.ipynb" | sort -h
               )
         after=$(echo "$output" | awk '{print $1}')
     else
-        echo "$script_dir/execute-notebook.sh" \
+        "$script_dir/execute-notebook.sh" \
             --conda-path "$conda_path" \
             --environment "$environment" \
             "$notebook" \
