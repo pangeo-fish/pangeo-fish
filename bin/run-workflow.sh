@@ -127,7 +127,8 @@ find "$parametrized_root/$conf_id" -maxdepth 1 -type f -name "*.ipynb" | sort -h
         # automatically use qsub if available
         output=$(
             qsub -N "$conf_id" \
-                 -V -W "depend=afterany:$after" \
+                 -W "depend=afterany:$after" \
+                 -- \
                  "$script_dir/execute-notebook.sh" \
                  --conda-path "$conda_path" \
                  --environment "$environment" \
