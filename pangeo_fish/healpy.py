@@ -32,8 +32,8 @@ def geographic_to_astronomic(lat, lon, rot):
     phi : array-like
         Astronomic longitude in degrees
     """
-    theta = 90.0 - lat - rot[1]
-    phi = -lon + rot[0]
+    theta = 90.0 - lat - rot["lat"]
+    phi = -lon + rot["lon"]
 
     return theta, phi
 
@@ -467,14 +467,14 @@ def buffer_points(
         _buffer_masks,
         cell_ids,
         positions,
-        input_core_dims=[["y", "x"], ["cartesian"]],
+        input_core_dims=[["x", "y"], ["cartesian"]],
         kwargs={
             "radius": radius_,
             "nside": nside,
             "factor": factor,
             "intersect": intersect,
         },
-        output_core_dims=[["y", "x"]],
+        output_core_dims=[["x", "y"]],
         vectorize=True,
     )
 

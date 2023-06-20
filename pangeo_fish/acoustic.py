@@ -79,8 +79,10 @@ def count_detections(detections, by):
     flox.xarray.xarray_reduce
     xarray.Dataset.groupby
     """
-    count_on = detections[["receiver_id"]].assign(
-        count=lambda ds: xr.ones_like(ds["receiver_id"], dtype=int)
+    count_on = (
+        detections[["receiver_id"]]
+        .assign(count=lambda ds: xr.ones_like(ds["receiver_id"], dtype=int))
+        .set_coords(["receiver_id"])
     )
 
     isbin = [False, isinstance(by, pd.IntervalIndex)]
