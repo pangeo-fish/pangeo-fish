@@ -128,11 +128,15 @@ mkdir -p "$parametrized_root"
 mkdir -p "$parametrized_root/$conf_id"
 
 find "$workflow_root" -maxdepth 1 -type f -name "*.ipynb" | sort -h | while read -r notebook; do
+    configuration_path="$configuration_root/$conf_id/$(basename "$notebook" .ipynb).yaml"
+    if [ ! -f "$configuration_path" ]; then
+        continue
+    fi
     papermill --prepare-only \
               --kernel python3 \
               "$notebook" \
               "$parametrized_root/$conf_id/$(basename "$notebook")" \
-              -f "$configuration_root/$conf_id/$(basename "$notebook" .ipynb).yaml"
+              -f "$configuration_path"
 done
 
 script_dir="$(dirname "$(readlink -f -- "${BASH_SOURCE[0]}")")"
