@@ -21,7 +21,7 @@ dependencies = [
 dynamic = ["version"]
 
 [project.urls]
-"Homepage" = "https://gitlab.ifremer.fr/iaocea/pangeo-fish"
+"Homepage" = "https://github.com/iaocea/pangeo-fish"
 
 [tool.setuptools]
 packages = ["pangeo_fish"]
