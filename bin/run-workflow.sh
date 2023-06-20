@@ -16,9 +16,12 @@ Options:
  -c, --configuration-root   the root of the configuration files
  -p, --parametrized-root    the root of the parametrized notebooks
      --executed-root        the root of the executed directories
+     --walltime             the walltime to request using qsub
+     --memory               the memory to request using qsub
+     --queue                the queue to submit the jobs to
 EOF
 
-if ! normalized=$(getopt -o hw:c:p:e: --long help,conda-path:,environment:,workflow-root:,configuration-root:,parametrized-root:,executed-root: -n "run-workflow" -- "$@"); then
+if ! normalized=$(getopt -o hw:c:p:e: --long help,conda-path:,environment:,workflow-root:,configuration-root:,parametrized-root:,executed-root:,walltime:,memory:,queue: -n "run-workflow" -- "$@"); then
     echo "failed to parse arguments" >&2
     exit 1
 fi
@@ -29,6 +32,9 @@ workflow_root="$(pwd)/notebooks/workflow"
 configuration_root="$workflow_root/configuration"
 parametrized_root="$workflow_root/parametrized"
 executed_root="$workflow_root/executed"
+walltime="02:00:00"
+memory="60GB"
+queue="mpi_1"
 
 while true; do
     case "$1" in
@@ -64,6 +70,21 @@ while true; do
 
         --conda-path)
             conda_path="$2"
+            shift 2
+            ;;
+
+        --queue)
+            queue="$2"
+            shift 2
+            ;;
+
+        --memory)
+            memory="$2"
+            shift 2
+            ;;
+
+        --walltime)
+            walltime="$2"
             shift 2
             ;;
 
@@ -128,6 +149,9 @@ find "$parametrized_root/$conf_id" -maxdepth 1 -type f -name "*.ipynb" | sort -h
         output=$(
             qsub -N "$conf_id" \
                  -W "depend=afterany:$after" \
+                 -l "walltime=$walltime" \
+                 -l "mem=$memory" \
+                 -q "$queue" \
                  -- \
                  "$script_dir/execute-notebook.sh" \
                  --conda-path "$conda_path" \
