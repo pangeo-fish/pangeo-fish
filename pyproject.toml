@@ -13,6 +13,7 @@ dependencies = [
     "pandas",
     "numpy",
     "scipy",
+    "numba",
     "more_itertools",
     "opt_einsum",
     "sparse",
