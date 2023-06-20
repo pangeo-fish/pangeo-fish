@@ -12,6 +12,7 @@ dependencies = [
     "xarray",
     "pandas",
     "numpy",
+    "scipy",
     "more_itertools",
     "opt_einsum",
     "sparse",
