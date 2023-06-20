@@ -14,7 +14,7 @@ _marc_diff_z_signatures = [
 def _marc_diff_z(
     model_temp, model_depth, bottom, tag_temp, tag_depth, depth_thresh, result
 ):
-    if depth_thresh != 0 and bottom < np.max(tag_depth) * 0.8:
+    if depth_thresh != 0 and bottom < np.max(tag_depth) * depth_thresh:
         result[0] = np.nan
         return
 
