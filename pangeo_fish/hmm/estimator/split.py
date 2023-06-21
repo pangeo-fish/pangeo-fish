@@ -36,6 +36,9 @@ class EagerScoreEstimator:
         return type(self)(**new_params)
 
     def _score(self, X, *, spatial_dims=None, temporal_dims=None):
+        if self.sigma is None:
+            raise ValueError("unset sigma, cannot run the filter")
+
         def _algorithm(emission, mask, initial, final, *, sigma, truncate):
             return score(
                 emission,
@@ -79,6 +82,9 @@ class EagerScoreEstimator:
         return value.fillna(np.inf)
 
     def _forward_algorithm(self, X, *, spatial_dims=None, temporal_dims=None):
+        if self.sigma is None:
+            raise ValueError("unset sigma, cannot run the filter")
+
         def _algorithm(emission, mask, initial, final, *, sigma, truncate):
             return forward(
                 emission=emission,
@@ -121,6 +127,9 @@ class EagerScoreEstimator:
         )
 
     def _forward_backward_algorithm(self, X, *, spatial_dims=None, temporal_dims=None):
+        if self.sigma is None:
+            raise ValueError("unset sigma, cannot run the filter")
+
         def _algorithm(emission, mask, initial, final, *, sigma, truncate):
             forward_state = forward(
                 emission=emission,
