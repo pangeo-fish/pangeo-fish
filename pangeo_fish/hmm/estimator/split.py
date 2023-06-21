@@ -1,3 +1,5 @@
+from dataclasses import asdict, dataclass, replace
+
 import numpy as np
 import xarray as xr
 
@@ -5,6 +7,7 @@ from ... import utils
 from ..filter import forward, score
 
 
+@dataclass
 class EagerScoreEstimator:
     """Estimator to train and predict gaussian random walk hidden markov models
 
@@ -18,9 +21,11 @@ class EagerScoreEstimator:
         calculate the maximum distance per time unit traveled by the fish.
     """
 
-    def __init__(self, *, sigma=None, truncate=4.0):
-        self.sigma = sigma
-        self.truncate = truncate
+    sigma: float = None
+    truncate: float = 4.0
+
+    def to_dict(self):
+        return asdict(self)
 
     def set_params(self, **params):
         """set the parameters on a new instance
@@ -30,10 +35,7 @@ class EagerScoreEstimator:
         **params
             Mapping of parameter name to new value.
         """
-        old_params = {"sigma": self.sigma, "truncate": self.truncate}
-        new_params = old_params | params
-
-        return type(self)(**new_params)
+        return replace(self, **params)
 
     def _score(self, X, *, spatial_dims=None, temporal_dims=None):
         if self.sigma is None:
