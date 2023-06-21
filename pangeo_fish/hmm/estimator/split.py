@@ -116,10 +116,7 @@ class EagerScoreEstimator:
             final,
             kwargs={"sigma": self.sigma, "truncate": self.truncate},
             input_core_dims=input_core_dims,
-            output_core_dims=[
-                temporal_dims,
-                temporal_dims + spatial_dims,
-            ],
+            output_core_dims=[temporal_dims + spatial_dims],
             dask="allowed",
         )
 
