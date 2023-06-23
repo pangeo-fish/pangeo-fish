@@ -7,11 +7,14 @@ requires-python = ">=3.10"
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
 ]
 dependencies = [
     "xarray",
     "pandas",
     "numpy",
+    "scipy",
+    "numba",
     "more_itertools",
     "opt_einsum",
     "sparse",
@@ -20,7 +23,7 @@ dependencies = [
 dynamic = ["version"]
 
 [project.urls]
-"Homepage" = "https://gitlab.ifremer.fr/iaocea/pangeo-fish"
+"Homepage" = "https://github.com/iaocea/pangeo-fish"
 
 [tool.setuptools]
 packages = ["pangeo_fish"]

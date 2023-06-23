@@ -1,9 +1,13 @@
+from dataclasses import asdict, dataclass, replace
+
+import numpy as np
 import xarray as xr
 
 from ... import utils
 from ..filter import forward, score
 
 
+@dataclass
 class EagerScoreEstimator:
     """Estimator to train and predict gaussian random walk hidden markov models
 
@@ -17,9 +21,11 @@ class EagerScoreEstimator:
         calculate the maximum distance per time unit traveled by the fish.
     """
 
-    def __init__(self, *, sigma=None, truncate=4.0):
-        self.sigma = sigma
-        self.truncate = truncate
+    sigma: float = None
+    truncate: float = 4.0
+
+    def to_dict(self):
+        return asdict(self)
 
     def set_params(self, **params):
         """set the parameters on a new instance
@@ -29,12 +35,12 @@ class EagerScoreEstimator:
         **params
             Mapping of parameter name to new value.
         """
-        old_params = {"sigma": self.sigma, "truncate": self.truncate}
-        new_params = old_params | params
-
-        return type(self)(**new_params)
+        return replace(self, **params)
 
     def _score(self, X, *, spatial_dims=None, temporal_dims=None):
+        if self.sigma is None:
+            raise ValueError("unset sigma, cannot run the filter")
+
         def _algorithm(emission, mask, initial, final, *, sigma, truncate):
             return score(
                 emission,
@@ -64,7 +70,7 @@ class EagerScoreEstimator:
             final_dims,
         ]
 
-        return xr.apply_ufunc(
+        value = xr.apply_ufunc(
             _algorithm,
             X.pdf.fillna(0),
             X.mask,
@@ -75,8 +81,12 @@ class EagerScoreEstimator:
             output_core_dims=[()],
             dask="allowed",
         )
+        return value.fillna(np.inf)
 
     def _forward_algorithm(self, X, *, spatial_dims=None, temporal_dims=None):
+        if self.sigma is None:
+            raise ValueError("unset sigma, cannot run the filter")
+
         def _algorithm(emission, mask, initial, final, *, sigma, truncate):
             return forward(
                 emission=emission,
@@ -114,14 +124,14 @@ class EagerScoreEstimator:
             final,
             kwargs={"sigma": self.sigma, "truncate": self.truncate},
             input_core_dims=input_core_dims,
-            output_core_dims=[
-                temporal_dims,
-                temporal_dims + spatial_dims,
-            ],
+            output_core_dims=[temporal_dims + spatial_dims],
             dask="allowed",
         )
 
     def _forward_backward_algorithm(self, X, *, spatial_dims=None, temporal_dims=None):
+        if self.sigma is None:
+            raise ValueError("unset sigma, cannot run the filter")
+
         def _algorithm(emission, mask, initial, final, *, sigma, truncate):
             forward_state = forward(
                 emission=emission,
@@ -197,7 +207,7 @@ class EagerScoreEstimator:
             The computed state probabilities
         """
         state = self._forward_backward_algorithm(
-            X, spatial_dims=spatial_dims, temporal_dims=temporal_dims
+            X.fillna(0), spatial_dims=spatial_dims, temporal_dims=temporal_dims
         )
         return state
 
@@ -225,4 +235,6 @@ class EagerScoreEstimator:
         score : float
             The score for the fit with the current parameters.
         """
-        return self._score(X, spatial_dims=spatial_dims, temporal_dims=temporal_dims)
+        return self._score(
+            X.fillna(0), spatial_dims=spatial_dims, temporal_dims=temporal_dims
+        )

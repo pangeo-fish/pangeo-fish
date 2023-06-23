@@ -162,7 +162,7 @@ class NaiveGaussianRandomWalkSTHMM:
             The computed state probabilities
         """
         _, probabilities = self._forward_backward_algorithm(
-            X, spatial_dims=spatial_dims, temporal_dims=temporal_dims
+            X.fillna(0), spatial_dims=spatial_dims, temporal_dims=temporal_dims
         )
         return probabilities
 
@@ -191,6 +191,8 @@ class NaiveGaussianRandomWalkSTHMM:
             The score for the fit with the current parameters.
         """
         normalizations, _ = self._forward_algorithm(
-            X, spatial_dims=spatial_dims, temporal_dims=temporal_dims
+            X.fillna(0), spatial_dims=spatial_dims, temporal_dims=temporal_dims
         )
-        return -np.sum(np.log(normalizations))
+        score = -np.sum(np.log(normalizations))
+
+        return score.fillna(np.inf)
