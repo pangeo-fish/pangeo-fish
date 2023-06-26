@@ -2,8 +2,10 @@ from dataclasses import asdict, dataclass, replace
 
 import numpy as np
 import xarray as xr
+from tlz.functoolz import compose_left, curry
 
 from ... import utils
+from ..decode import mean_track, mode_track, viterbi
 from ..filter import forward, score
 
 
@@ -238,3 +240,39 @@ class EagerScoreEstimator:
         return self._score(
             X.fillna(0), spatial_dims=spatial_dims, temporal_dims=temporal_dims
         )
+
+    def decode(self, X, *, mode="viterbi", spatial_dims=None, temporal_dims=None):
+        """decode the state sequence from the selected model and the data
+
+        Parameters
+        ----------
+        X : Dataset
+            The emission probability maps. The dataset should contain these variables:
+            - `pdf`, the emission probabilities
+            - `mask`, a mask to select ocean pixels
+            - `initial`, the initial probability map
+            - `final`, the final probability map (optional)
+        mode : {"mean", "mode", "viterbi"}
+        spatial_dims : list of hashable, optional
+            The spatial dimensions of the dataset.
+        temporal_dims : list of hashable, optional
+            The temporal dimensions of the dataset.
+        """
+
+        compute_states = curry(
+            self.predict_proba, spatial_dims=spatial_dims, temporal_dims=temporal_dims
+        )
+
+        decoders = {
+            "mean": compose_left(compute_states, mean_track),
+            "mode": compose_left(compute_states, mode_track),
+            "viterbi": lambda ds: viterbi(ds.pdf, self.sigma, ds.mask),
+        }
+
+        decoder = decoders.get(mode)
+        if decoder is None:
+            raise ValueError(
+                f"unknown mode: {mode!r}. Choose one of {{{', '.join(sorted(decoders))}}}"
+            )
+
+        return decoder(X)
