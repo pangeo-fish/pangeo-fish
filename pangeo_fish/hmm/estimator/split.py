@@ -6,6 +6,7 @@ from tlz.functoolz import compose_left, curry
 from tlz.itertoolz import identity
 
 from ... import utils
+from ...tracks import to_trajectory
 from ..decode import mean_track, modal_track, viterbi
 from ..filter import forward, score
 
@@ -298,4 +299,6 @@ class EagerScoreEstimator:
                 f"unknown mode: {mode!r}. Choose one of {{{', '.join(sorted(decoders))}}}"
             )
 
-        return decoder(X)
+        decoded = decoder(X)
+
+        return to_trajectory(decoded)
