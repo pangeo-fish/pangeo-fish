@@ -3,6 +3,7 @@ from dataclasses import asdict, dataclass, replace
 import numpy as np
 import xarray as xr
 from tlz.functoolz import compose_left, curry
+from tlz.itertoolz import identity
 
 from ... import utils
 from ..decode import mean_track, modal_track, viterbi
@@ -211,7 +212,7 @@ class EagerScoreEstimator:
         state = self._forward_backward_algorithm(
             X.fillna(0), spatial_dims=spatial_dims, temporal_dims=temporal_dims
         )
-        return state.rename("state_pdf")
+        return state.rename("states")
 
     def score(self, X, *, spatial_dims=None, temporal_dims=None):
         """score the fit of the selected model to the data
@@ -241,7 +242,15 @@ class EagerScoreEstimator:
             X.fillna(0), spatial_dims=spatial_dims, temporal_dims=temporal_dims
         )
 
-    def decode(self, X, *, mode="viterbi", spatial_dims=None, temporal_dims=None):
+    def decode(
+        self,
+        X,
+        *,
+        mode="viterbi",
+        spatial_dims=None,
+        temporal_dims=None,
+        is_states=False,
+    ):
         """decode the state sequence from the selected model and the data
 
         Parameters
@@ -252,21 +261,35 @@ class EagerScoreEstimator:
             - `mask`, a mask to select ocean pixels
             - `initial`, the initial probability map
             - `final`, the final probability map (optional)
-        mode : {"mean", "mode", "viterbi"}
+        mode : {"mean", "mode", "viterbi"}, default: "viterbi"
+            The decoding method. Can be one of
+            - ``"mean"``: use the centroid of the state probabilities as decoded state
+            - ``"mode"``: use the maximum of the state probabilities as decoded state
+            - ``"viterbi"``: use the viterbi algorithm to determine the most probable states
         spatial_dims : list of hashable, optional
             The spatial dimensions of the dataset.
         temporal_dims : list of hashable, optional
             The temporal dimensions of the dataset.
+        is_states : bool, default: False
+            Whether ``X`` is the precomputed state probabilities. Useful if computing both
+            the mean and mode states.
         """
 
-        compute_states = curry(
-            self.predict_proba, spatial_dims=spatial_dims, temporal_dims=temporal_dims
-        )
+        if is_states and mode == "viterbi":
+            raise ValueError("cannot pass state probabilities to the viterbi algorithm")
+        elif is_states and mode != "viterbi":
+            compute_states = curry(
+                self.predict_proba,
+                spatial_dims=spatial_dims,
+                temporal_dims=temporal_dims,
+            )
+        else:
+            compute_states = identity
 
         decoders = {
             "mean": compose_left(compute_states, mean_track),
             "mode": compose_left(compute_states, modal_track),
-            "viterbi": lambda ds: viterbi(ds.pdf, self.sigma, ds.mask),
+            "viterbi": curry(viterbi, sigma=self.sigma),
         }
 
         decoder = decoders.get(mode)
