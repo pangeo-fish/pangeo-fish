@@ -7,9 +7,11 @@ import numpy as np
 import xarray as xr
 
 from ..distributions import gaussian_kernel
+from ..pdf import combine_emission_pdf
 
 
-def mean_track(probabilities, coords=["latitude", "longitude"]):
+def mean_track(X, coords=["latitude", "longitude"]):
+    probabilities = X["states"]
     dims = list(
         set(itertools.chain.from_iterable(probabilities[name].dims for name in coords))
     )
@@ -17,7 +19,8 @@ def mean_track(probabilities, coords=["latitude", "longitude"]):
     return grid.weighted(probabilities).mean(dim=dims)
 
 
-def modal_track(probabilities, coords=["latitude", "longitude"]):
+def modal_track(X, coords=["latitude", "longitude"]):
+    probabilities = X["states"]
     dims = list(
         set(itertools.chain.from_iterable(probabilities[name].dims for name in coords))
     )
@@ -88,16 +91,16 @@ def kernel_state_metric(previous_state_metric, previous_positions, pdf, kernel):
     return state_metric, positions
 
 
-def most_probable_track(pdf, sigma, land_mask):
+def viterbi(emission, sigma):
     """
     Parameters
     ----------
-    pdf : DataArray
-        The observation probability. The initial and final probability have to have been inserted.
+    emission : Dataset
+        The emission probability dataset containing land mask, initial
+        and final probabilities and the different components of the
+        pdf.
     sigma : float
         The coefficient of diffusion in pixel
-    land_mask : DataArray
-        The boolean land mask, with `True` where the land is above sea level
 
     Returns
     -------
@@ -146,14 +149,19 @@ def most_probable_track(pdf, sigma, land_mask):
 
         return state_metrics, positions[::-1]
 
+    emission_ = combine_emission_pdf(emission)
+    pdf = emission_.pdf
+    pdf[{"time": 0}] = emission_.initial
+    pdf[{"time": -1}] = emission_.final
+
     state_metrics, positions = xr.apply_ufunc(
         decode_most_probable_track,
         np.log(pdf),
         sigma,
-        land_mask,
+        emission.mask,
         input_core_dims=[("x", "y"), (), ("x", "y")],
         output_core_dims=[("x", "y"), ()],
         dask="allowed",
     )
 
-    return state_metrics.rename("state_metrics"), positions.rename("track")
+    return xr.Dataset({"state_metrics": state_metrics, "track": positions})
