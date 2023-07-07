@@ -278,7 +278,7 @@ class EagerScoreEstimator:
 
         if is_states and mode == "viterbi":
             raise ValueError("cannot pass state probabilities to the viterbi algorithm")
-        elif is_states and mode != "viterbi":
+        elif not is_states and mode != "viterbi":
             compute_states = curry(
                 self.predict_proba,
                 spatial_dims=spatial_dims,
