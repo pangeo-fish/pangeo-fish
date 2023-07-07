@@ -5,7 +5,7 @@ import xarray as xr
 from tlz.functoolz import compose_left, curry
 
 from ... import utils
-from ..decode import mean_track, mode_track, viterbi
+from ..decode import mean_track, modal_track, viterbi
 from ..filter import forward, score
 
 
@@ -211,7 +211,7 @@ class EagerScoreEstimator:
         state = self._forward_backward_algorithm(
             X.fillna(0), spatial_dims=spatial_dims, temporal_dims=temporal_dims
         )
-        return state
+        return state.rename("state_pdf")
 
     def score(self, X, *, spatial_dims=None, temporal_dims=None):
         """score the fit of the selected model to the data
@@ -265,7 +265,7 @@ class EagerScoreEstimator:
 
         decoders = {
             "mean": compose_left(compute_states, mean_track),
-            "mode": compose_left(compute_states, mode_track),
+            "mode": compose_left(compute_states, modal_track),
             "viterbi": lambda ds: viterbi(ds.pdf, self.sigma, ds.mask),
         }
 

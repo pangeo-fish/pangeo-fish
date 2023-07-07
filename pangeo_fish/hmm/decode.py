@@ -88,7 +88,7 @@ def kernel_state_metric(previous_state_metric, previous_positions, pdf, kernel):
     return state_metric, positions
 
 
-def most_probable_track(pdf, sigma, land_mask):
+def viterbi(emission, sigma):
     """
     Parameters
     ----------
@@ -146,14 +146,18 @@ def most_probable_track(pdf, sigma, land_mask):
 
         return state_metrics, positions[::-1]
 
+    pdf = emission.pdf
+    pdf[{"time": 0}] = emission.initial
+    pdf[{"time": -1}] = emission.final
+
     state_metrics, positions = xr.apply_ufunc(
         decode_most_probable_track,
         np.log(pdf),
         sigma,
-        land_mask,
+        emission.mask,
         input_core_dims=[("x", "y"), (), ("x", "y")],
         output_core_dims=[("x", "y"), ()],
         dask="allowed",
     )
 
-    return state_metrics.rename("state_metrics"), positions.rename("track")
+    return xr.Dataset({"state_metrics": state_metrics, "track": positions})
