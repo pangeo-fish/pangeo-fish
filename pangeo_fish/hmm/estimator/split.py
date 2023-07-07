@@ -301,4 +301,4 @@ class EagerScoreEstimator:
 
         decoded = decoder(X)
 
-        return to_trajectory(decoded)
+        return to_trajectory(decoded.compute(), name=mode)
