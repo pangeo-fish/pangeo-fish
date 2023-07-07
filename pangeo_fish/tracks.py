@@ -1,5 +1,7 @@
 import movingpandas as mpd
-from tlz.functoolz import curry
+from tlz.functoolz import compose, curry, do, pipe
+
+from .functoolz import lookup
 
 
 def to_trajectory(ds, name, crs=None):
@@ -14,13 +16,7 @@ def additional_quantities(traj, quantities):
         "distance": curry(mpd.Trajectory.add_distance, name="distance", units="km"),
     }
 
-    extended = traj.copy()
+    lookup_method = curry(lookup, quantity_methods, message="unknown quantity: {key}")
+    funcs = [compose(do, lookup_method(quantity)) for quantity in quantities]
 
-    for quantity in quantities:
-        method = quantity_methods.get(quantity)
-        if method is None:
-            raise ValueError(f"unknown quantity: {quantity}")
-
-        method(extended)
-
-    return extended
+    return pipe(traj.copy(), *funcs)
