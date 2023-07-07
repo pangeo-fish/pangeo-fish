@@ -1,5 +1,5 @@
 import movingpandas as mpd
-from tlz.functoolz import compose, curry, do, pipe
+from tlz.functoolz import curry, do, pipe
 
 from .functoolz import lookup
 
@@ -17,6 +17,6 @@ def additional_quantities(traj, quantities):
     }
 
     lookup_method = curry(lookup, quantity_methods, message="unknown quantity: {key}")
-    funcs = [compose(do, lookup_method(quantity)) for quantity in quantities]
+    funcs = [curry(do, lookup_method(quantity)) for quantity in quantities]
 
     return pipe(traj.copy(), *funcs)
