@@ -212,8 +212,8 @@ def forward(
 
 
 def backward(
-    state,
-    prediction,
+    state,   # forward states  [0,1,... n_max-2,n_max-1]
+    prediction,  #forward predictions [0,1,... n_max-2,n_max-1]
     sigma,
     mask=None,
     *,
@@ -222,16 +222,21 @@ def backward(
     n_max = state.shape[0]
     eps = 2.204e-16**20
 
-    smoothed = [state[-1, ...]]
-    backward_predictions = [state[-1, ...]]
-    for index in range(1, n_max):
+    smoothed = [state[-1, ...]]     # backward states [n_max-1,n_max-2,..... 1,0] 
+    backward_predictions = [state[-1, ...]]  # backward preditions ;-) [n_max-1,n_max-2,..... 1,0]
+    for index in range(1, n_max -1):
         ratio = smoothed[index - 1] / (prediction[-index, ...] + eps)
-        backward_prediction = predict(ratio, sigma=sigma, mask=None, truncate=truncate)
+        backward_prediction = predict(ratio, sigma=sigma, mask=None, truncate=truncate) #convolution step
         normalized = backward_prediction / np.sum(backward_prediction)
         backward_predictions.append(normalized)
 
-        updated = normalized * state[-index, ...]
-        smoothed.append(updated)
+        updated = normalized * state[-index -1, ...]
+        updated_normalized = updated / np.nansum(updated)
+
+        smoothed.append(updated_normalized)
+
+    smoothed.append(state[0,...])
+    backward_predictions.append(state[0,...])
 
     return np.stack(backward_predictions[::-1], axis=0), np.stack(
         smoothed[::-1], axis=0
