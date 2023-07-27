@@ -159,7 +159,7 @@ def viterbi(emission, sigma):
         decode_most_probable_track,
         np.log(pdf.fillna(0)),
         sigma,
-        emission.mask,
+        np.logical_not(emission.mask),
         input_core_dims=[("x", "y"), (), ("x", "y")],
         output_core_dims=[("x", "y"), ()],
         dask="allowed",
