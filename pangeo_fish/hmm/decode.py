@@ -157,7 +157,7 @@ def viterbi(emission, sigma):
 
     state_metrics, positions = xr.apply_ufunc(
         decode_most_probable_track,
-        np.log(pdf),
+        np.log(pdf.fillna(0)),
         sigma,
         emission.mask,
         input_core_dims=[("x", "y"), (), ("x", "y")],
