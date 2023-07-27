@@ -117,37 +117,38 @@ def viterbi(emission, sigma):
         pos0 = np.argmax(pdf[0, ...]).compute()
 
         # all in log space
-        state_metrics = np.empty_like(pdf)
-        state_metrics[0, ...] = pdf[0, ...]
+        state_metrics_ = [pdf[0, ...]]
 
-        branches = np.full_like(pdf, fill_value=-1)
-        branches[0, ...] = np.where(pdf[0, ...] != -np.inf, pos0, -1)
+        initial_branches = np.where(pdf[0, ...] != -np.inf, pos0, -1)
+        branches_ = [initial_branches]
 
         for index in range(1, pdf.shape[0]):
             state_metric, positions = da.apply_gufunc(
                 kernel_state_metric,
                 "(x,y),(x,y),(x,y),(n,m)->(x,y),(x,y)",
-                state_metrics[index - 1, ...],
-                branches[index - 1, ...],
+                state_metrics_[index - 1],
+                branches_[index - 1],
                 pdf[index, ...],
                 np.log(kernel),
                 output_dtypes=[float, int],
             )
 
-            state_metrics[index, ...] = np.where(land_mask, -np.inf, state_metric)
-            branches[index, ...] = np.where(land_mask, -1, positions)
+            state_metrics_.append(np.where(land_mask, -np.inf, state_metric))
+            branches_.append(np.where(land_mask, -1, positions))
+
+        state_metrics = np.stack(state_metrics_, axis=0)
+        branches = np.stack(branches_, axis=0)
 
         reshaped_branches = branches.reshape(branches.shape[0], -1)
 
         most_likely_position = np.argmax(state_metrics[-1, ...])
 
-        positions = np.empty_like(state_metrics[:, 0, 0], dtype=int)
-        positions[0] = most_likely_position
-        for index in range(1, positions.shape[0]):
+        positions = [most_likely_position]
+        for index in range(1, state_metrics.shape[0]):
             branch_index = reshaped_branches.shape[0] - index
-            positions[index] = reshaped_branches[branch_index, positions[index - 1]]
+            positions.append(reshaped_branches[branch_index, positions[index - 1]])
 
-        return state_metrics, positions[::-1]
+        return state_metrics, np.stack(positions[::-1])
 
     emission_ = combine_emission_pdf(emission)
     pdf = emission_.pdf
