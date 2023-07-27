@@ -224,7 +224,7 @@ def backward(
 
     smoothed = [states[-1, ...]]
     backward_predictions = [states[-1, ...]]
-    for index in range(1, n_max - 1):
+    for index in range(1, n_max):
         ratio = smoothed[index - 1] / (predictions[-index, ...] + eps)
         backward_prediction = predict(ratio, sigma=sigma, mask=None, truncate=truncate)
         normalized = backward_prediction / np.sum(backward_prediction)
