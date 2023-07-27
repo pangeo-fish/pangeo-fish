@@ -114,7 +114,7 @@ def viterbi(emission, sigma):
     def decode_most_probable_track(pdf, sigma, land_mask):
         kernel = gaussian_kernel(np.full(shape=(2,), fill_value=sigma))
 
-        pos0 = np.argmax(pdf[0, ...])
+        pos0 = np.argmax(pdf[0, ...]).compute()
 
         # all in log space
         state_metrics = np.empty_like(pdf)
