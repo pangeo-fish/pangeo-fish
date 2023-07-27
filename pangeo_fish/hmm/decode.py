@@ -111,7 +111,7 @@ def viterbi(emission, sigma):
         TODO: translate this to label space without computing
     """
 
-    def decode_most_probable_track(pdf, sigma, land_mask):
+    def decode_most_probable_track(pdf, sigma, ocean_mask):
         kernel = gaussian_kernel(np.full(shape=(2,), fill_value=sigma))
 
         pos0 = np.argmax(pdf[0, ...]).compute()
@@ -133,8 +133,8 @@ def viterbi(emission, sigma):
                 output_dtypes=[float, int],
             )
 
-            state_metrics_.append(np.where(land_mask, -np.inf, state_metric))
-            branches_.append(np.where(land_mask, -1, positions))
+            state_metrics_.append(np.where(ocean_mask, state_metric, -np.inf))
+            branches_.append(np.where(ocean_mask, positions, -1))
 
         state_metrics = np.stack(state_metrics_, axis=0)
         branches = np.stack(branches_, axis=0)
@@ -159,7 +159,7 @@ def viterbi(emission, sigma):
         decode_most_probable_track,
         np.log(pdf.fillna(0)),
         sigma,
-        np.logical_not(emission.mask),
+        emission.mask,
         input_core_dims=[("x", "y"), (), ("x", "y")],
         output_core_dims=[("x", "y"), ()],
         dask="allowed",
