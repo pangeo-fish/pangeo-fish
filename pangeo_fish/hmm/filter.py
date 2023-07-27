@@ -60,7 +60,9 @@ def single_pass(
 
     normalizations = []
     posterior_probabilities = []
+    predictions = []
 
+    predictions.append(initial_probability)
     posterior_probabilities.append(initial_probability)
     normalizations.append(np.sum(initial_probability * pdf[0, ...]))
 
@@ -76,16 +78,19 @@ def single_pass(
         normalizations.append(np.sum(updated))
         normalized = updated / normalizations[index]
 
+        predictions.append(prediction)
         posterior_probabilities.append(normalized)
 
     if final_probability is not None:
         normalizations.append(np.sum(final_probability))
         posterior_probabilities.append(final_probability)
+        predictions.append(final_probability)
 
     normalizations_ = np.stack(normalizations, axis=0)
     posterior_probabilities_ = np.stack(posterior_probabilities, axis=0)
+    predictions_ = np.stack(predictions, axis=0)
 
-    return normalizations_, posterior_probabilities_
+    return predictions_, normalizations_, posterior_probabilities_
 
 
 def score(
@@ -179,27 +184,60 @@ def forward(
     """
     n_max = emission.shape[0] - (0 if final_probability is None else 1)
 
-    state = []
+    predictions = []
+    states = []
 
-    state.append(initial_probability)
+    predictions.append(initial_probability)
+    states.append(initial_probability)
 
     for index in range(1, n_max):
         prediction = predict(
-            state[index - 1],
+            states[index - 1],
             sigma=sigma,
             mask=mask,
             truncate=truncate,
         )
+        predictions.append(prediction)
+
         updated = prediction * emission[index, ...]
 
         normalized = updated / np.sum(updated)
-
-        state.append(normalized)
+        states.append(normalized)
 
     if final_probability is not None:
-        state.append(final_probability)
+        predictions.append(final_probability)
+        states.append(final_probability)
 
-    return np.stack(state, axis=0)
+    return np.stack(predictions, axis=0), np.stack(states, axis=0)
+
+
+def backward(
+    states,
+    predictions,
+    sigma,
+    mask=None,
+    *,
+    truncate=4.0,
+):
+    n_max = states.shape[0]
+    eps = 2.204e-16**20
+
+    smoothed = [states[-1, ...]]
+    backward_predictions = [states[-1, ...]]
+    for index in range(1, n_max):
+        ratio = smoothed[index - 1] / (predictions[-index, ...] + eps)
+        backward_prediction = predict(ratio, sigma=sigma, mask=None, truncate=truncate)
+        normalized = backward_prediction / np.sum(backward_prediction)
+        backward_predictions.append(normalized)
+
+        updated = normalized * states[-index - 1, ...]
+        updated_normalized = updated / np.sum(updated)
+
+        smoothed.append(updated_normalized)
+
+    return np.stack(backward_predictions[::-1], axis=0), np.stack(
+        smoothed[::-1], axis=0
+    )
 
 
 def forward_backward(
@@ -232,7 +270,7 @@ def forward_backward(
         A measure of how well the model parameter fits the data.
     """
 
-    forward_state = forward(
+    forward_predictions, forward_states = forward(
         emission=emission,
         sigma=sigma,
         initial_probability=initial_probability,
@@ -240,12 +278,11 @@ def forward_backward(
         final_probability=final_probability,
         truncate=truncate,
     )
-    backwards_state = forward(
-        emission=forward_state[::-1, ...],
+    backwards_predictions, backwards_states = backward(
+        states=forward_states,
+        predictions=forward_predictions,
         sigma=sigma,
-        initial_probability=final_probability,
         mask=mask,
-        final_probability=initial_probability,
         truncate=truncate,
     )
-    return backwards_state
+    return backwards_states

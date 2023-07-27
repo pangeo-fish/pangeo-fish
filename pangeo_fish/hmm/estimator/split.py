@@ -8,7 +8,7 @@ from tlz.itertoolz import identity
 from ... import utils
 from ...tracks import to_trajectory
 from ..decode import mean_track, modal_track, viterbi
-from ..filter import forward, score
+from ..filter import forward, score,forward_backward
 
 
 @dataclass
@@ -132,12 +132,19 @@ class EagerScoreEstimator:
             dask="allowed",
         )
 
+    def _backward_algorithm(self, X, *, spatial_dims=None, temporal_dims=None):
+        if self.sigma is None:
+            raise ValueError("unset sigma, cannot run the filter")
+
+        def _algorithm(emission, mask, initial, final, *, sigma, truncate):
+            pass
+
     def _forward_backward_algorithm(self, X, *, spatial_dims=None, temporal_dims=None):
         if self.sigma is None:
             raise ValueError("unset sigma, cannot run the filter")
 
         def _algorithm(emission, mask, initial, final, *, sigma, truncate):
-            forward_state = forward(
+            backward_state = forward_backward(
                 emission=emission,
                 sigma=sigma,
                 mask=mask,
@@ -145,16 +152,8 @@ class EagerScoreEstimator:
                 final_probability=final,
                 truncate=truncate,
             )
-            backward_state = forward(
-                emission=forward_state[::-1, ...],
-                sigma=sigma,
-                mask=mask,
-                initial_probability=forward_state[-1, ...],
-                final_probability=forward_state[0, ...],
-                truncate=truncate,
-            )
 
-            return backward_state[::-1, ...]
+            return backward_state
 
         if spatial_dims is None:
             spatial_dims = utils._detect_spatial_dims(X)
