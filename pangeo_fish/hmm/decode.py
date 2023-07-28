@@ -50,6 +50,7 @@ def kernel_overlap(pos, shape, kernel_shape):
     return ((a_xmin, a_xmax), (a_ymin, a_ymax)), ((k_xmin, k_xmax), (k_ymin, k_ymax))
 
 
+@numba.njit
 def kernel_state_metric(previous_state_metric, previous_positions, pdf, kernel):
     possible_positions = previous_state_metric != -np.inf
 
