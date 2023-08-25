@@ -1,0 +1,252 @@
+:py:mod:`pangeo_fish.healpy`
+============================
+
+.. py:module:: pangeo_fish.healpy
+
+
+Module Contents
+---------------
+
+Classes
+~~~~~~~
+
+.. autoapisummary::
+
+   pangeo_fish.healpy.HealpyGridInfo
+   pangeo_fish.healpy.HealpyRegridder
+
+
+
+Functions
+~~~~~~~~~
+
+.. autoapisummary::
+
+   pangeo_fish.healpy.geographic_to_astronomic
+   pangeo_fish.healpy.astronomic_to_cartesian
+   pangeo_fish.healpy.astronomic_to_cell_ids
+   pangeo_fish.healpy._compute_indices
+   pangeo_fish.healpy._compute_coords
+   pangeo_fish.healpy.concat
+   pangeo_fish.healpy.unique
+   pangeo_fish.healpy.create_grid
+   pangeo_fish.healpy._compute_weights
+   pangeo_fish.healpy._weights_to_sparse
+   pangeo_fish.healpy.buffer_points
+
+
+
+.. py:function:: geographic_to_astronomic(lat, lon, rot)
+
+   transform geographic coordinates to astronomic coordinates
+
+   Parameters
+   ----------
+   lat : array-like
+       geographic latitude, in degrees
+   lon : array-like
+       geographic longitude, in degrees
+   rot : list-like
+       Two element list with the rotation transformation (shift?) used by the grid, in
+       degrees
+
+   Returns
+   -------
+   theta : array-like
+       Colatitude in degrees
+   phi : array-like
+       Astronomic longitude in degrees
+
+
+.. py:function:: astronomic_to_cartesian(theta, phi, dim='receiver_id')
+
+   transform astronomic coordinates to cartesian coordinates
+
+   Parameters
+   ----------
+   theta : DataArray
+       astronomic colatitude, in degrees
+   phi : DataArray
+       astronomic longitude, in degrees
+   dim : hashable
+       Name of the dimension
+
+   Returns
+   -------
+   cartesian : Dataset
+       Cartesian coordinates
+
+   See Also
+   --------
+   healpy.ang2vec
+
+
+.. py:function:: astronomic_to_cell_ids(nside, phi, theta)
+
+   Compute cell ids from astronomic coordinates
+
+   Parameters
+   ----------
+   nside : int
+       Healpix resolution level
+   phi, theta : xr.DataArray
+       astronomic longitude and colatitude, in degrees
+
+   Returns
+   -------
+   cell_ids : xr.DataArray
+       The computed cell ids
+
+
+.. py:function:: _compute_indices(nside)
+
+
+.. py:function:: _compute_coords(nside)
+
+
+.. py:class:: HealpyGridInfo
+
+
+   class representing a HealPix grid
+
+   Attributes
+   ----------
+   nside : int
+       HealPix grid resolution
+   rot : dict of str to float
+       Rotation of the healpix sphere.
+   coords : xr.Dataset
+       Unstructured grid coordinates: latitude, longitude, cell ids.
+   indices : xr.DataArray
+       Indices that can be used to reorder to a flattened 2D healpy grid
+
+   .. py:attribute:: nside
+      :type: int
+
+      
+
+   .. py:attribute:: rot
+      :type: dict[str, float]
+
+      
+
+   .. py:attribute:: indices
+      :type: xarray.DataArray
+
+      
+
+   .. py:attribute:: coords
+      :type: xarray.Dataset
+
+      
+
+   .. py:method:: unstructured_to_2d(unstructured, dim='cells', keep_attrs='drop_conflicts')
+
+
+   .. py:method:: to_xarray()
+
+
+
+.. py:function:: concat(iterable)
+
+
+.. py:function:: unique(iterable)
+
+
+.. py:function:: create_grid(nside, rot={'lat': 0, 'lon': 0})
+
+
+.. py:function:: _compute_weights(source_lat, source_lon, *, nside, rot={'lat': 0, 'lon': 0})
+
+
+.. py:function:: _weights_to_sparse(weights)
+
+
+.. py:class:: HealpyRegridder
+
+
+   regrid a dataset to healpy face 0
+
+   Parameters
+   ----------
+   input_grid : xr.Dataset
+       The input dataset. For now, it has to have the `"latitude"` and `"longitude"` coordinates.
+   output_grid : HealpyGridInfo
+       The target grid, containing healpix parameters like `nside` and `rot`.
+
+   .. py:attribute:: input_grid
+      :type: xarray.Dataset
+
+      
+
+   .. py:attribute:: output_grid
+      :type: HealpyGridInfo
+
+      
+
+   .. py:attribute:: weights_path
+      :type: str | os.PathLike | None
+
+      
+
+   .. py:attribute:: weights
+      :type: xarray.Dataset
+
+      
+
+   .. py:method:: __post_init__()
+
+
+   .. py:method:: regrid_ds(ds)
+
+      regrid a dataset on the same grid as the input grid
+
+      The regridding method is restricted to linear interpolation so far.
+
+      Parameters
+      ----------
+      ds : xr.Dataset
+          The input dataset.
+
+      Returns
+      -------
+      regridded : xr.Dataset
+          The regridded dataset
+
+
+
+.. py:function:: buffer_points(cell_ids, positions, *, buffer_size, nside, sphere_radius=6371000.0, factor=4, intersect=False)
+
+   select the cells within a circular buffer around the given positions
+
+   Parameters
+   ----------
+   cell_ids : xarray.DataArray
+       The cell ids within the given grid.
+   positions : xarray.DataArray
+       The positions of the points in cartesian coordinates.
+   buffer_size : float
+       The size of the circular buffer.
+   nside : int
+       The resolution of the healpix grid.
+   sphere_radius : float, default: 6371000
+       The radius of the underlying sphere, used to convert `radius` to radians. By
+       default, this is the standard earth's radius in meters.
+   factor : int, default: 4
+       The increased resolution for the buffer search.
+   intersect : bool, default: False
+       If `False`, select all cells where the center is within the buffer. If `True`,
+       select cells which intersect the buffer.
+
+   Returns
+   -------
+   masks : xarray.DataArray
+       The masks for each position. The cells within the buffer are `True`, every other
+       cell is set to `False`.
+
+   See Also
+   --------
+   pangeo_fish.healpy.geographic_to_astronomic
+   pangeo_fish.healpy.astronomic_to_cartesian
+
+

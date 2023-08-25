@@ -1,0 +1,43 @@
+:py:mod:`pangeo_fish.diff`
+==========================
+
+.. py:module:: pangeo_fish.diff
+
+
+Module Contents
+---------------
+
+
+Functions
+~~~~~~~~~
+
+.. autoapisummary::
+
+   pangeo_fish.diff._marc_diff_z
+   pangeo_fish.diff.marc_diff_z_numba
+   pangeo_fish.diff.marc_diff_z
+
+
+
+Attributes
+~~~~~~~~~~
+
+.. autoapisummary::
+
+   pangeo_fish.diff._marc_diff_z_signatures
+
+
+.. py:data:: _marc_diff_z_signatures
+   :value: ['void(float32[:], float32[:], float32, float32[:], float32[:], float32, float32[:])',...
+
+   
+
+.. py:function:: _marc_diff_z(model_temp, model_depth, bottom, tag_temp, tag_depth, depth_thresh, result)
+
+
+.. py:function:: marc_diff_z_numba(model_temp, model_depth, bottom, tag_temp, tag_depth, depth_thresh)
+
+
+.. py:function:: marc_diff_z(model, tag, depth_threshold=0.8)
+
+

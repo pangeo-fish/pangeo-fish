@@ -1,0 +1,55 @@
+:py:mod:`pangeo_fish.hmm.decode`
+================================
+
+.. py:module:: pangeo_fish.hmm.decode
+
+
+Module Contents
+---------------
+
+
+Functions
+~~~~~~~~~
+
+.. autoapisummary::
+
+   pangeo_fish.hmm.decode.mean_track
+   pangeo_fish.hmm.decode.modal_track
+   pangeo_fish.hmm.decode.kernel_overlap
+   pangeo_fish.hmm.decode.kernel_state_metric
+   pangeo_fish.hmm.decode.viterbi
+
+
+
+.. py:function:: mean_track(X, coords=['latitude', 'longitude'])
+
+
+.. py:function:: modal_track(X, coords=['latitude', 'longitude'])
+
+
+.. py:function:: kernel_overlap(pos, shape, kernel_shape)
+
+
+.. py:function:: kernel_state_metric(previous_state_metric, previous_positions, pdf, kernel)
+
+
+.. py:function:: viterbi(emission, sigma)
+
+   Parameters
+   ----------
+   emission : Dataset
+       The emission probability dataset containing land mask, initial
+       and final probabilities and the different components of the
+       pdf.
+   sigma : float
+       The coefficient of diffusion in pixel
+
+   Returns
+   -------
+   state_metrics : DataArray
+       The evolution of state metrics over time
+   positions : DataArray
+       The integer positions of the tracks
+       TODO: translate this to label space without computing
+
+

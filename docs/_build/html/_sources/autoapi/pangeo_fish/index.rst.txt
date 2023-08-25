@@ -1,0 +1,35 @@
+:py:mod:`pangeo_fish`
+=====================
+
+.. py:module:: pangeo_fish
+
+
+Subpackages
+-----------
+.. toctree::
+   :titlesonly:
+   :maxdepth: 3
+
+   hmm/index.rst
+
+
+Submodules
+----------
+.. toctree::
+   :titlesonly:
+   :maxdepth: 1
+
+   acoustic/index.rst
+   cf/index.rst
+   diff/index.rst
+   distributions/index.rst
+   filters/index.rst
+   functoolz/index.rst
+   healpy/index.rst
+   model/index.rst
+   pdf/index.rst
+   tags/index.rst
+   tracks/index.rst
+   utils/index.rst
+
+

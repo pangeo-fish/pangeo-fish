@@ -1,0 +1,90 @@
+:py:mod:`pangeo_fish.distributions`
+===================================
+
+.. py:module:: pangeo_fish.distributions
+
+
+Module Contents
+---------------
+
+
+Functions
+~~~~~~~~~
+
+.. autoapisummary::
+
+   pangeo_fish.distributions.create_covariances
+   pangeo_fish.distributions.normal_at
+   pangeo_fish.distributions.zeros
+   pangeo_fish.distributions.delta_at
+   pangeo_fish.distributions._discrete_gaussian_1d
+   pangeo_fish.distributions._continuous_gaussian_1d
+   pangeo_fish.distributions.gaussian_kernel
+
+
+
+.. py:function:: create_covariances(cov, coord_names)
+
+
+.. py:function:: normal_at(grid, *, pos, cov, axes=['X', 'Y'], normalize=False)
+
+   multivariate normal distribution
+
+   Parameters
+   ----------
+   grid : Dataset
+       The reference grid.
+   pos : Dataset
+       The position of the mean of the distribution
+   cov : DataArray
+       The covariance matrix of the distribution. Has to have a `i` dimension
+       for variances and `i` and `j` for covariances. Both need to have `axes`
+       as coordinate values.
+   axes : list of hashable, default: ["X", "Y"]
+       The coordinates to use. Can be anything that `cf-xarray`'s `.cf` accessor understands.
+   normalize : bool, default: False
+       Normalize the distribution before returning.
+
+
+.. py:function:: zeros(coords, dtype=float)
+
+
+.. py:function:: delta_at(grid, *, pos, method='nearest', axes=['X', 'Y'])
+
+   spatial delta function / Dirac distribution
+
+   Parameters
+   ----------
+   grid : Dataset
+       The reference grid.
+   pos : Dataset
+       The position of the peak.
+   axes : list of hashable, default: ["X", "Y"]
+       The coordinates to use. Can be anything that `cf-xarray`'s `.cf` accessor understands.
+   method : {"nearest", "point-in-polygon"}, default: "nearest"
+       The method to "snap" the position to the grid.
+
+       One of:
+       - "nearest": search for the nearest grid center (in cartesian space)
+                    Uses the coordinate's "nearest" search.
+       - "point-in-polygon": perform a point-in-polygon search on the cell bounds using `xvec`.
+
+   Returns
+   -------
+   DataArray
+       The delta function
+
+   See Also
+   --------
+   scipy.signal.unit_impulse
+
+
+.. py:function:: _discrete_gaussian_1d(sigma, radius)
+
+
+.. py:function:: _continuous_gaussian_1d(sigma, radius)
+
+
+.. py:function:: gaussian_kernel(sigma, truncate=4.0, type='continuous')
+
+

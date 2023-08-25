@@ -1,0 +1,22 @@
+:py:mod:`pangeo_fish.filters`
+=============================
+
+.. py:module:: pangeo_fish.filters
+
+
+Module Contents
+---------------
+
+
+Functions
+~~~~~~~~~
+
+.. autoapisummary::
+
+   pangeo_fish.filters.blur_edges
+
+
+
+.. py:function:: blur_edges(arr, *, dims, method, **filter_kwargs)
+
+

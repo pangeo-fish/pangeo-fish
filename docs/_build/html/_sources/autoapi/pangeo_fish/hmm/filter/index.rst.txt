@@ -1,0 +1,130 @@
+:py:mod:`pangeo_fish.hmm.filter`
+================================
+
+.. py:module:: pangeo_fish.hmm.filter
+
+
+Module Contents
+---------------
+
+
+Functions
+~~~~~~~~~
+
+.. autoapisummary::
+
+   pangeo_fish.hmm.filter.gaussian_filter
+   pangeo_fish.hmm.filter.predict
+   pangeo_fish.hmm.filter.single_pass
+   pangeo_fish.hmm.filter.score
+   pangeo_fish.hmm.filter.forward
+   pangeo_fish.hmm.filter.backward
+   pangeo_fish.hmm.filter.forward_backward
+
+
+
+.. py:function:: gaussian_filter(X, sigma, **kwargs)
+
+
+.. py:function:: predict(X, sigma, *, mask=None, **kwargs)
+
+
+.. py:function:: single_pass(pdf, sigma, initial_probability, mask=None, *, final_probability=None, truncate=4.0)
+
+   compute a single pass (forwards) of the HMM filter
+
+   Parameters
+   ----------
+   pdf : array-like
+       probability density function of the observations
+   sigma : float
+       standard deviation of the gaussian kernel, in units of pixels
+   initial_probability : array-like
+       The probability of the first hidden state
+   final_probability : array-like, optional
+       The probability of the last hidden state
+   mask : array-like, optional
+       A mask to apply after each step. No shadowing yet.
+
+   Returns
+   -------
+   predictions : array-like
+       The probability of the
+   normalizations : array-like
+       The normalization factors per time step.
+   posterior_probabilities : array-like
+       The probability of the hidden state given the observation.
+
+
+.. py:function:: score(emission, sigma, initial_probability, mask=None, *, final_probability=None, truncate=4.0)
+
+   score of a single pass (forwards) of the spatial HMM filter
+
+   Parameters
+   ----------
+   emission : array-like
+       probability density function of the observations (emission probabilities)
+   sigma : float
+       standard deviation of the gaussian kernel, in units of pixels
+   initial_probability : array-like
+       The probability of the first hidden state
+   final_probability : array-like, optional
+       The probability of the last hidden state
+   mask : array-like, optional
+       A mask to apply after each step. No shadowing yet.
+
+   Returns
+   -------
+   score : float
+       A measure of how well the model parameter fits the data.
+
+
+.. py:function:: forward(emission, sigma, initial_probability, mask=None, *, final_probability=None, truncate=4.0)
+
+   single pass (forwards) of the spatial HMM filter
+
+   Parameters
+   ----------
+   emission : array-like
+       probability density function of the observations (emission probabilities)
+   sigma : float
+       standard deviation of the gaussian kernel, in units of pixels
+   initial_probability : array-like
+       The probability of the first hidden state
+   final_probability : array-like, optional
+       The probability of the last hidden state
+   mask : array-like, optional
+       A mask to apply after each step. No shadowing yet.
+
+   Returns
+   -------
+   score : float
+       A measure of how well the model parameter fits the data.
+
+
+.. py:function:: backward(states, predictions, sigma, mask=None, *, truncate=4.0)
+
+
+.. py:function:: forward_backward(emission, sigma, initial_probability, mask=None, *, final_probability=None, truncate=4.0)
+
+   double pass (forwards and backwards) of the spatial HMM filter
+
+   Parameters
+   ----------
+   emission : array-like
+       probability density function of the observations (emission probabilities)
+   sigma : float
+       standard deviation of the gaussian kernel, in units of pixels
+   initial_probability : array-like
+       The probability of the first hidden state
+   final_probability : array-like, optional
+       The probability of the last hidden state
+   mask : array-like, optional
+       A mask to apply after each step. No shadowing yet.
+
+   Returns
+   -------
+   score : float
+       A measure of how well the model parameter fits the data.
+
+

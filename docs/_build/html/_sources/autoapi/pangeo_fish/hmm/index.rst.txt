@@ -1,0 +1,26 @@
+:py:mod:`pangeo_fish.hmm`
+=========================
+
+.. py:module:: pangeo_fish.hmm
+
+
+Subpackages
+-----------
+.. toctree::
+   :titlesonly:
+   :maxdepth: 3
+
+   estimator/index.rst
+   optimize/index.rst
+
+
+Submodules
+----------
+.. toctree::
+   :titlesonly:
+   :maxdepth: 1
+
+   decode/index.rst
+   filter/index.rst
+
+
