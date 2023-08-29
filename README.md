@@ -2,6 +2,15 @@
 
 ## installing
 
+
+
+The library itself has not been published anywhere, so for now it has to be installed from source:
+
+```sh
+git clone https://github.com/iaocea/pangeo-fish.git
+cd pangeo-fish
+```
+
 The main dependencies are:
 
 - xarray
@@ -21,12 +30,11 @@ conda env create -n pangeo-fish -f ci/requirements/environment.yaml
 conda activate pangeo-fish
 ```
 
-(use the drop-in replacement `mamba` for faster results)
+(use the drop-in replacement `mamba`  or for `micromamba` for faster results)
 
-The library itself has not been published anywhere, so for now it has to be installed from source:
+Install the pangeo-fish downloaded above using pip by following command.
 
 ```sh
-git clone https://github.com/iaocea/pangeo-fish.git
-cd pangeo-fish
+
 pip install -e .
 ```
