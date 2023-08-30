@@ -64,5 +64,9 @@ def combine_emission_pdf(raw, exclude=("initial", "final", "mask")):
             .rename("pdf")
         )
 
+    if "final" in raw:
+        pdf[{"time": -1}] = pdf[{"time": -1}] * raw["final"]
+        exclude = [n for n in exclude if n != "final"]
+
     spatial_dims = _detect_spatial_dims(raw)
     return xr.merge([raw[exclude], pdf.pipe(normalize, spatial_dims)])
