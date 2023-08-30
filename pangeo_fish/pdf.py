@@ -53,9 +53,16 @@ def normal(samples, mean, std, *, dims):
 def combine_emission_pdf(raw, exclude=("initial", "final", "mask")):
     exclude = list(more_itertools.always_iterable(exclude))
 
-    pdfs = raw[[name for name in raw.data_vars if name not in exclude]]
-    pdf = pdfs.to_array(dim="pdf").prod(dim="pdf", skipna=False).rename("pdf")
+    to_combine = [name for name in raw.data_vars if name not in exclude]
+    if len(to_combine) == 1:
+        pdf = raw[to_combine]
+    else:
+        pdf = (
+            raw[to_combine]
+            .to_array(dim="pdf")
+            .prod(dim="pdf", skipna=False)
+            .rename("pdf")
+        )
 
     spatial_dims = _detect_spatial_dims(raw)
-
     return xr.merge([raw[exclude], pdf.pipe(normalize, spatial_dims)])
