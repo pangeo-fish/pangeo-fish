@@ -36,12 +36,11 @@ class NaiveGaussianRandomWalkSTHMM:
         return type(self)(**new_params)
 
     def _forward_algorithm(self, X, *, spatial_dims=None, temporal_dims=None):
-        def _algorithm(pdf, mask, initial, final, *, sigma, truncate):
+        def _algorithm(pdf, mask, initial, *, sigma, truncate):
             return single_pass(
                 pdf,
                 mask=mask,
                 initial_probability=initial,
-                final_probability=final,
                 sigma=sigma,
                 truncate=truncate,
             )
@@ -51,18 +50,10 @@ class NaiveGaussianRandomWalkSTHMM:
         if temporal_dims is None:
             temporal_dims = utils._detect_temporal_dims(X)
 
-        if "final" in X:
-            final = X.final
-            final_dims = spatial_dims
-        else:
-            final = None
-            final_dims = ()
-
         input_core_dims = [
             temporal_dims + spatial_dims,
             spatial_dims,
             spatial_dims,
-            final_dims,
         ]
 
         return xr.apply_ufunc(
@@ -70,7 +61,6 @@ class NaiveGaussianRandomWalkSTHMM:
             X.pdf,
             X.mask,
             X.initial,
-            final,
             kwargs={"sigma": self.sigma, "truncate": self.truncate},
             input_core_dims=input_core_dims,
             output_core_dims=[
@@ -81,13 +71,12 @@ class NaiveGaussianRandomWalkSTHMM:
         )
 
     def _forward_backward_algorithm(self, X, *, spatial_dims=None, temporal_dims=None):
-        def _algorithm(pdf, mask, initial, final, *, sigma, truncate):
+        def _algorithm(pdf, mask, initial, *, sigma, truncate):
             _, probabilities = single_pass(
                 pdf=pdf,
                 sigma=sigma,
                 mask=mask,
                 initial_probability=initial,
-                final_probability=final,
                 truncate=truncate,
             )
             normalization, probabilities = single_pass(
@@ -95,7 +84,6 @@ class NaiveGaussianRandomWalkSTHMM:
                 sigma=sigma,
                 mask=mask,
                 initial_probability=probabilities[-1, ...],
-                final_probability=probabilities[0, ...],
                 truncate=truncate,
             )
 
@@ -109,18 +97,10 @@ class NaiveGaussianRandomWalkSTHMM:
         if temporal_dims is None:
             temporal_dims = utils._detect_temporal_dims(X)
 
-        if "final" in X:
-            final = X.final
-            final_dims = spatial_dims
-        else:
-            final = None
-            final_dims = ()
-
         input_core_dims = [
             temporal_dims + spatial_dims,
             spatial_dims,
             spatial_dims,
-            final_dims,
         ]
 
         return xr.apply_ufunc(
@@ -128,7 +108,6 @@ class NaiveGaussianRandomWalkSTHMM:
             X.pdf,
             X.mask,
             X.initial,
-            final,
             kwargs={"sigma": self.sigma, "truncate": self.truncate},
             input_core_dims=input_core_dims,
             output_core_dims=[
