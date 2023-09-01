@@ -8,7 +8,7 @@ from tlz.itertoolz import identity
 from ... import utils
 from ...tracks import to_trajectory
 from ..decode import mean_track, modal_track, viterbi
-from ..filter import forward, score,forward_backward
+from ..filter import forward, forward_backward, score
 
 
 @dataclass
@@ -45,12 +45,11 @@ class EagerScoreEstimator:
         if self.sigma is None:
             raise ValueError("unset sigma, cannot run the filter")
 
-        def _algorithm(emission, mask, initial, final, *, sigma, truncate):
+        def _algorithm(emission, mask, initial, *, sigma, truncate):
             return score(
                 emission,
                 mask=mask,
                 initial_probability=initial,
-                final_probability=final,
                 sigma=sigma,
                 truncate=truncate,
             )
@@ -60,18 +59,10 @@ class EagerScoreEstimator:
         if temporal_dims is None:
             temporal_dims = utils._detect_temporal_dims(X)
 
-        if "final" in X:
-            final = X.final
-            final_dims = spatial_dims
-        else:
-            final = None
-            final_dims = ()
-
         input_core_dims = [
             temporal_dims + spatial_dims,
             spatial_dims,
             spatial_dims,
-            final_dims,
         ]
 
         value = xr.apply_ufunc(
@@ -79,7 +70,6 @@ class EagerScoreEstimator:
             X.pdf.fillna(0),
             X.mask,
             X.initial,
-            final,
             kwargs={"sigma": self.sigma, "truncate": self.truncate},
             input_core_dims=input_core_dims,
             output_core_dims=[()],
@@ -91,12 +81,11 @@ class EagerScoreEstimator:
         if self.sigma is None:
             raise ValueError("unset sigma, cannot run the filter")
 
-        def _algorithm(emission, mask, initial, final, *, sigma, truncate):
+        def _algorithm(emission, mask, initial, *, sigma, truncate):
             return forward(
                 emission=emission,
                 mask=mask,
                 initial_probability=initial,
-                final_probability=final,
                 sigma=sigma,
                 truncate=truncate,
             )
@@ -106,18 +95,10 @@ class EagerScoreEstimator:
         if temporal_dims is None:
             temporal_dims = utils._detect_temporal_dims(X)
 
-        if "final" in X:
-            final = X.final
-            final_dims = spatial_dims
-        else:
-            final = None
-            final_dims = ()
-
         input_core_dims = [
             temporal_dims + spatial_dims,
             spatial_dims,
             spatial_dims,
-            final_dims,
         ]
 
         return xr.apply_ufunc(
@@ -125,7 +106,6 @@ class EagerScoreEstimator:
             X.pdf,
             X.mask,
             X.initial,
-            final,
             kwargs={"sigma": self.sigma, "truncate": self.truncate},
             input_core_dims=input_core_dims,
             output_core_dims=[temporal_dims + spatial_dims],
@@ -136,20 +116,19 @@ class EagerScoreEstimator:
         if self.sigma is None:
             raise ValueError("unset sigma, cannot run the filter")
 
-        def _algorithm(emission, mask, initial, final, *, sigma, truncate):
+        def _algorithm(emission, mask, initial, *, sigma, truncate):
             pass
 
     def _forward_backward_algorithm(self, X, *, spatial_dims=None, temporal_dims=None):
         if self.sigma is None:
             raise ValueError("unset sigma, cannot run the filter")
 
-        def _algorithm(emission, mask, initial, final, *, sigma, truncate):
+        def _algorithm(emission, mask, initial, *, sigma, truncate):
             backward_state = forward_backward(
                 emission=emission,
                 sigma=sigma,
                 mask=mask,
                 initial_probability=initial,
-                final_probability=final,
                 truncate=truncate,
             )
 
@@ -160,18 +139,10 @@ class EagerScoreEstimator:
         if temporal_dims is None:
             temporal_dims = utils._detect_temporal_dims(X)
 
-        if "final" in X:
-            final = X.final
-            final_dims = spatial_dims
-        else:
-            final = None
-            final_dims = ()
-
         input_core_dims = [
             temporal_dims + spatial_dims,
             spatial_dims,
             spatial_dims,
-            final_dims,
         ]
 
         return xr.apply_ufunc(
@@ -179,7 +150,6 @@ class EagerScoreEstimator:
             X.pdf,
             X.mask,
             X.initial,
-            final,
             kwargs={"sigma": self.sigma, "truncate": self.truncate},
             input_core_dims=input_core_dims,
             output_core_dims=[temporal_dims + spatial_dims],
@@ -196,7 +166,6 @@ class EagerScoreEstimator:
         X : Dataset
             The emission probability maps. The dataset should contain these variables:
             - `initial`, the initial probability map
-            - `final`, the final probability map
             - `pdf`, the emission probabilities
             - `mask`, a mask to select ocean pixels
         spatial_dims : list of hashable, optional
@@ -227,7 +196,6 @@ class EagerScoreEstimator:
             - `pdf`, the emission probabilities
             - `mask`, a mask to select ocean pixels
             - `initial`, the initial probability map
-            - `final`, the final probability map (optional)
         spatial_dims : list of hashable, optional
             The spatial dimensions of the dataset.
         temporal_dims : list of hashable, optional
@@ -260,7 +228,6 @@ class EagerScoreEstimator:
             - `pdf`, the emission probabilities
             - `mask`, a mask to select ocean pixels
             - `initial`, the initial probability map
-            - `final`, the final probability map (optional)
         mode : {"mean", "mode", "viterbi"}, default: "viterbi"
             The decoding method. Can be one of
             - ``"mean"``: use the centroid of the state probabilities as decoded state
