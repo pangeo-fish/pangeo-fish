@@ -29,9 +29,7 @@ def predict(X, sigma, *, mask=None, **kwargs):
     return np.where(mask, filtered, 0)
 
 
-def single_pass(
-    pdf, sigma, initial_probability, mask=None, *, final_probability=None, truncate=4.0
-):
+def single_pass(pdf, sigma, initial_probability, mask=None, *, truncate=4.0):
     """compute a single pass (forwards) of the HMM filter
 
     Parameters
@@ -42,8 +40,6 @@ def single_pass(
         standard deviation of the gaussian kernel, in units of pixels
     initial_probability : array-like
         The probability of the first hidden state
-    final_probability : array-like, optional
-        The probability of the last hidden state
     mask : array-like, optional
         A mask to apply after each step. No shadowing yet.
 
@@ -56,7 +52,7 @@ def single_pass(
     posterior_probabilities : array-like
         The probability of the hidden state given the observation.
     """
-    n_max = pdf.shape[0] - (0 if final_probability is None else 1)
+    n_max = pdf.shape[0]
 
     normalizations = []
     posterior_probabilities = []
@@ -81,11 +77,6 @@ def single_pass(
         predictions.append(prediction)
         posterior_probabilities.append(normalized)
 
-    if final_probability is not None:
-        normalizations.append(np.sum(final_probability))
-        posterior_probabilities.append(final_probability)
-        predictions.append(final_probability)
-
     normalizations_ = np.stack(normalizations, axis=0)
     posterior_probabilities_ = np.stack(posterior_probabilities, axis=0)
     predictions_ = np.stack(predictions, axis=0)
@@ -99,7 +90,6 @@ def score(
     initial_probability,
     mask=None,
     *,
-    final_probability=None,
     truncate=4.0,
 ):
     """score of a single pass (forwards) of the spatial HMM filter
@@ -122,11 +112,11 @@ def score(
     score : float
         A measure of how well the model parameter fits the data.
     """
-    n_max = emission.shape[0] - (0 if final_probability is None else 1)
+    n_max = emission.shape[0]
 
     normalizations = []
 
-    initial, final, mask = dask.compute(initial_probability, final_probability, mask)
+    initial, mask = dask.compute(initial_probability, mask)
 
     normalizations.append(np.sum(initial * dask.compute(emission[0, ...])[0]))
     previous = initial
@@ -145,9 +135,6 @@ def score(
 
         previous = normalized
 
-    if final is not None:
-        normalizations.append(np.sum(final))
-
     normalizations_ = np.stack(normalizations, axis=0)
 
     return -np.sum(np.log(normalizations_))
@@ -159,7 +146,6 @@ def forward(
     initial_probability,
     mask=None,
     *,
-    final_probability=None,
     truncate=4.0,
 ):
     """single pass (forwards) of the spatial HMM filter
@@ -172,8 +158,6 @@ def forward(
         standard deviation of the gaussian kernel, in units of pixels
     initial_probability : array-like
         The probability of the first hidden state
-    final_probability : array-like, optional
-        The probability of the last hidden state
     mask : array-like, optional
         A mask to apply after each step. No shadowing yet.
 
@@ -182,7 +166,7 @@ def forward(
     score : float
         A measure of how well the model parameter fits the data.
     """
-    n_max = emission.shape[0] - (0 if final_probability is None else 1)
+    n_max = emission.shape[0]
 
     predictions = []
     states = []
@@ -203,10 +187,6 @@ def forward(
 
         normalized = updated / np.sum(updated)
         states.append(normalized)
-
-    if final_probability is not None:
-        predictions.append(final_probability)
-        states.append(final_probability)
 
     return np.stack(predictions, axis=0), np.stack(states, axis=0)
 
@@ -246,7 +226,6 @@ def forward_backward(
     initial_probability,
     mask=None,
     *,
-    final_probability=None,
     truncate=4.0,
 ):
     """double pass (forwards and backwards) of the spatial HMM filter
@@ -275,7 +254,6 @@ def forward_backward(
         sigma=sigma,
         initial_probability=initial_probability,
         mask=mask,
-        final_probability=final_probability,
         truncate=truncate,
     )
     backwards_predictions, backwards_states = backward(

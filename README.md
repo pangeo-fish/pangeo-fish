@@ -2,8 +2,6 @@
 
 ## installing
 
-
-
 The library itself has not been published anywhere, so for now it has to be installed from source:
 
 ```sh
@@ -30,7 +28,7 @@ conda env create -n pangeo-fish -f ci/requirements/environment.yaml
 conda activate pangeo-fish
 ```
 
-(use the drop-in replacement `mamba`  or  `micromamba` for faster results)
+(use the drop-in replacement `mamba` or `micromamba` for faster results)
 
 Install the pangeo-fish downloaded above using pip by following command.
 
