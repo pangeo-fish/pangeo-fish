@@ -1,4 +1,6 @@
-#!/usr/bin/env bash
+#!/bin/bash -x
+#bash
+#source .bashrc
 
 if ! normalized=$(getopt -o he: --long help,environment:,conda-path: -n "execute-notebook" -- "$@"); then
     echo "failed to parse arguments" >&2
