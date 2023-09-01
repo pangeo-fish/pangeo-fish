@@ -154,7 +154,6 @@ def viterbi(emission, sigma):
     emission_ = combine_emission_pdf(emission)
     pdf = emission_.pdf
     pdf[{"time": 0}] = emission_.initial
-    pdf[{"time": -1}] = emission_.final
 
     state_metrics, positions = xr.apply_ufunc(
         decode_most_probable_track,
