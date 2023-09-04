@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash  -x
 
 read -r -d "" help <<-EOF
 Usage: $0 [options] confname
@@ -31,9 +31,10 @@ eval set -- "$normalized"
 workflow_root="$(pwd)/notebooks/workflow"
 configuration_root="$workflow_root/configuration"
 parametrized_root="$workflow_root/parametrized"
+#executed_root="$workflow_root/executed"
 executed_root="$workflow_root/executed"
-walltime="02:00:00"
-memory="60GB"
+walltime="04:00:00"
+memory="120GB"
 queue="mpi_1"
 
 while true; do
@@ -150,6 +151,7 @@ find "$parametrized_root/$conf_id" -maxdepth 1 -type f -name "*.ipynb" | sort -h
 
     if which qsub >/dev/null; then
         # automatically use qsub if available
+        echo 'do qsub'
         output=$(
             qsub -N "$conf_id" \
                  -W "depend=afterany:$after" \

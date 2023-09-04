@@ -36,3 +36,14 @@ Install the pangeo-fish downloaded above using pip by following command.
 
 pip install -e .
 ```
+
+## How to run the code
+
+After the installation activate the envoriment pangeo-fish
+Place the configuration file in a directory 'A18832_na'
+
+type following command if you use the code on datarmor
+
+Make sure to specify the absolute path to the enviomennt you have installed for executing the pangeo-fish after --enviroment path
+
+./bin/run-workflow.sh --configuration-root ./configuration A18832_na --environment /home1/datawork/todaka/micromamba/envs/pangeo-fish-0723 --conda-path /appli/anaconda/versions/4.8.2/condabin/conda --memory "120GB" --walltime "4:00:00"
