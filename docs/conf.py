@@ -7,8 +7,8 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 project = 'pangeo-fish'
-copyright = '2023, Alexandre Derrien'
-author = 'Alexandre Derrien'
+author = "pangeo-fish developers"
+copyright = f"2023, {author}"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
