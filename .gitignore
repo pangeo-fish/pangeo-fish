@@ -9,6 +9,14 @@ __pycache__/
 dask-worker-space/
 /*.egg-info/
 
+# build artifacts
+/dist/*
+/docs/_build/*
+
+# editor swap files
+\.*.swp
+*~
+\#*\#
 
 # data storage
 data*/*
