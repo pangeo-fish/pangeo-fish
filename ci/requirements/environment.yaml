@@ -2,58 +2,50 @@ channels:
   - conda-forge
 dependencies:
   # development
-  - jupyterlab
-  - ipykernel
+  - python=3.11.*
+  - jupyterlab=3.*
   - ipython
+  - ipykernel
+  - graphviz
+  - python-graphviz
+  # plotting
+  - cmocean
+  - holoviews=1.16.2
+  - hvplot=0.8.3
+  - geoviews=1.10.0
+  # I/O
+  - fsspec=2023.03.0
+  - h5netcdf
+  - intake-xarray 
+  - zstandard 
+  # units, bounds, and cf-conventions
+  - cf_xarray
+  - pint-xarray
+  # general computing
+  - flox
+  - xarray
+  - more-itertools
+  - scipy
+  # geographic manipulations
+  - movingpandas
+  - geopandas
+  - cartopy
+  # video processing
+  - ffmpeg
+  - xmovie
+  # distributed computing
+  - dask-labextension
+  - dask-image
+  - dask
+  # parameterizing and executing Jupyter Notebooks
+  - papermill
+  # code formatting
   - jupyterlab_code_formatter
   - black
   - isort
   - rich
   - pre-commit
-  - graphviz
-  - python-graphviz
-  # general computing
-  - xarray
-  - more-itertools
-  - scipy
-  - flox
-  - numba
-  # units, bounds, and cf-conventions
-  - pint-xarray
-  - cf_xarray
-  # geographic manipulations
-  - pyproj
-  - cartopy
-  - shapely
-  - odc-geo
-  - regionmask
-  - geopandas
-  - movingpandas
-  - xesmf
-  - healpy
-  # I/O
-  - pystac
-  - pystac-client
-  - netcdf4
-  - h5netcdf
-  - zarr
-  - fsspec
-  - pooch
-  # machine learning
-  - optuna
-  # distributed computing
-  - dask
-  - distributed
-  - dask-labextension
-  - dask-image
-  # plotting
-  - hvplot
-  - holoviews
-  - geoviews
-  - datashader
-  - panel
-  - selenium
-  - folium
-  - cmocean
-  - xmovie
-  - matplotlib-core
+  # other utilities
+  - jupyterlab-git
+  - git 
+  
