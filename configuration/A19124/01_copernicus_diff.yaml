@@ -1,0 +1,4 @@
+tag_name: "A19124"
+ref_model_name: "copernicus"
+acoustic: "/acoustic"
+time_step: 1
