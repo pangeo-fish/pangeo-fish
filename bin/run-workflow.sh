@@ -155,7 +155,7 @@ find "$parametrized_root/$conf_id" -maxdepth 1 -type f -name "*.ipynb" | sort -h
         output=$(
             qsub -N "$conf_id" \
                  -W "depend=afterany:$after" \
-                 -l "mem=$memory,walltime=$walltime" \
+                 -l "select=1:ncpus=28:mem=$memory,walltime=$walltime" \
                  -q "$queue" \
                  -- \
                  "$script_dir/execute-notebook.sh" \
