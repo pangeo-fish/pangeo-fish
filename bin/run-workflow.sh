@@ -148,12 +148,13 @@ mkdir -p "$executed_root/$conf_id"
 find "$parametrized_root/$conf_id" -maxdepth 1 -type f -name "*.ipynb" | sort -h | while read -r notebook; do
     executed_path="$executed_root/$conf_id/$(basename "$notebook")"
     html_path="$(basename "$executed_path" .ipynb).html"
+    job_name="$(basename "$executed_path" .ipynb)_${conf_id}"
 
     if which qsub >/dev/null; then
         # automatically use qsub if available
         echo 'do qsub'
         output=$(
-            qsub -N "$conf_id" \
+            qsub -N "$job_name" \
                  -W "depend=afterany:$after" \
                  -l "select=1:ncpus=28:mem=$memory,walltime=$walltime" \
                  -q "$queue" \
