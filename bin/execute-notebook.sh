@@ -67,7 +67,7 @@ fi
 /usr/bin/time -v jupyter nbconvert --execute --allow-errors \
               "$input_notebook" \
               --to notebook \
-              --output "$output_notebook"
+              --output "$output_notebook" --debug
 
 /usr/bin/time -v jupyter nbconvert --allow-errors \
               "$output_notebook" \
