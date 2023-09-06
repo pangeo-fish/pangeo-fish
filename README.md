@@ -39,11 +39,28 @@ pip install -e .
 
 ## How to run the code
 
-After the installation activate the envoriment pangeo-fish
-Place the configuration file in a directory 'A18832_na'
+### Interactive way
+You can run the code from jupyter-lab interface using jupyternotebooks existing in `./notebooks/workflows`.  You can updates parameters in the first cells
 
-type following command if you use the code on datarmor
+
+### Non interactive way
+If you want to run the notebooks automatically, by providing parameters in configuration files.  
+To do so, place parameters in `congiguration\A19124` directory.  You will find examples there `01_copernicus_diff.yaml`
+
+Place parameter files in `yaml` format for each notebooks you will want to run sequentially.  pangeo-fish can submit your job to batchsytem, one after another, in alphaverical order.
+
+Example of command lines for Datarmor:
+```
+ssh datarmor
+bash
+micromamba activate pangeo-fish-0723
+# cd to pangeo-fish installed directory
+cd /home1/datawork/todaka/git/pangeo-fish
+
+./bin/run-workflow.sh --configuration-root ./configuration A19124 --environment /home1/datawork/todaka/micromamba/envs/pangeo-fish-0723 --conda-path /appli/anaconda/versions/4.8.2/condabin/conda --memory "120GB" --walltime "4:00:00"
+mamba activate
+
+```
 
 Make sure to specify the absolute path to the enviomennt you have installed for executing the pangeo-fish after --enviroment path
 
-./bin/run-workflow.sh --configuration-root ./configuration A18832_na --environment /home1/datawork/todaka/micromamba/envs/pangeo-fish-0723 --conda-path /appli/anaconda/versions/4.8.2/condabin/conda --memory "120GB" --walltime "4:00:00"
