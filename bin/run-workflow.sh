@@ -17,12 +17,13 @@ Options:
  -p, --parametrized-root    the root of the parametrized notebooks
      --executed-root        the root of the executed directories
      --html-root            the root of the output notebook(html)A directories
+     --no-depend            All job runs without dependency
      --walltime             the walltime to request using qsub
      --memory               the memory to request using qsub
      --queue                the queue to submit the jobs to
 EOF
 
-if ! normalized=$(getopt -o hw:c:p:e: --long help,conda-path:,environment:,workflow-root:,configuration-root:,parametrized-root:,executed-root:,walltime:,memory:,queue: -n "run-workflow" -- "$@"); then
+if ! normalized=$(getopt -o hw:c:p:e: --long help,conda-path:,environment:,workflow-root:,configuration-root:,parametrized-root:,executed-root:,html-root:,no-depend,walltime:,memory:,queue: -n "run-workflow" -- "$@"); then
     echo "failed to parse arguments" >&2
     exit 1
 fi
@@ -38,6 +39,7 @@ executed_root="$workflow_root/executed"
 html_root="/home/datawork-taos-s/public/fish"
 walltime="04:00:00"
 memory="120GB"
+no_dependency=0
 queue="mpi_1"
 
 while true; do
@@ -70,6 +72,11 @@ while true; do
         --html-root)
             html_root="$2"
             shift 2
+            ;;
+
+        --no-depend)
+            no_dependency="1"
+            shift 1
             ;;
 
         -e|--environment)
@@ -158,13 +165,17 @@ find "$parametrized_root/$conf_id" -maxdepth 1 -type f -name "*.ipynb" | sort -h
     executed_path="$executed_root/$conf_id/$(basename "$notebook")"
     html_path="$html_root/$conf_id/notebooks/$(basename "$executed_path" .ipynb).html"
     job_name="$(basename "$executed_path" .ipynb)_${conf_id}"
+    dependency=""
+    if [ "$no_dependency" -eq "0" ]; then
+        dependency="-W depend=afterany:"${after}
+    fi
 
     if which qsub >/dev/null; then
         # automatically use qsub if available
         echo 'do qsub'
         output=$(
             qsub -N "$job_name" \
-                 -W "depend=afterany:$after" \
+                  $dependency  \
                  -l "select=1:ncpus=28:mem=$memory,walltime=$walltime" \
                  -q "$queue" \
                  -- \
