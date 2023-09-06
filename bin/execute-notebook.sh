@@ -76,3 +76,4 @@ fi
               "$output_notebook" \
               --to html \
               --output "$output_html"
+chmod o+r $output_html
