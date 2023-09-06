@@ -58,7 +58,6 @@ micromamba activate pangeo-fish-0723
 cd /home1/datawork/todaka/git/pangeo-fish
 
 ./bin/run-workflow.sh --configuration-root ./configuration A19124 --environment /home1/datawork/todaka/micromamba/envs/pangeo-fish-0723 --conda-path /appli/anaconda/versions/4.8.2/condabin/conda --memory "120GB" --walltime "4:00:00"
-mamba activate
 
 ```
 

@@ -1,6 +1,5 @@
 #!/bin/bash -x
-#bash
-#source .bashrc
+source $HOME/.bashrc
 
 if ! normalized=$(getopt -o he: --long help,environment:,conda-path: -n "execute-notebook" -- "$@"); then
     echo "failed to parse arguments" >&2
@@ -53,6 +52,10 @@ done
 input_notebook="$1"
 output_notebook="$2"
 output_html="$3"
+
+work_dir="$(dirname "$output_notebook" )"
+
+cd $work_dir
 
 if [[ "$environment" != "" && "$conda_path" == "" ]]; then
     echo "need the conda path when activating a environment" >&2
