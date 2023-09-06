@@ -55,11 +55,16 @@ ssh datarmor
 bash
 micromamba activate pangeo-fish-0723
 # cd to pangeo-fish installed directory
-cd /home1/datawork/todaka/git/pangeo-fish
+cd /home1/datawork/todaka/git/github-iaocea/pangeo-fish
 
-./bin/run-workflow.sh --configuration-root ./configuration A19124 --environment /home1/datawork/todaka/micromamba/envs/pangeo-fish-0723 --conda-path /appli/anaconda/versions/4.8.2/condabin/conda --memory "120GB" --walltime "4:00:00"
+./bin/run-workflow.sh A19124 --environment /home1/datawork/todaka/micromamba/envs/pangeo-fish-0723  --html-root /home/datawork-taos-s/public/fish/test  
 
 ```
 
-Make sure to specify the absolute path to the enviomennt you have installed for executing the pangeo-fish after --enviroment path
+Make sure to specify the absolute path to the enviomennt you have installed for executing the pangeo-fish after --enviroment path.  
+
+```
+./bin/run-workflow.sh --help
+```
+gives you other options
 
