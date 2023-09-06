@@ -1,0 +1,14 @@
+tag_name: "A19124"
+ref_model_name: "copernicus"
+acoustic: ""
+time_step: 24
+subset: {'lat_min':45,
+              'lat_max':50,
+              'lon_min':-8,
+              'lon_max':0,}
+tag_base_path: "/home/datawork-taos-s/intranet/data/tag/Archival_Data/NetCDF/"
+tag_db_path:  "/home/datawork-taos-s/intranet/data/tag/Acoustic_Data/FishIntel_tagging_France.csv"
+detections_path:  "/home/datawork-taos-s/intranet/data/tag/Acoustic_Data/pollack_filtered_detections.csv"
+working_path:  "/home/datawork-taos-s/public/fish/"
+
+
