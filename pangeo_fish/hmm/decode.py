@@ -166,3 +166,112 @@ def viterbi(emission, sigma):
     )
 
     return xr.Dataset({"state_metrics": state_metrics, "track": positions})
+
+
+@numba.njit
+def _propagate_timestep(M, kernel, emission, Tprevx, Tprevy):
+    row, col = M.shape
+    ks = kernel.shape[0]
+
+    subject = M != -np.inf
+
+    Mtemp = np.full((row, col), fill_value=-np.inf)
+    Ttempx = np.full((row, col), fill_value=-1, dtype="int16")
+    Ttempy = np.full((row, col), fill_value=-1, dtype="int16")
+
+    for x in range(0, col):
+        for y in range(0, row):
+            if not subject[y, x]:
+                continue
+
+            kminlat = max(ks // 2 - y, 0)
+            kmaxlat = min((ks - 1) - (y + ks // 2 - (row - 1)), ks - 1)
+            kminlong = max(ks // 2 - x, 0)
+            kmaxlong = min((ks - 1) - (x + ks // 2 - (col - 1)), ks - 1)
+
+            mminlat = max(y - ks // 2, 0)
+            mmaxlat = min(y + ks // 2, row - 1)
+            mminlong = max(x - ks // 2, 0)
+            mmaxlong = min(x + ks // 2, col - 1)
+
+            B = (
+                emission[mminlat : mmaxlat + 1, mminlong : mmaxlong + 1]
+                + kernel[kminlat : kmaxlat + 1, kminlong : kmaxlong + 1]
+            )
+
+            Msub = B + M[y, x]
+
+            Mupdate = Mtemp[mminlat : mmaxlat + 1, mminlong : mmaxlong + 1]
+            Txupdate = Ttempx[mminlat : mmaxlat + 1, mminlong : mmaxlong + 1]
+            Tyupdate = Ttempy[mminlat : mmaxlat + 1, mminlong : mmaxlong + 1]
+
+            update = Msub > Mupdate
+
+            Mupdate = np.where(update, Msub, Mupdate)
+            Txupdate = np.where(update, x, Txupdate)
+            Tyupdate = np.where(update, y, Tyupdate)
+
+            Mtemp[mminlat : mmaxlat + 1, mminlong : mmaxlong + 1] = Mupdate
+            Ttempx[mminlat : mmaxlat + 1, mminlong : mmaxlong + 1] = Txupdate
+            Ttempy[mminlat : mmaxlat + 1, mminlong : mmaxlong + 1] = Tyupdate
+
+    return Mtemp, Ttempx, Ttempy
+
+
+@numba.njit
+def _reorder_track(Tprevx, Tprevy, Ttempx, Ttempy, index, subject):
+    row, col = subject.shape
+
+    Tx = np.full_like(Tprevx, fill_value=-1)
+    Ty = np.full_like(Tprevy, fill_value=-1)
+
+    for x in range(col):
+        for y in range(row):
+            if not subject[y, x]:
+                continue
+
+            Tx[y, x, :index] = Tprevx[Ttempy[y, x], Ttempx[y, x], :index]
+            Ty[y, x, :index] = Tprevy[Ttempy[y, x], Ttempx[y, x], :index]
+            Tx[y, x, index] = x
+            Ty[y, x, index] = y
+
+    return Tx, Ty
+
+
+def _viterbi(emission, land_mask, pos0, sigma, selection="max"):
+    kernel = np.log(gaussian_kernel(np.array([sigma, sigma]), type="discrete"))
+    emission_ = np.log(emission)
+
+    M = dask.compute(emission_[0, ...])[0]
+
+    y0, x0 = pos0
+
+    Tprevx = np.full(M.shape + emission_.shape[:1], fill_value=-1, dtype="int16")
+    Tprevx[y0, x0, 0] = x0
+    Tprevy = np.full(M.shape + emission_.shape[:1], fill_value=-1, dtype="int16")
+    Tprevy[y0, x0, 0] = y0
+
+    for index in range(emission_.shape[0]):
+        pdf = dask.compute(emission_[index, ...])[0]
+
+        Mtemp, Ttempx, Ttempy = _propagate_timestep(M, kernel, pdf, Tprevx, Tprevy)
+        Mtemp[land_mask] = -np.inf
+
+        subject = Mtemp != -np.inf
+        Tx, Ty = _reorder_track(Tprevx, Tprevy, Ttempx, Ttempy, index, subject)
+
+        M = Mtemp
+        Tprevx = Tx
+        Tprevy = Ty
+
+    reshaped_M = np.reshape(M, -1)
+    reshaped_x = np.reshape(Tprevx, -1, emission.shape[0])
+    reshaped_y = np.reshape(Tprevy, -1, emission.shape[0])
+
+    if selection == "max":
+        pos = np.argmax(reshaped_M)
+        y, x = reshaped_y[pos, :], reshaped_x[pos, :]
+    else:
+        raise ValueError(f"unknown selection type: {selection}")
+
+    return y, x
