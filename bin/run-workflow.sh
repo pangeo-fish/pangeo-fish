@@ -16,12 +16,14 @@ Options:
  -c, --configuration-root   the root of the configuration files
  -p, --parametrized-root    the root of the parametrized notebooks
      --executed-root        the root of the executed directories
+     --html-root            the root of the output notebook(html)A directories
+     --no-depend            All job runs without dependency
      --walltime             the walltime to request using qsub
      --memory               the memory to request using qsub
      --queue                the queue to submit the jobs to
 EOF
 
-if ! normalized=$(getopt -o hw:c:p:e: --long help,conda-path:,environment:,workflow-root:,configuration-root:,parametrized-root:,executed-root:,walltime:,memory:,queue: -n "run-workflow" -- "$@"); then
+if ! normalized=$(getopt -o hw:c:p:e: --long help,conda-path:,environment:,workflow-root:,configuration-root:,parametrized-root:,executed-root:,html-root:,no-depend,walltime:,memory:,queue: -n "run-workflow" -- "$@"); then
     echo "failed to parse arguments" >&2
     exit 1
 fi
@@ -31,10 +33,13 @@ eval set -- "$normalized"
 workflow_root="$(pwd)/notebooks/workflow"
 configuration_root="$workflow_root/configuration"
 parametrized_root="$workflow_root/parametrized"
+conda_path="/appli/anaconda/versions/4.8.2/condabin/conda"
 #executed_root="$workflow_root/executed"
 executed_root="$workflow_root/executed"
+html_root="/home/datawork-taos-s/public/fish"
 walltime="04:00:00"
 memory="120GB"
+no_dependency=0
 queue="mpi_1"
 
 while true; do
@@ -62,6 +67,16 @@ while true; do
         --executed-root)
             executed_root="$2"
             shift 2
+            ;;
+
+        --html-root)
+            html_root="$2"
+            shift 2
+            ;;
+
+        --no-depend)
+            no_dependency="1"
+            shift 1
             ;;
 
         -e|--environment)
@@ -145,17 +160,23 @@ script_dir="$(dirname "$(readlink -f -- "${BASH_SOURCE[0]}")")"
 
 # execute the notebooks
 mkdir -p "$executed_root/$conf_id"
+mkdir -p "$html_root/$conf_id/notebooks"
 find "$parametrized_root/$conf_id" -maxdepth 1 -type f -name "*.ipynb" | sort -h | while read -r notebook; do
     executed_path="$executed_root/$conf_id/$(basename "$notebook")"
-    html_path="$(basename "$executed_path" .ipynb).html"
+    html_path="$html_root/$conf_id/notebooks/$(basename "$executed_path" .ipynb).html"
+    job_name="$(basename "$executed_path" .ipynb)_${conf_id}"
+    dependency=""
+    if [ "$no_dependency" -eq "0" ]; then
+        dependency="-W depend=afterany:"${after}
+    fi
 
     if which qsub >/dev/null; then
         # automatically use qsub if available
         echo 'do qsub'
         output=$(
-            qsub -N "$conf_id" \
-                 -W "depend=afterany:$after" \
-                 -l "mem=$memory,walltime=$walltime" \
+            qsub -N "$job_name" \
+                  $dependency  \
+                 -l "select=1:ncpus=28:mem=$memory,walltime=$walltime" \
                  -q "$queue" \
                  -- \
                  "$script_dir/execute-notebook.sh" \

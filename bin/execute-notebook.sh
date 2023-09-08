@@ -1,6 +1,5 @@
 #!/bin/bash -x
-#bash
-#source .bashrc
+source $HOME/.bashrc
 
 if ! normalized=$(getopt -o he: --long help,environment:,conda-path: -n "execute-notebook" -- "$@"); then
     echo "failed to parse arguments" >&2
@@ -54,6 +53,10 @@ input_notebook="$1"
 output_notebook="$2"
 output_html="$3"
 
+work_dir="$(dirname "$output_notebook" )"
+
+cd $work_dir
+
 if [[ "$environment" != "" && "$conda_path" == "" ]]; then
     echo "need the conda path when activating a environment" >&2
     exit 3
@@ -67,9 +70,10 @@ fi
 /usr/bin/time -v jupyter nbconvert --execute --allow-errors \
               "$input_notebook" \
               --to notebook \
-              --output "$output_notebook"
+              --output "$output_notebook" --debug
 
 /usr/bin/time -v jupyter nbconvert --allow-errors \
               "$output_notebook" \
               --to html \
               --output "$output_html"
+chmod o+r $output_html
