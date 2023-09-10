@@ -173,15 +173,13 @@ def _propagate_timestep(M, kernel, emission, Tprevx, Tprevy):
     row, col = M.shape
     ks = kernel.shape[0]
 
-    subject = M != -np.inf
-
     Mtemp = np.full((row, col), fill_value=-np.inf)
     Ttempx = np.full((row, col), fill_value=-1, dtype="int16")
     Ttempy = np.full((row, col), fill_value=-1, dtype="int16")
 
-    for x in range(0, col):
-        for y in range(0, row):
-            if not subject[y, x]:
+    for x in range(col):
+        for y in range(row):
+            if M[y, x] == -np.inf:
                 continue
 
             kminlat = max(ks // 2 - y, 0)
@@ -207,27 +205,29 @@ def _propagate_timestep(M, kernel, emission, Tprevx, Tprevy):
 
             update = Msub > Mupdate
 
-            Mupdate = np.where(update, Msub, Mupdate)
-            Txupdate = np.where(update, x, Txupdate)
-            Tyupdate = np.where(update, y, Tyupdate)
-
-            Mtemp[mminlat : mmaxlat + 1, mminlong : mmaxlong + 1] = Mupdate
-            Ttempx[mminlat : mmaxlat + 1, mminlong : mmaxlong + 1] = Txupdate
-            Ttempy[mminlat : mmaxlat + 1, mminlong : mmaxlong + 1] = Tyupdate
+            Mtemp[mminlat : mmaxlat + 1, mminlong : mmaxlong + 1] = np.where(
+                update, Msub, Mupdate
+            )
+            Ttempx[mminlat : mmaxlat + 1, mminlong : mmaxlong + 1] = np.where(
+                update, x, Txupdate
+            )
+            Ttempy[mminlat : mmaxlat + 1, mminlong : mmaxlong + 1] = np.where(
+                update, y, Tyupdate
+            )
 
     return Mtemp, Ttempx, Ttempy
 
 
 @numba.njit
-def _reorder_track(Tprevx, Tprevy, Ttempx, Ttempy, index, subject):
-    row, col = subject.shape
+def _reorder_track(Tprevx, Tprevy, Ttempx, Ttempy, index, M):
+    row, col = M.shape
 
     Tx = np.full_like(Tprevx, fill_value=-1)
     Ty = np.full_like(Tprevy, fill_value=-1)
 
     for x in range(col):
         for y in range(row):
-            if not subject[y, x]:
+            if M[y, x] == -np.inf:
                 continue
 
             Tx[y, x, :index] = Tprevx[Ttempy[y, x], Ttempx[y, x], :index]
@@ -251,14 +251,13 @@ def _viterbi(emission, land_mask, pos0, sigma):
     Tprevy = np.full(M.shape + emission_.shape[:1], fill_value=-1, dtype="int16")
     Tprevy[y0, x0, 0] = y0
 
-    for index in range(emission_.shape[0]):
+    for index in range(1, emission_.shape[0]):
         pdf = dask.compute(emission_[index, ...])[0]
 
         Mtemp, Ttempx, Ttempy = _propagate_timestep(M, kernel, pdf, Tprevx, Tprevy)
         Mtemp[land_mask] = -np.inf
 
-        subject = Mtemp != -np.inf
-        Tx, Ty = _reorder_track(Tprevx, Tprevy, Ttempx, Ttempy, index, subject)
+        Tx, Ty = _reorder_track(Tprevx, Tprevy, Ttempx, Ttempy, index, Mtemp)
 
         M = Mtemp
         Tprevx = Tx
