@@ -238,7 +238,7 @@ def _reorder_track(Tprevx, Tprevy, Ttempx, Ttempy, index, subject):
     return Tx, Ty
 
 
-def _viterbi(emission, land_mask, pos0, sigma, selection="max"):
+def _viterbi(emission, land_mask, pos0, sigma):
     kernel = np.log(gaussian_kernel(np.array([sigma, sigma]), type="discrete"))
     emission_ = np.log(emission)
 
@@ -268,10 +268,28 @@ def _viterbi(emission, land_mask, pos0, sigma, selection="max"):
     reshaped_x = np.reshape(Tprevx, -1, emission.shape[0])
     reshaped_y = np.reshape(Tprevy, -1, emission.shape[0])
 
-    if selection == "max":
-        pos = np.argmax(reshaped_M)
-        y, x = reshaped_y[pos, :], reshaped_x[pos, :]
-    else:
-        raise ValueError(f"unknown selection type: {selection}")
+    pos = np.argmax(reshaped_M)
+    y, x = reshaped_y[pos, :], reshaped_x[pos, :]
 
     return y, x
+
+
+def viterbi2(emission, sigma):
+    emission_ = combine_emission_pdf(emission)
+    pdf = emission_.pdf
+    pdf[{"time": 0}] = emission_.initial
+
+    # different order for x and y, so we need to swap it
+    x, y = xr.apply_ufunc(
+        _viterbi,
+        pdf.fillna(0),
+        sigma,
+        np.logical_not(emission.mask),  # ocean mask → land mask
+        input_core_dims=[("x", "y"), (), ("x", "y")],
+        output_core_dims=[(), ()],
+        dask="allowed",
+    )
+
+    return (
+        emission[["time", "latitude", "longitude"]].isel(x=x, y=y).drop_vars("cell_ids")
+    )
