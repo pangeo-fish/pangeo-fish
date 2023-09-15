@@ -265,8 +265,8 @@ def _viterbi(emission, land_mask, sigma):
         Tprevy = Ty
 
     reshaped_M = np.reshape(M, -1)
-    reshaped_x = np.reshape(Tprevx, -1, emission.shape[0])
-    reshaped_y = np.reshape(Tprevy, -1, emission.shape[0])
+    reshaped_x = np.reshape(Tprevx, (-1, emission.shape[0]))
+    reshaped_y = np.reshape(Tprevy, (-1, emission.shape[0]))
 
     pos = np.argmax(reshaped_M)
     y, x = reshaped_y[pos, :], reshaped_x[pos, :]
