@@ -165,7 +165,10 @@ def viterbi(emission, sigma):
         dask="allowed",
     )
 
-    return xr.Dataset({"state_metrics": state_metrics, "track": positions})
+    coords = emission_[["longitude", "latitude"]].stack(z=["x", "y"])
+    track = coords.isel(z=positions)
+
+    return track
 
 
 @numba.njit
