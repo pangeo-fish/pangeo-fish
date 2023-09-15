@@ -283,10 +283,10 @@ def viterbi2(emission, sigma):
     x, y = xr.apply_ufunc(
         _viterbi,
         pdf.fillna(0),
-        sigma,
         np.logical_not(emission.mask),  # ocean mask → land mask
-        input_core_dims=[("x", "y"), (), ("x", "y")],
+        input_core_dims=[("x", "y"), ("x", "y")],
         output_core_dims=[(), ()],
+        kwargs={"sigma": sigma},
         dask="allowed",
     )
 
