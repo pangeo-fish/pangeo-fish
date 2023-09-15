@@ -115,7 +115,7 @@ def viterbi(emission, sigma):
     def decode_most_probable_track(pdf, sigma, ocean_mask):
         kernel = gaussian_kernel(np.full(shape=(2,), fill_value=sigma))
 
-        pos0 = np.argmax(pdf[0, ...]).compute()
+        pos0 = dask.compute(np.argmax(pdf[0, ...]))
 
         # all in log space
         state_metrics_ = [pdf[0, ...]]
