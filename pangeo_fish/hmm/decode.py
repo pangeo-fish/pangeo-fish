@@ -238,13 +238,14 @@ def _reorder_track(Tprevx, Tprevy, Ttempx, Ttempy, index, M):
     return Tx, Ty
 
 
-def _viterbi(emission, land_mask, pos0, sigma):
+def _viterbi(emission, land_mask, sigma):
     kernel = np.log(gaussian_kernel(np.array([sigma, sigma]), type="discrete"))
     emission_ = np.log(emission)
 
     M = dask.compute(emission_[0, ...])[0]
 
-    y0, x0 = pos0
+    pos0 = np.argmax(M)
+    y0, x0 = np.unravel_index(pos0, M.shape)
 
     Tprevx = np.full(M.shape + emission_.shape[:1], fill_value=-1, dtype="int16")
     Tprevx[y0, x0, 0] = x0
