@@ -55,7 +55,7 @@ ssh datarmor
 bash
 micromamba activate pangeo-fish-0723
 # cd to pangeo-fish installed directory
-cd /home1/datawork/todaka/git/github-iaocea/pangeo-fish
+cd /home1/datawork/todaka/git/pangeo-fish
 
 ./bin/run-workflow.sh A19124 --environment /home1/datawork/todaka/micromamba/envs/pangeo-fish-0723  --html-root /home/datawork-taos-s/public/fish/test  
 
