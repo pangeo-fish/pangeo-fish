@@ -6,7 +6,7 @@ import xarray as xr
 def extract_receivers(
     detections,
     columns=[
-        "receiver_id",
+        "deployment_id",
         "deploy_latitude",
         "deploy_longitude",
         "station_name",
@@ -18,7 +18,7 @@ def extract_receivers(
     ----------
     detections : pandas.DataFrame
         All detections in the database.
-    columns : list of hashable, default: ["receiver_id", "deploy_latitude", \
+    columns : list of hashable, default: ["deployment_id", "deploy_latitude", \
                                           "deploy_longitude", "station_name"]
         Receiver-specific columns.
 
@@ -29,7 +29,7 @@ def extract_receivers(
     """
     subset = detections[columns]
 
-    return subset.set_index("receiver_id").drop_duplicates()
+    return subset.set_index("deployment_id").drop_duplicates()
 
 
 def search_acoustic_tag_id(tag_database, pit_tag_id):
@@ -80,16 +80,16 @@ def count_detections(detections, by):
     xarray.Dataset.groupby
     """
     count_on = (
-        detections[["receiver_id"]]
-        .assign(count=lambda ds: xr.ones_like(ds["receiver_id"], dtype=int))
-        .set_coords(["receiver_id"])
+        detections[["deployment_id"]]
+        .assign(count=lambda ds: xr.ones_like(ds["deployment_id"], dtype=int))
+        .set_coords(["deployment_id"])
     )
 
     isbin = [False, isinstance(by, pd.IntervalIndex)]
 
     result = flox.xarray.xarray_reduce(
         count_on,
-        "receiver_id",
+        "deployment_id",
         "time",
         expected_groups=(None, by),
         isbin=isbin,
