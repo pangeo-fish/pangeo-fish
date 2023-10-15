@@ -1,4 +1,4 @@
-#!/bin/bash  -x
+#!/bin/bash  
 
 read -r -d "" help <<-EOF
 Usage: $0 [options] confname
@@ -37,7 +37,7 @@ conda_path="/appli/anaconda/versions/4.8.2/condabin/conda"
 #executed_root="$workflow_root/executed"
 executed_root="$workflow_root/executed"
 html_root="/home/datawork-taos-s/public/fish"
-walltime="04:00:00"
+walltime="24:00:00"
 memory="120GB"
 no_dependency=0
 queue="mpi_1"
@@ -164,7 +164,7 @@ mkdir -p "$html_root/$conf_id/notebooks"
 find "$parametrized_root/$conf_id" -maxdepth 1 -type f -name "*.ipynb" | sort -h | while read -r notebook; do
     executed_path="$executed_root/$conf_id/$(basename "$notebook")"
     html_path="$html_root/$conf_id/notebooks/$(basename "$executed_path" .ipynb).html"
-    job_name="$(basename "$executed_path" .ipynb)_${conf_id}"
+    job_name="${conf_id}_$(basename "$executed_path" .ipynb)"
     dependency=""
     if [ "$no_dependency" -eq "0" ]; then
         dependency="-W depend=afterany:"${after}
@@ -176,7 +176,7 @@ find "$parametrized_root/$conf_id" -maxdepth 1 -type f -name "*.ipynb" | sort -h
         output=$(
             qsub -N "$job_name" \
                   $dependency  \
-                 -l "select=1:ncpus=28:mem=$memory,walltime=$walltime" \
+                 -l "select=1:ncpus=28:mem=120GB,walltime=$walltime" \
                  -q "$queue" \
                  -- \
                  "$script_dir/execute-notebook.sh" \
