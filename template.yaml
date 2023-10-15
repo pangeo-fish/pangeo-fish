@@ -1,0 +1,12 @@
+tag_name: "A18828"
+ref_model_name: "copernicus"
+acoustic: "/acoustic/"
+time_step: 1
+subset: {'lat_min':48,
+              'lat_max':50,
+              'lon_min':-6,
+              'lon_max':-2,}
+tag_base_path: "/home/datawork-taos-s/intranet/data/tag/Archival_Data/NetCDF_UTC/"
+tag_db_path:  "/home/datawork-taos-s/intranet/data/tag/Fish_Metadata/all_pollack_11102023.csv"
+detections_path:  "/home/datawork-taos-s/intranet/data/tag/Acoustic_Data/pollack_filtered_detections.csv"
+working_path:  "/home/datawork-taos-s/public/fish/"
