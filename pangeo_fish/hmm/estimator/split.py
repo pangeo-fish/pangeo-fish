@@ -42,6 +42,7 @@ class EagerScoreEstimator:
         return replace(self, **params)
 
     def _score(self, X, *, spatial_dims=None, temporal_dims=None):
+        import gc
         if self.sigma is None:
             raise ValueError("unset sigma, cannot run the filter")
 
@@ -75,6 +76,7 @@ class EagerScoreEstimator:
             output_core_dims=[()],
             dask="allowed",
         )
+        gc.collect()
         return value.fillna(np.inf)
 
     def _forward_algorithm(self, X, *, spatial_dims=None, temporal_dims=None):
