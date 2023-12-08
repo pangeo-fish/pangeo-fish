@@ -16,6 +16,7 @@ dependencies:
   - pre-commit
   - graphviz
   - python-graphviz
+  - papermill
   # general computing
   - xarray
   - scipy
