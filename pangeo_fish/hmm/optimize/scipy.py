@@ -104,12 +104,12 @@ class EagerBoundsSearch:
             The estimator with optimized parameters.
         """
 
-        def f(sigma):
+        def f(sigma,X):
             # computing is important to avoid recomputing as many times as the result is used
             return self.estimator.set_params(sigma=sigma).score(X).compute().data
 
         lower, upper = self.param_bounds
-        result = scipy.optimize.fminbound(f, lower, upper, **self.optimizer_kwargs)
+        result = scipy.optimize.fminbound(f, lower, upper,args=(X,), **self.optimizer_kwargs)
 
         return self.estimator.set_params(sigma=result.item())
 

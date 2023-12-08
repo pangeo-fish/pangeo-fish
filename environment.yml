@@ -1,0 +1,63 @@
+name: pangeo-fish_202312_1
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  # development
+  - jupyterlab=3.*
+  - ipykernel
+  - ipython
+  - jupyterlab_code_formatter
+  - git
+  - jupyterlab-git
+  - black
+  - isort
+  - rich
+  - pre-commit
+  - graphviz
+  - python-graphviz
+  - papermill
+  # general computing
+  - xarray
+  - scipy
+  - numba
+#  - scikit-learn==0.20.3
+  # units, bounds, and cf-conventions
+  - cf_xarray
+  - pint-xarray
+  # geographic manipulations
+  - pyproj
+  - cartopy
+  - shapely
+  - odc-geo
+  - regionmask
+  - geopandas
+  - healpy
+  - sparse
+  - opt-einsum
+  - cdshealpix
+  # I/O
+  - kerchunk
+  - intake-xarray
+  - netcdf4
+  - h5netcdf
+  - zarr
+  - fsspec
+  - zstandard
+  - zstd
+  - fastparquet
+  # distributed computing
+  - dask
+  - distributed
+  - dask-labextension
+  # plotting
+  - hvplot
+  - holoviews
+  - geoviews
+  - datashader
+  - cmocean
+  - pip:
+    - dask-hpcconfig
+    - xarray[complete]
+    - xdggs
+#    - git+git://github.com/IAOCEA/xarray-healpy.git
