@@ -112,10 +112,28 @@ def viterbi(emission, sigma):
         TODO: translate this to label space without computing
     """
 
+    def apply_kernel_state_metric(
+        pdf, previous_state_metric, previous_branches, kernel
+    ):
+        if isinstance(pdf, da.Array):
+            return da.apply_gufunc(
+                kernel_state_metric,
+                "(x,y),(x,y),(x,y),(n,m)->(x,y),(x,y)",
+                previous_state_metric,
+                previous_branches,
+                pdf,
+                kernel,
+                output_dtypes=[float, int],
+            )
+        else:
+            return kernel_state_metric(
+                previous_state_metric, previous_branches, pdf, kernel
+            )
+
     def decode_most_probable_track(pdf, sigma, ocean_mask):
         kernel = gaussian_kernel(np.full(shape=(2,), fill_value=sigma))
 
-        pos0 = dask.compute(np.argmax(pdf[0, ...]))
+        [pos0] = dask.compute(np.argmax(pdf[0, ...]))
 
         # all in log space
         state_metrics_ = [pdf[0, ...]]
@@ -124,14 +142,11 @@ def viterbi(emission, sigma):
         branches_ = [initial_branches]
 
         for index in range(1, pdf.shape[0]):
-            state_metric, positions = da.apply_gufunc(
-                kernel_state_metric,
-                "(x,y),(x,y),(x,y),(n,m)->(x,y),(x,y)",
+            state_metric, positions = apply_kernel_state_metric(
+                pdf[index, ...],
                 state_metrics_[index - 1],
                 branches_[index - 1],
-                pdf[index, ...],
                 np.log(kernel),
-                output_dtypes=[float, int],
             )
 
             state_metrics_.append(np.where(ocean_mask, state_metric, -np.inf))
