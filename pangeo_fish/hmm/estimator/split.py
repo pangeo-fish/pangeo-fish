@@ -2,7 +2,7 @@ from dataclasses import asdict, dataclass, replace
 
 import numpy as np
 import xarray as xr
-from tlz.functoolz import compose_left, curry
+from tlz.functoolz import compose_left, curry, juxt
 from tlz.itertoolz import identity
 
 from ... import utils
@@ -245,10 +245,16 @@ class EagerScoreEstimator:
         if is_states and mode == "viterbi":
             raise ValueError("cannot pass state probabilities to the viterbi algorithm")
         elif not is_states and mode != "viterbi":
-            compute_states = curry(
-                self.predict_proba,
-                spatial_dims=spatial_dims,
-                temporal_dims=temporal_dims,
+            compute_states = compose_left(
+                juxt(
+                    curry(
+                        self.predict_proba,
+                        spatial_dims=spatial_dims,
+                        temporal_dims=temporal_dims,
+                    ),
+                    identity,
+                ),
+                xr.merge,
             )
         else:
             compute_states = identity
