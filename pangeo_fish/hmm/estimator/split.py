@@ -2,12 +2,12 @@ from dataclasses import asdict, dataclass, replace
 
 import numpy as np
 import xarray as xr
-from tlz.functoolz import compose_left, curry
+from tlz.functoolz import compose_left, curry, juxt
 from tlz.itertoolz import identity
 
 from ... import utils
 from ...tracks import to_trajectory
-from ..decode import mean_track, modal_track, viterbi
+from ..decode import mean_track, modal_track, viterbi, viterbi2
 from ..filter import forward, forward_backward, score
 
 
@@ -247,10 +247,16 @@ class EagerScoreEstimator:
         if is_states and mode == "viterbi":
             raise ValueError("cannot pass state probabilities to the viterbi algorithm")
         elif not is_states and mode != "viterbi":
-            compute_states = curry(
-                self.predict_proba,
-                spatial_dims=spatial_dims,
-                temporal_dims=temporal_dims,
+            compute_states = compose_left(
+                juxt(
+                    curry(
+                        self.predict_proba,
+                        spatial_dims=spatial_dims,
+                        temporal_dims=temporal_dims,
+                    ),
+                    identity,
+                ),
+                xr.merge,
             )
         else:
             compute_states = identity
@@ -259,6 +265,7 @@ class EagerScoreEstimator:
             "mean": compose_left(compute_states, mean_track),
             "mode": compose_left(compute_states, modal_track),
             "viterbi": curry(viterbi, sigma=self.sigma),
+            "viterbi2": curry(viterbi2, sigma=self.sigma),
         }
 
         decoder = decoders.get(mode)
