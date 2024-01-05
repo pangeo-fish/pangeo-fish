@@ -3,7 +3,7 @@ from dataclasses import asdict, dataclass, replace
 import numpy as np
 import xarray as xr
 from tlz.functoolz import compose_left, curry
-from tlz.itertoolz import identity
+from tlz.itertoolz import first, second
 
 from ... import utils
 from ...tracks import to_trajectory
@@ -43,6 +43,7 @@ class EagerScoreEstimator:
 
     def _score(self, X, *, spatial_dims=None, temporal_dims=None):
         import gc
+
         if self.sigma is None:
             raise ValueError("unset sigma, cannot run the filter")
 
@@ -215,11 +216,11 @@ class EagerScoreEstimator:
     def decode(
         self,
         X,
+        states=None,
         *,
         mode="viterbi",
         spatial_dims=None,
         temporal_dims=None,
-        is_states=False,
     ):
         """decode the state sequence from the selected model and the data
 
@@ -230,6 +231,10 @@ class EagerScoreEstimator:
             - `pdf`, the emission probabilities
             - `mask`, a mask to select ocean pixels
             - `initial`, the initial probability map
+            - `final`, the final probability map (optional)
+        states : Dataset, optional
+            The precomputed state probability maps. The dataset should contain these variables:
+            - `states`, the state probabilities
         mode : {"mean", "mode", "viterbi"}, default: "viterbi"
             The decoding method. Can be one of
             - ``"mean"``: use the centroid of the state probabilities as decoded state
@@ -239,26 +244,25 @@ class EagerScoreEstimator:
             The spatial dimensions of the dataset.
         temporal_dims : list of hashable, optional
             The temporal dimensions of the dataset.
-        is_states : bool, default: False
-            Whether ``X`` is the precomputed state probabilities. Useful if computing both
-            the mean and mode states.
         """
-
-        if is_states and mode == "viterbi":
-            raise ValueError("cannot pass state probabilities to the viterbi algorithm")
-        elif not is_states and mode != "viterbi":
-            compute_states = curry(
-                self.predict_proba,
-                spatial_dims=spatial_dims,
-                temporal_dims=temporal_dims,
-            )
+        if mode == "viterbi":
+            preprocessors = [first]
+        elif states is None:
+            preprocessors = [
+                first,
+                curry(
+                    self.predict_proba,
+                    spatial_dims=spatial_dims,
+                    temporal_dims=temporal_dims,
+                ),
+            ]
         else:
-            compute_states = identity
+            preprocessors = [second]
 
         decoders = {
-            "mean": compose_left(compute_states, mean_track),
-            "mode": compose_left(compute_states, modal_track),
-            "viterbi": curry(viterbi, sigma=self.sigma),
+            "mean": compose_left(*preprocessors, mean_track),
+            "mode": compose_left(*preprocessors, modal_track),
+            "viterbi": compose_left(*preprocessors, curry(viterbi, sigma=self.sigma)),
         }
 
         decoder = decoders.get(mode)
@@ -267,6 +271,6 @@ class EagerScoreEstimator:
                 f"unknown mode: {mode!r}. Choose one of {{{', '.join(sorted(decoders))}}}"
             )
 
-        decoded = decoder(X)
+        decoded = decoder([X, states])
 
         return to_trajectory(decoded.compute(), name=mode)
