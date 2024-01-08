@@ -31,7 +31,7 @@ def assign_group_labels(ds, *, dim, index, bin_dim, other_dim):
 
 
 def reshape_by_bins(ds, *, dim, bins, bin_dim="bincount", other_dim="obs"):
-    index = bins.to_index()
+    index = bins.to_index().astype("interval")
     vertices = np.concatenate([index.left, index.right[-1:]])
 
     grouped = ds.groupby_bins(dim, bins=vertices)
