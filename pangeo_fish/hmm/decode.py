@@ -7,7 +7,6 @@ import numpy as np
 import xarray as xr
 
 from ..distributions import gaussian_kernel
-from ..pdf import combine_emission_pdf
 
 
 def mean_track(X, coords=["latitude", "longitude"]):
@@ -96,9 +95,8 @@ def viterbi(emission, sigma):
     Parameters
     ----------
     emission : Dataset
-        The emission probability dataset containing land mask, initial
-        and final probabilities and the different components of the
-        pdf.
+        The emission probability dataset containing land mask and initial
+        probabilities and the pdf.
     sigma : float
         The coefficient of diffusion in pixel
 
@@ -149,10 +147,8 @@ def viterbi(emission, sigma):
 
         return state_metrics, positions[::-1]
 
-    emission_ = combine_emission_pdf(emission)
-    pdf = emission_.pdf
-    pdf[{"time": 0}] = emission_.initial
-    pdf[{"time": -1}] = emission_.final
+    pdf = emission["pdf"].copy()
+    pdf[{"time": 0}] = emission.initial
 
     state_metrics, positions = xr.apply_ufunc(
         decode_most_probable_track,
