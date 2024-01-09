@@ -245,7 +245,7 @@ class EagerScoreEstimator:
         temporal_dims : list of hashable, optional
             The temporal dimensions of the dataset.
         """
-        if mode == "viterbi":
+        if mode in {"viterbi", "viterbi2"}:
             preprocessors = [first]
         elif states is None:
             preprocessors = [

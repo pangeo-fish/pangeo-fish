@@ -290,7 +290,7 @@ def _viterbi(emission, land_mask, sigma):
 
 
 def viterbi2(emission, sigma):
-    pdf = emission.pdf.copy()
+    pdf = emission["pdf"].copy()
     pdf[{"time": 0}] = emission.initial
 
     # different order for x and y, so we need to swap it
