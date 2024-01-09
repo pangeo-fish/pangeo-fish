@@ -7,7 +7,7 @@ from tlz.itertoolz import first, second
 
 from ... import utils
 from ...tracks import to_trajectory
-from ..decode import mean_track, modal_track, viterbi
+from ..decode import mean_track, modal_track, viterbi, viterbi2
 from ..filter import forward, forward_backward, score
 
 
@@ -263,6 +263,7 @@ class EagerScoreEstimator:
             "mean": compose_left(*preprocessors, mean_track),
             "mode": compose_left(*preprocessors, modal_track),
             "viterbi": compose_left(*preprocessors, curry(viterbi, sigma=self.sigma)),
+            "viterbi2": compose_left(*preprocessors, curry(viterbi2, sigma=self.sigma)),
         }
 
         decoder = decoders.get(mode)
