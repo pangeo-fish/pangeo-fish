@@ -1,6 +1,9 @@
 import flox.xarray
 import pandas as pd
 import xarray as xr
+from tlz.itertoolz import first
+
+from .cf import bounds_to_bins
 
 
 def extract_receivers(
@@ -79,6 +82,14 @@ def count_detections(detections, by):
     flox.xarray.xarray_reduce
     xarray.Dataset.groupby
     """
+    if "bounds" in getattr(by, "dims", []):
+        if len(by.cf.bounds) != 1:
+            raise ValueError("cannot find a valid bounds variable")
+
+        bounds_var = first(by.cf.bounds.values())[0]
+        bins_var = f"{bounds_var.removesuffix('_bounds')}_bins"
+        by = bounds_to_bins(by)[bins_var]
+
     count_on = (
         detections[["deployment_id"]]
         .assign(count=lambda ds: xr.ones_like(ds["deployment_id"], dtype=int))
