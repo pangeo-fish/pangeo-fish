@@ -98,3 +98,28 @@ def count_detections(detections, by):
     )
 
     return result
+
+
+def select_detections_by_tag_id(database, tag_id):
+    """select detections by the acoustic tag id
+
+    Parameters
+    ----------
+    database : pandas.DataFrame
+        The detections database.
+    tag_id : str
+        The acoustic tag id to search for.
+
+    Returns
+    -------
+    detections : xarray.Dataset
+        The selected detections.
+    """
+    return (
+        database[["deployment_id", "acoustic_tag_id"]]
+        .to_xarray()
+        .set_coords(["acoustic_tag_id"])
+        .set_xindex("acoustic_tag_id")
+        .sel({"acoustic_tag_id": tag_id})
+        .drop_vars(["acoustic_tag_id"])
+    )
