@@ -1,6 +1,9 @@
 import flox.xarray
 import pandas as pd
 import xarray as xr
+from tlz.itertoolz import first
+
+from .cf import bounds_to_bins
 
 
 def extract_receivers(
@@ -79,6 +82,14 @@ def count_detections(detections, by):
     flox.xarray.xarray_reduce
     xarray.Dataset.groupby
     """
+    if "bounds" in getattr(by, "dims", []):
+        if len(by.cf.bounds) != 1:
+            raise ValueError("cannot find a valid bounds variable")
+
+        bounds_var = first(by.cf.bounds.values())[0]
+        bins_var = f"{bounds_var.removesuffix('_bounds')}_bins"
+        by = bounds_to_bins(by)[bins_var]
+
     count_on = (
         detections[["deployment_id"]]
         .assign(count=lambda ds: xr.ones_like(ds["deployment_id"], dtype=int))
@@ -98,3 +109,28 @@ def count_detections(detections, by):
     )
 
     return result
+
+
+def select_detections_by_tag_id(database, tag_id):
+    """select detections by the acoustic tag id
+
+    Parameters
+    ----------
+    database : pandas.DataFrame
+        The detections database.
+    tag_id : str
+        The acoustic tag id to search for.
+
+    Returns
+    -------
+    detections : xarray.Dataset
+        The selected detections.
+    """
+    return (
+        database[["deployment_id", "acoustic_tag_id"]]
+        .to_xarray()
+        .set_coords(["acoustic_tag_id"])
+        .set_xindex("acoustic_tag_id")
+        .sel({"acoustic_tag_id": tag_id})
+        .drop_vars(["acoustic_tag_id"])
+    )

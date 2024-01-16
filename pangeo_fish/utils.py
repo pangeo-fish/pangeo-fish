@@ -4,6 +4,13 @@ import cf_xarray  # noqa: F401
 import more_itertools
 import pandas as pd
 import xarray as xr
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeRemainingColumn,
+)
 
 
 def clear_attrs(obj, variables=None):
@@ -116,6 +123,25 @@ def temporal_resolution(time):
     units = timedelta_units(timedelta)
 
     return xr.DataArray(timedelta.astype("float"), dims=None, attrs={"units": units})
+
+
+def progress_status(sequence):
+    progress = Progress(
+        SpinnerColumn(),
+        TextColumn("{task.fields[label]}"),
+        BarColumn(),
+        TimeRemainingColumn(),
+        transient=True,
+    )
+
+    with progress:
+        task_id = progress.add_task(
+            "computations", total=len(sequence), label="starting up"
+        )
+        for item in sequence:
+            progress.update(task_id, advance=0, label=item)
+            yield item
+            progress.update(task_id, advance=1, label=item)
 
 
 def encode_positions(df):

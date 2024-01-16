@@ -7,7 +7,6 @@ import numpy as np
 import xarray as xr
 
 from ..distributions import gaussian_kernel
-from ..pdf import combine_emission_pdf
 
 
 def mean_track(X, coords=["latitude", "longitude"]):
@@ -97,9 +96,8 @@ def viterbi(emission, sigma):
     Parameters
     ----------
     emission : Dataset
-        The emission probability dataset containing land mask, initial
-        and final probabilities and the different components of the
-        pdf.
+        The emission probability dataset containing land mask and initial
+        probabilities and the pdf.
     sigma : float
         The coefficient of diffusion in pixel
 
@@ -166,9 +164,8 @@ def viterbi(emission, sigma):
 
         return state_metrics, np.stack(positions[::-1])
 
-    emission_ = combine_emission_pdf(emission)
-    pdf = emission_.pdf
-    pdf[{"time": 0}] = emission_.initial
+    pdf = emission["pdf"].copy()
+    pdf[{"time": 0}] = emission.initial
 
     state_metrics, positions = xr.apply_ufunc(
         decode_most_probable_track,
@@ -180,7 +177,7 @@ def viterbi(emission, sigma):
         dask="allowed",
     )
 
-    coords = emission_[["longitude", "latitude"]].stack(z=["x", "y"])
+    coords = emission[["longitude", "latitude"]].stack(z=["x", "y"])
     track = coords.isel(z=positions)
 
     return track
@@ -293,9 +290,8 @@ def _viterbi(emission, land_mask, sigma):
 
 
 def viterbi2(emission, sigma):
-    emission_ = combine_emission_pdf(emission)
-    pdf = emission_.pdf
-    pdf[{"time": 0}] = emission_.initial
+    pdf = emission["pdf"].copy()
+    pdf[{"time": 0}] = emission.initial
 
     # different order for x and y, so we need to swap it
     x, y = xr.apply_ufunc(
