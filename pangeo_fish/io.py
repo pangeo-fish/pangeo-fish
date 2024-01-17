@@ -57,6 +57,21 @@ def read_detection_database(url):
 
 
 def open_copernicus_catalog(cat):
+    """assemble the given intake catalog into a dataset
+
+    .. warning::
+        This will only work for the catalog at https://data-taos.ifremer.fr/references/copernicus.yaml
+
+    Parameters
+    ----------
+    cat : intake.Catalog
+        The pre-opened intake catalog
+
+    Returns
+    -------
+    ds : xarray.Dataset
+        The assembled dataset.
+    """
     ds = (
         cat.data(type="TEM")
         .to_dask()
