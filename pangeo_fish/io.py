@@ -54,3 +54,32 @@ def read_detection_database(url):
         .rename(columns={"date_time": "time"})
         .set_index("time")
     )
+
+
+def open_copernicus_catalog(cat):
+    ds = (
+        cat.data(type="TEM")
+        .to_dask()
+        .rename({"thetao": "TEMP"})
+        .get(["TEMP"])
+        .assign_coords({"time": lambda ds: ds["time"].astype("datetime64[ns]")})
+        .assign(
+            {
+                "XE": cat.data(type="SSH").to_dask().get("zos"),
+                "H0": (
+                    cat.data_tmp(type="mdt")
+                    .to_dask()
+                    .get("deptho")
+                    .rename({"latitude": "lat", "longitude": "lon"})
+                ),
+                "mask": (
+                    cat.data_tmp(type="mdt")
+                    .to_dask()
+                    .get("mask")
+                    .rename({"latitude": "lat", "longitude": "lon"})
+                ),
+            }
+        )
+    )
+
+    return ds
