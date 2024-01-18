@@ -43,4 +43,7 @@ def reshape_by_bins(ds, *, dim, bins, bin_dim="bincount", other_dim="obs"):
         processed.swap_dims({dim: other_dim})
         .set_index({"stacked": [bin_dim, other_dim]})
         .unstack("stacked")
+        .assign_coords({dim: lambda ds: bins[dim].isel({dim: ds[bin_dim]})})
+        .swap_dims({bin_dim: dim})
+        .drop_vars([bin_dim, bins.name], errors="ignore")
     )

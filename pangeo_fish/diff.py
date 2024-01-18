@@ -2,7 +2,7 @@ import numba
 import numpy as np
 import xarray as xr
 
-_marc_diff_z_signatures = [
+_diff_z_signatures = [
     "void(float32[:], float32[:], float32, float32[:], float32[:], float32, float32[:])",
     "void(float64[:], float64[:], float64, float64[:], float64[:], float32, float64[:])",
     "void(float32[:], float32[:], float32, float64[:], float64[:], float32, float64[:])",
@@ -10,10 +10,8 @@ _marc_diff_z_signatures = [
 ]
 
 
-@numba.guvectorize(_marc_diff_z_signatures, "(z),(z),(),(o),(o),()->()", nopython=True)
-def _marc_diff_z(
-    model_temp, model_depth, bottom, tag_temp, tag_depth, depth_thresh, result
-):
+@numba.guvectorize(_diff_z_signatures, "(z),(z),(),(o),(o),()->()", nopython=True)
+def _diff_z(model_temp, model_depth, bottom, tag_temp, tag_depth, depth_thresh, result):
     if depth_thresh != 0 and bottom < np.max(tag_depth) * depth_thresh:
         result[0] = np.nan
         return
@@ -38,19 +36,17 @@ def _marc_diff_z(
     result[0] = np.mean(diff_temp[~np.isnan(diff_temp)])
 
 
-def marc_diff_z_numba(
-    model_temp, model_depth, bottom, tag_temp, tag_depth, depth_thresh
-):
+def diff_z_numba(model_temp, model_depth, bottom, tag_temp, tag_depth, depth_thresh):
     with np.errstate(all="ignore"):
         # TODO: figure out why the "invalid value encountered" warning is raised
-        return _marc_diff_z(
+        return _diff_z(
             model_temp, model_depth, bottom, tag_temp, tag_depth, depth_thresh
         )
 
 
-def marc_diff_z(model, tag, depth_threshold=0.8):
+def diff_z(model, tag, depth_threshold=0.8):
     diff = xr.apply_ufunc(
-        marc_diff_z_numba,
+        diff_z_numba,
         model.TEMP,
         model.depth,
         model.bottom,
@@ -66,4 +62,4 @@ def marc_diff_z(model, tag, depth_threshold=0.8):
     )
     original_units = model.TEMP.attrs["units"]
 
-    return diff.assign_attrs({"units": original_units}).rename("diff")
+    return diff.assign_attrs({"units": original_units}).to_dataset(name="diff")
