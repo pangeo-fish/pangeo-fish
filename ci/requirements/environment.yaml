@@ -26,10 +26,15 @@ dependencies:
   - xarray
   - more-itertools
   - scipy
+  - opt_einsum
   # geographic manipulations
   - movingpandas
   - geopandas
   - cartopy
+  - healpy
+  - cdshealpix
+  - scikit-learn
+  - astropy
   # video processing
   - ffmpeg
   - xmovie
