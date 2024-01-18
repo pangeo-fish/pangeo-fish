@@ -108,7 +108,7 @@ def count_detections(detections, by):
         fill_value=0,
     )
 
-    return result
+    return result.drop_vars(["time"]).assign_coords({"time": by["time"].variable})
 
 
 def select_detections_by_tag_id(database, tag_id):
