@@ -53,3 +53,6 @@ dependencies:
   # other utilities
   - jupyterlab-git
   - git
+  - pip
+  - pip:
+      - git+https://github.com/iaocea/xarray-healpy
