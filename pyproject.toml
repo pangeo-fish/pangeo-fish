@@ -19,6 +19,8 @@ dependencies = [
     "opt_einsum",
     "sparse",
     "healpy",
+    "movingpandas",
+    "xarray-healpy"
 ]
 dynamic = ["version"]
 
