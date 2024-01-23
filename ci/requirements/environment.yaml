@@ -24,6 +24,7 @@ dependencies:
   # general computing
   - flox
   - xarray
+  - xarray-datatree
   - more-itertools
   - scipy
   - opt_einsum
