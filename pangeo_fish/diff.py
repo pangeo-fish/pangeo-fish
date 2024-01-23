@@ -47,11 +47,11 @@ def diff_z_numba(model_temp, model_depth, bottom, tag_temp, tag_depth, depth_thr
 def diff_z(model, tag, depth_threshold=0.8):
     diff = xr.apply_ufunc(
         diff_z_numba,
-        model.TEMP,
-        model.depth,
-        model.bottom,
-        tag.water_temperature,
-        tag.pressure,
+        model["TEMP"],
+        model["depth"],
+        model["bottom"],
+        tag["temperature"],
+        tag["pressure"],
         kwargs={"depth_thresh": depth_threshold},
         input_core_dims=[["level"], ["level"], [], ["obs"], ["obs"]],
         output_core_dims=[[]],
@@ -60,6 +60,6 @@ def diff_z(model, tag, depth_threshold=0.8):
         dask="parallelized",
         output_dtypes=[model.dtypes["TEMP"]],
     )
-    original_units = model.TEMP.attrs["units"]
+    original_units = model["TEMP"].attrs["units"]
 
     return diff.assign_attrs({"units": original_units}).to_dataset(name="diff")
