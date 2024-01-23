@@ -89,7 +89,7 @@ def open_tag(root, name, storage_options=None):
         mapper.dirfs.open(f"{name}/dst_deployment.csv"), index_col=0
     )
     acoustic = pd.read_csv(mapper.dirfs.open(f"{name}/acoustic.csv"), index_col=0)
-    metadata = json.load(mapper.dirfs.open(f"{name}/metadata.csv"))
+    metadata = json.load(mapper.dirfs.open(f"{name}/metadata.json"))
 
     all_stations = pd.read_csv(
         mapper.dirfs.open("stations.csv"),
