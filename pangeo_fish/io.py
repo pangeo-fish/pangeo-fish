@@ -95,13 +95,12 @@ def open_tag(root, name, storage_options=None):
     )
     metadata = json.load(mapper.dirfs.open(f"{name}/metadata.json"))
 
-    all_stations = pd.read_csv(
+    stations = pd.read_csv(
         mapper.dirfs.open("stations.csv"),
         parse_dates=["deploy_date_time", "recover_date_time"],
         date_format="%Y-%m-%d %H:%M:%S",
         index_col=0,
     )
-    stations = all_stations.loc[acoustic["deployment_id"].unique()]
 
     return datatree.DataTree.from_dict(
         {
