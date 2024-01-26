@@ -28,6 +28,7 @@ dependencies:
   - more-itertools
   - scipy
   - opt_einsum
+  - sparse
   # geographic manipulations
   - movingpandas
   - geopandas
