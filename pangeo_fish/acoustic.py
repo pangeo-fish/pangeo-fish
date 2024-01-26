@@ -1,8 +1,12 @@
 import flox.xarray
+import numpy as np
 import pandas as pd
 import xarray as xr
 from tlz.itertoolz import first
+from xarray_healpy.conversions import geographic_to_cartesian
+from xarray_healpy.operations import buffer_points
 
+from . import utils
 from .cf import bounds_to_bins
 
 
@@ -133,4 +137,84 @@ def select_detections_by_tag_id(database, tag_id):
         .set_xindex("acoustic_tag_id")
         .sel({"acoustic_tag_id": tag_id})
         .drop_vars(["acoustic_tag_id"])
+    )
+
+
+def deployment_reception_masks(stations, grid, buffer_size):
+    cell_ids = grid["cell_ids"]
+    rot = {"lat": cell_ids.attrs["lat"], "lon": cell_ids.attrs["lon"]}
+
+    positions = geographic_to_cartesian(
+        lon=stations["deploy_longitude"],
+        lat=stations["deploy_latitude"],
+        rot=rot,
+        dim="deployment_id",
+    )
+
+    masks = buffer_points(
+        cell_ids,
+        positions,
+        buffer_size=buffer_size.m_as("m"),
+        nside=2 ** cell_ids.attrs["level"],
+        factor=2**16,
+        intersect=True,
+    )
+
+    return masks
+
+
+def emission_probability(tag, grid, buffer_size, nondetections="mask"):
+    """construct emission probability maps from acoustic detections
+
+    Parameters
+    ----------
+    tag : datatree.DataTree
+        The tag data.
+    grid : xarray.Dataset
+        The target grid. Must have the ``cell_ids`` and ``time``
+        coordinates and the ``mask`` variable.
+    buffer_size : pint.Quantity
+        The size of the buffer around each station. Must be given in
+        a length unit.
+    nondetections : {"mask", "ignore"}, default: "mask"
+        How to deal with non-detections in time slices without detections:
+
+        - "mask": set the buffer around stations without detections to `0`.
+        - "ignore": all valid pixels are equally probable.
+
+    Returns
+    -------
+    emission : xarray.Dataset
+        The resulting emission probability maps.
+    """
+    weights = (
+        count_detections(
+            tag["acoustic"].to_dataset(),
+            by=grid[["time"]].cf.add_bounds(keys="time"),
+        )
+        .rename_vars({"count": "weights"})
+        .chunk({"time": 1})
+        .get("weights")
+    )
+
+    maps = deployment_reception_masks(
+        tag["stations"].to_dataset(), grid[["cell_ids"]], buffer_size
+    )
+
+    if nondetections == "ignore":
+        fill_map = xr.ones_like(grid["cell_ids"], dtype=float).pipe(
+            utils.normalize, dim="cells"
+        )
+    elif nondetections == "mask":
+        fill_map = maps.any(dim="deployment_id").pipe(np.logical_not).astype(float)
+    else:
+        raise ValueError("invalid nondetections treatment argument")
+
+    return (
+        maps.weighted(weights)
+        .sum(dim="deployment_id")
+        .where((weights != 0).any(dim="deployment_id"), fill_map)
+        .pipe(utils.normalize, dim=["x", "y"])
+        .assign_attrs({"buffer_size": buffer_size.m_as("m")})
+        .to_dataset(name="acoustic")
     )
