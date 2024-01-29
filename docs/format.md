@@ -19,18 +19,22 @@ tag
 
 Each tag deployment directory must contain the DST log (`dst.csv`) and the DST deployment data (`dst_deployment.csv`). It may also contain a file with all the acoustic detections (`acoustic.csv`) and additional metadata (`metadata.json`).
 
+## csv formatting
+
+All CSV files must separate columns using `,` and new lines using `\n` characters.
+
+Floating point (or fixed-point) values must use `.` as a decimal separator.
+
+All time values must be given in ISO8601 format (`YYYY-MM-DD HH:MM:SS±ZZZZ`), where the time zone may be omitted. However, if it is not explicitly specified the time must be in UTC. _TODO: should we instead strictly follow ISO8601, i.e. use a format of `%Y-%m-%DT%H:%M:%SZ` or `%Y-%m-%DT%H:%M:%S±%z` (i.e. trailing `Z` is UTC)?_
+
+Strings containing `,` or `\n` must be wrapped in quotes.
+
 ## `dst_deployment.csv`
 
 The DST deployment data describes the start and end of the natural behavior of the fish, beginning with the release after the tagging and ending on its death (either natural or by being fished).
 
-The CSV file must separate columns using `,` and new lines using `\n` characters.
-
 It must have four columns: `event_name`, `time`, `latitude`, and `longitude`.
 
-The used events are: `release`, `recapture`, `fish_death` (more are possible, but must be after the end of the natural behavior).
+The used events are: `release`, `recapture`, `fish_death` (more are possible but will be ignored). The file must contain entries for `release` and one of `recapture` or `fish_death`.
 
-The time must be given in ISO8601 format (`YYYY-MM-DD HH:MM:SS±ZZZZ`), where the time zone may be omitted. However, if it is not explicitly specified the time must be in UTC. _TODO: should we instead strictly follow ISO8601, i.e. use a format of `%Y-%m-%DT%H:%M:%SZ` or `%Y-%m-%DT%H:%M:%S±%z` (i.e. trailing `Z` is UTC)?_
-
-The file must contain entries for `release` and one of `recapture` or `fish_death`.
-
-`latitude` and `longitude` are fixed-point representations of the position in degree, with a `.` as separator. `latitude` must be in a range of `-90°` to `90°`, while `longitude` may be given in either `0°` to `360°` or `-180°` to `180°`.
+`latitude` and `longitude` are fixed-point representations of the position in degree, with a `.` as separator. `latitude` must be in a range of `-90°` to `90°`, while `longitude` may be given in either `0°` to `360°` or `-180°` to `180°`. If the position is unknown, both `latitude` and `longitude` must be set to `NA`.
