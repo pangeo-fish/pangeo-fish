@@ -23,7 +23,7 @@ Each tag deployment directory must contain the DST log (`dst.csv`) and the DST d
 
 All CSV files must separate columns using `,` and new lines using `\n` characters.
 
-Floating point (or fixed-point) values must use `.` as a decimal separator.
+All floating point (or fixed-point) values must use `.` as a decimal separator.
 
 All time values must be given in ISO8601 format (`YYYY-MM-DD HH:MM:SS±ZZZZ`), where the time zone may be omitted. However, if it is not explicitly specified the time must be in UTC. _TODO: should we instead strictly follow ISO8601, i.e. use a format of `%Y-%m-%DT%H:%M:%SZ` or `%Y-%m-%DT%H:%M:%S±%z` (i.e. trailing `Z` is UTC)?_
 
