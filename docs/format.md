@@ -54,3 +54,26 @@ event_name,time,latitude,longitude
 release,2023-07-13 13:21:57,48.21842,-4.08578
 fish_death,2023-09-17 05:21:07,NA,NA
 ```
+
+## `acoustic.csv`: Acoustic detections
+
+This file contains information about acoustic detections.
+
+It must contain at least two columns: `deployment_id` and `time`.
+
+It may contain additional columns, such as the position of detection.
+
+For example:
+
+```csv
+time,deployment_id
+2022-08-10 22:11:00,176492
+```
+
+or
+
+```csv
+time,deployment_id,longitude,latitude
+2022-08-10 22:11:00,176492,-3.88402,47.78820
+2022-08-10 23:25:31,176492,-3.68471,47.81740
+```
