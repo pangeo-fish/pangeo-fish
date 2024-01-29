@@ -11,6 +11,7 @@ classifiers = [
 ]
 dependencies = [
     "xarray",
+    "xarray-datatree",  # remove once datatree has been merged into xarray
     "pandas",
     "numpy",
     "scipy",

@@ -24,9 +24,11 @@ dependencies:
   # general computing
   - flox
   - xarray
+  - xarray-datatree
   - more-itertools
   - scipy
   - opt_einsum
+  - sparse
   # geographic manipulations
   - movingpandas
   - geopandas
