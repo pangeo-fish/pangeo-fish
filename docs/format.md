@@ -91,3 +91,15 @@ time,deployment_id,longitude,latitude
 2022-08-10 22:11:00,176492,-3.88402,47.78820
 2022-08-10 23:25:31,176492,-3.68471,47.81740
 ```
+
+## `metadata.json`: arbitrary metadata
+
+This file may contain additional metadata.
+
+It must be in JSON format and the top-level structure must be an object. Additionally, the keys must be strings. Any valid JSON value is allowed.
+
+For example:
+
+```json
+{ "pit_tag_id": "A19124", "acoustic_tag_id": "OPI-372" }
+```
