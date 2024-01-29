@@ -29,6 +29,20 @@ All time values must be given in ISO8601 format (`YYYY-MM-DD HH:MM:SS±ZZZZ`), w
 
 Strings containing `,` or `\n` must be wrapped in quotes.
 
+## `dst.csv`: DST log
+
+The DST log contains the data measured by the DST tag.
+
+The file must have three columns: `time`, `temperature`, and `pressure`.
+
+For example:
+
+```csv
+time,temperature,pressure
+2022-07-21 12:12:30,10.1,14.3
+2022-08-01 07:08:01,1.3,17.3
+```
+
 ## `dst_deployment.csv`: DST deployment data
 
 The DST deployment data describes the start and end of the natural behavior of the fish, beginning with the release after the tagging and ending on its death.
