@@ -11,13 +11,13 @@ tag
 ├── A19124
 │   ├── acoustic.csv
 │   ├── dst.csv
-│   ├── dst_deployment.csv
+│   ├── tagging_events.csv
 │   └── metadata.json
 ├── ...
 └── stations.csv
 ```
 
-Each tag deployment directory must contain the DST log (`dst.csv`) and the DST deployment data (`dst_deployment.csv`). It may also contain a file with all the acoustic detections (`acoustic.csv`) and additional metadata (`metadata.json`).
+Each tag deployment directory must contain the DST log (`dst.csv`) and the lifetime data (`tagging_events.csv`). It may also contain a file with all the acoustic detections (`acoustic.csv`) and additional metadata (`metadata.json`).
 
 ## csv formatting
 
@@ -43,9 +43,9 @@ time,temperature,pressure
 2022-08-01 07:08:01,1.3,17.3
 ```
 
-## `dst_deployment.csv`: DST deployment data
+## `tagging_events.csv`: lifetime data
 
-The DST deployment data describes the start and end of the natural behavior of the fish, beginning with the release after the tagging and ending on its death.
+The lifetime data describes the start and end of the natural behavior of the fish, beginning with the release after the tagging and ending with its death.
 
 It must have four columns: `event_name`, `time`, `latitude`, and `longitude`.
 
