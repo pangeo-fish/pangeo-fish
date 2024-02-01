@@ -11,13 +11,13 @@ tag
 ├── A19124
 │   ├── acoustic.csv
 │   ├── dst.csv
-│   ├── dst_deployment.csv
+│   ├── tagging_events.csv
 │   └── metadata.json
 ├── ...
 └── stations.csv
 ```
 
-Each tag deployment directory must contain the DST log (`dst.csv`) and the DST deployment data (`dst_deployment.csv`). It may also contain a file with all the acoustic detections (`acoustic.csv`) and additional metadata (`metadata.json`).
+Each tag deployment directory must contain the DST log (`dst.csv`) and the lifetime data (`tagging_events.csv`). It may also contain a file with all the acoustic detections (`acoustic.csv`) and additional metadata (`metadata.json`).
 
 ## csv formatting
 
@@ -25,7 +25,7 @@ All CSV files must separate columns using `,` and new lines using `\n` character
 
 All floating point (or fixed-point) values must use `.` as a decimal separator.
 
-All time values must be given in ISO8601 format (`YYYY-MM-DDTHH:MM:SS±ZZZZ` or `YYYY-MM-DDTHH:MM:SS`). However, time zone-naive datetime data (i.e. without timezone information) will be assumed to be UTC.
+All time values must be given in ISO8601 format (`YYYY-MM-DDTHH:MM:SS±ZZZZ`, `YYYY-MM-DDTHH:MM:SSZ` or `YYYY-MM-DDTHH:MM:SS`). However, time zone-naive datetime data (i.e. without timezone information) will be assumed to be UTC.
 
 Strings containing `,` or `\n` must be wrapped in double quotes (`""`).
 
@@ -39,13 +39,13 @@ For example:
 
 ```csv
 time,temperature,pressure
-2022-07-21 12:12:30,10.1,14.3
-2022-08-01 07:08:01,1.3,17.3
+2022-07-21T12:12:30Z,10.1,14.3
+2022-08-01T07:08:01Z,1.3,17.3
 ```
 
-## `dst_deployment.csv`: DST deployment data
+## `tagging_events.csv`: lifetime data
 
-The DST deployment data describes the start and end of the natural behavior of the fish, beginning with the release after the tagging and ending on its death.
+The lifetime data describes the start and end of the natural behavior of the fish, beginning with the release after the tagging and ending with its death.
 
 It must have four columns: `event_name`, `time`, `latitude`, and `longitude`.
 
@@ -57,16 +57,16 @@ For example:
 
 ```csv
 event_name,time,latitude,longitude
-release,2023-07-13 13:21:57,48.21842,-4.08578
-recapture,2023-09-17 05:21:07,47.37423,-3.87582
+release,2023-07-13T13:21:57Z,48.21842,-4.08578
+recapture,2023-09-17T05:21:07Z,47.37423,-3.87582
 ```
 
 or
 
 ```csv
 event_name,time,latitude,longitude
-release,2023-07-13 13:21:57,48.21842,-4.08578
-fish_death,2023-09-17 05:21:07,NA,NA
+release,2023-07-13T13:21:57Z,48.21842,-4.08578
+fish_death,2023-09-17T05:21:07Z,NA,NA
 ```
 
 ## `acoustic.csv`: Acoustic detections
@@ -81,15 +81,15 @@ For example:
 
 ```csv
 time,deployment_id
-2022-08-10 22:11:00,176492
+2022-08-10T22:11:00Z,176492
 ```
 
 or
 
 ```csv
 time,deployment_id,longitude,latitude
-2022-08-10 22:11:00,176492,-3.88402,47.78820
-2022-08-10 23:25:31,176492,-3.68471,47.81740
+2022-08-10T22:11:00Z,176492,-3.88402,47.78820
+2022-08-10T23:25:31Z,176492,-3.68471,47.81740
 ```
 
 ## `metadata.json`: arbitrary metadata
