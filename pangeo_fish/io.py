@@ -87,8 +87,8 @@ def open_tag(root, name, storage_options=None):
     dst = pd.read_csv(
         mapper.dirfs.open(f"{name}/dst.csv"), index_col=0, parse_dates=[0]
     )
-    dst_deployment = pd.read_csv(
-        mapper.dirfs.open(f"{name}/dst_deployment.csv"), index_col=0, parse_dates=[1]
+    tagging_events = pd.read_csv(
+        mapper.dirfs.open(f"{name}/tagging_events.csv"), index_col=0, parse_dates=[1]
     )
     acoustic = pd.read_csv(
         mapper.dirfs.open(f"{name}/acoustic.csv"), index_col=0, parse_dates=[0]
@@ -107,7 +107,7 @@ def open_tag(root, name, storage_options=None):
             "/": xr.Dataset(attrs=metadata),
             "stations": stations.to_xarray(),
             "dst": dst.to_xarray(),
-            "dst_deployment": dst_deployment.to_xarray(),
+            "tagging_events": tagging_events.to_xarray(),
             "acoustic": acoustic.to_xarray(),
         }
     )
