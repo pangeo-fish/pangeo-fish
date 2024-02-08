@@ -108,9 +108,10 @@ def open_tag(root, name, storage_options=None):
     }
 
     if mapper.dirfs.exists(f"{name}/acoustic.csv"):
-        mapping["acoustic"] = pd.read_csv(
+        acoustic = pd.read_csv(
             mapper.dirfs.open(f"{name}/acoustic.csv"), index_col=0, parse_dates=[0]
         )
+        mapping["acoustic"] = acoustic.to_xarray()
 
     return datatree.DataTree.from_dict(mapping)
 
