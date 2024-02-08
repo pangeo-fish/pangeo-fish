@@ -90,27 +90,29 @@ def open_tag(root, name, storage_options=None):
     tagging_events = pd.read_csv(
         mapper.dirfs.open(f"{name}/tagging_events.csv"), index_col=0, parse_dates=[1]
     )
-    acoustic = pd.read_csv(
-        mapper.dirfs.open(f"{name}/acoustic.csv"), index_col=0, parse_dates=[0]
-    )
+
     metadata = json.load(mapper.dirfs.open(f"{name}/metadata.json"))
 
     stations = pd.read_csv(
         mapper.dirfs.open("stations.csv"),
-        parse_dates=["deploy_date_time", "recover_date_time"],
+        parse_dates=["deploy_time", "recover_time"],
         date_format="%Y-%m-%d %H:%M:%S",
         index_col=0,
     )
 
-    return datatree.DataTree.from_dict(
-        {
-            "/": xr.Dataset(attrs=metadata),
-            "stations": stations.to_xarray(),
-            "dst": dst.to_xarray(),
-            "tagging_events": tagging_events.to_xarray(),
-            "acoustic": acoustic.to_xarray(),
-        }
-    )
+    mapping = {
+        "/": xr.Dataset(attrs=metadata),
+        "stations": stations.to_xarray(),
+        "dst": dst.to_xarray(),
+        "tagging_events": tagging_events.to_xarray(),
+    }
+
+    if mapper.dirfs.exists(f"{name}/acoustic.csv"):
+        mapping["acoustic"] = pd.read_csv(
+            mapper.dirfs.open(f"{name}/acoustic.csv"), index_col=0, parse_dates=[0]
+        )
+
+    return datatree.DataTree.from_dict(mapping)
 
 
 def open_copernicus_catalog(cat):
