@@ -8,6 +8,23 @@ import pandas as pd
 import xarray as xr
 
 
+def tz_convert(df, timezones):
+    """Convert the timezone of columns in a dataframe
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        The dataframe.
+    timezones : mapping of str to str
+        The time zones to convert to per column.
+    """
+    new_columns = {
+        column: pd.Index(df[column]).tz_convert(tz) for column, tz in timezones.items()
+    }
+
+    return df.assign(**new_columns)
+
+
 def read_tag_database(url):
     """read the tag database
 
@@ -84,21 +101,25 @@ def open_tag(root, name, storage_options=None):
     else:
         mapper = root
 
-    dst = pd.read_csv(
-        mapper.dirfs.open(f"{name}/dst.csv"), index_col=0, parse_dates=[0]
+    dst = (
+        pd.read_csv(mapper.dirfs.open(f"{name}/dst.csv"), parse_dates=["time"])
+        .pipe(tz_convert, {"time": None})
+        .set_index("time")
     )
+
     tagging_events = pd.read_csv(
-        mapper.dirfs.open(f"{name}/tagging_events.csv"), index_col=0, parse_dates=[1]
-    )
+        mapper.dirfs.open(f"{name}/tagging_events.csv"),
+        parse_dates=["time"],
+        index_col="event_name",
+    ).pipe(tz_convert, {"time": None})
 
     metadata = json.load(mapper.dirfs.open(f"{name}/metadata.json"))
 
     stations = pd.read_csv(
         mapper.dirfs.open("stations.csv"),
         parse_dates=["deploy_time", "recover_time"],
-        date_format="%Y-%m-%d %H:%M:%S",
-        index_col=0,
-    )
+        index_col="deployment_id",
+    ).pipe(tz_convert, {"deploy_time": None, "recover_time": None})
 
     mapping = {
         "/": xr.Dataset(attrs=metadata),
@@ -108,8 +129,10 @@ def open_tag(root, name, storage_options=None):
     }
 
     if mapper.dirfs.exists(f"{name}/acoustic.csv"):
-        acoustic = pd.read_csv(
-            mapper.dirfs.open(f"{name}/acoustic.csv"), index_col=0, parse_dates=[0]
+        acoustic = (
+            pd.read_csv(mapper.dirfs.open(f"{name}/acoustic.csv"), parse_dates=["time"])
+            .pipe(tz_convert, {"time": None})
+            .set_index("time")
         )
         mapping["acoustic"] = acoustic.to_xarray()
 
