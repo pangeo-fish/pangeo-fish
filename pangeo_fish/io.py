@@ -101,11 +101,9 @@ def open_tag(root, name, storage_options=None):
     else:
         mapper = root
 
-    dst = (
-        pd.read_csv(mapper.dirfs.open(f"{name}/dst.csv"), parse_dates=["time"])
-        .pipe(tz_convert, {"time": None})
-        .set_index("time")
-    )
+    dst = pd.read_csv(
+        mapper.dirfs.open(f"{name}/dst.csv"), parse_dates=["time"], index_col="time"
+    ).tz_convert(None)
 
     tagging_events = pd.read_csv(
         mapper.dirfs.open(f"{name}/tagging_events.csv"),
@@ -129,11 +127,11 @@ def open_tag(root, name, storage_options=None):
     }
 
     if mapper.dirfs.exists(f"{name}/acoustic.csv"):
-        acoustic = (
-            pd.read_csv(mapper.dirfs.open(f"{name}/acoustic.csv"), parse_dates=["time"])
-            .pipe(tz_convert, {"time": None})
-            .set_index("time")
-        )
+        acoustic = pd.read_csv(
+            mapper.dirfs.open(f"{name}/acoustic.csv"),
+            parse_dates=["time"],
+            index_col="time",
+        ).tz_convert(None)
         mapping["acoustic"] = acoustic.to_xarray()
 
     return datatree.DataTree.from_dict(mapping)
