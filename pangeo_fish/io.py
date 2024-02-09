@@ -8,6 +8,23 @@ import pandas as pd
 import xarray as xr
 
 
+def tz_convert(df, timezones):
+    """Convert the timezone of columns in a dataframe
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        The dataframe.
+    timezones : mapping of str to str
+        The time zones to convert to per column.
+    """
+    new_columns = {
+        column: pd.Index(df[column]).tz_convert(tz) for column, tz in timezones.items()
+    }
+
+    return df.assign(**new_columns)
+
+
 def read_tag_database(url):
     """read the tag database
 
@@ -85,32 +102,39 @@ def open_tag(root, name, storage_options=None):
         mapper = root
 
     dst = pd.read_csv(
-        mapper.dirfs.open(f"{name}/dst.csv"), index_col=0, parse_dates=[0]
-    )
+        mapper.dirfs.open(f"{name}/dst.csv"), parse_dates=["time"], index_col="time"
+    ).tz_convert(None)
+
     tagging_events = pd.read_csv(
-        mapper.dirfs.open(f"{name}/tagging_events.csv"), index_col=0, parse_dates=[1]
-    )
-    acoustic = pd.read_csv(
-        mapper.dirfs.open(f"{name}/acoustic.csv"), index_col=0, parse_dates=[0]
-    )
+        mapper.dirfs.open(f"{name}/tagging_events.csv"),
+        parse_dates=["time"],
+        index_col="event_name",
+    ).pipe(tz_convert, {"time": None})
+
     metadata = json.load(mapper.dirfs.open(f"{name}/metadata.json"))
 
     stations = pd.read_csv(
         mapper.dirfs.open("stations.csv"),
-        parse_dates=["deploy_date_time", "recover_date_time"],
-        date_format="%Y-%m-%d %H:%M:%S",
-        index_col=0,
-    )
+        parse_dates=["deploy_time", "recover_time"],
+        index_col="deployment_id",
+    ).pipe(tz_convert, {"deploy_time": None, "recover_time": None})
 
-    return datatree.DataTree.from_dict(
-        {
-            "/": xr.Dataset(attrs=metadata),
-            "stations": stations.to_xarray(),
-            "dst": dst.to_xarray(),
-            "tagging_events": tagging_events.to_xarray(),
-            "acoustic": acoustic.to_xarray(),
-        }
-    )
+    mapping = {
+        "/": xr.Dataset(attrs=metadata),
+        "stations": stations.to_xarray(),
+        "dst": dst.to_xarray(),
+        "tagging_events": tagging_events.to_xarray(),
+    }
+
+    if mapper.dirfs.exists(f"{name}/acoustic.csv"):
+        acoustic = pd.read_csv(
+            mapper.dirfs.open(f"{name}/acoustic.csv"),
+            parse_dates=["time"],
+            index_col="time",
+        ).tz_convert(None)
+        mapping["acoustic"] = acoustic.to_xarray()
+
+    return datatree.DataTree.from_dict(mapping)
 
 
 def open_copernicus_catalog(cat):

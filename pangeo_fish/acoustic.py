@@ -187,6 +187,9 @@ def emission_probability(tag, grid, buffer_size, nondetections="mask"):
     emission : xarray.Dataset
         The resulting emission probability maps.
     """
+    if "acoustic" not in tag:
+        return xr.Dataset()
+
     weights = (
         count_detections(
             tag["acoustic"].to_dataset(),
