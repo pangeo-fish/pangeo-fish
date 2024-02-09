@@ -179,3 +179,26 @@ def open_copernicus_catalog(cat):
     )
 
     return ds
+
+
+def save_trajectories(traj, root, format="geoparquet"):
+    from .tracks import to_dataframe
+
+    converters = {
+        "geoparquet": lambda x: x.drop(columns="traj_id"),
+        "parquet": to_dataframe,
+    }
+    converter = converters.get(format)
+    if converter is None:
+        raise ValueError(f"unknown format: {format!r}")
+
+    trajectories = getattr(traj, "trajectories", [traj])
+
+    fs, _ = fsspec.core.url_to_fs(root)
+    fs.mkdirs(root, exist_ok=True)
+
+    for traj in trajectories:
+        path = f"{root}/{traj.id}.parquet"
+
+        df = converter(traj.df)
+        df.to_parquet(path)

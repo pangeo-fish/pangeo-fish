@@ -22,10 +22,10 @@ def additional_quantities(traj, quantities):
     return pipe(traj.copy(), *funcs)
 
 
-def to_dataframe(traj):
-    gdf = traj.df
-
+def to_dataframe(gdf):
     coords = gdf.geometry.get_coordinates().rename(
         columns={"x": "longitude", "y": "latitude"}
     )
-    return gdf.merge(coords, left_index=True, right_index=True).drop(columns="geometry")
+    return gdf.merge(coords, left_index=True, right_index=True).drop(
+        columns=["geometry", "traj_id"]
+    )
