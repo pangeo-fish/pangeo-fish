@@ -3,7 +3,7 @@ channels:
 dependencies:
   # development
   - python=3.11
-  - jupyterlab
+  - jupyterlab=3.*
   - ipython
   - ipykernel
   - graphviz
@@ -22,6 +22,7 @@ dependencies:
   - cf_xarray
   - pint-xarray
   # general computing
+  - blas=*=mkl
   - flox
   - xarray
   - xarray-datatree
@@ -57,4 +58,7 @@ dependencies:
   - git
   - pip
   - pip:
+      - dask-hpcconfig
+      - xarray[complete]
+      - xdggs
       - git+https://github.com/iaocea/xarray-healpy
