@@ -52,6 +52,7 @@ def single_pass(pdf, sigma, initial_probability, mask=None, *, truncate=4.0):
     posterior_probabilities : array-like
         The probability of the hidden state given the observation.
     """
+    import gc
     n_max = pdf.shape[0]
 
     normalizations = []
@@ -76,11 +77,14 @@ def single_pass(pdf, sigma, initial_probability, mask=None, *, truncate=4.0):
 
         predictions.append(prediction)
         posterior_probabilities.append(normalized)
+    gc.collect()
+    print('index',index)
 
     normalizations_ = np.stack(normalizations, axis=0)
     posterior_probabilities_ = np.stack(posterior_probabilities, axis=0)
     predictions_ = np.stack(predictions, axis=0)
 
+    gc.collect()
     return predictions_, normalizations_, posterior_probabilities_
 
 
@@ -155,6 +159,7 @@ def forward(
     *,
     truncate=4.0,
 ):
+    import gc
     """single pass (forwards) of the spatial HMM filter
 
     Parameters
@@ -194,7 +199,12 @@ def forward(
 
         normalized = updated / np.sum(updated)
         states.append(normalized)
-
+        if index % 1000 == 0:
+            print("This is the iforward",index)
+            gc.collect()
+    gc.collect()
+        #print('index in forward',index)
+    print('in forward gc.collected')
     return np.stack(predictions, axis=0), np.stack(states, axis=0)
 
 
@@ -206,6 +216,7 @@ def backward(
     *,
     truncate=4.0,
 ):
+    import gc
     n_max = states.shape[0]
     eps = 2.204e-16**20
 
@@ -221,7 +232,11 @@ def backward(
         updated_normalized = updated / np.sum(updated)
 
         smoothed.append(updated_normalized)
-
+        if index % 1000 == 0:
+            print("This is the i",index)
+            gc.collect()
+    gc.collect()
+    print('in backward gc collected just before the np stack')
     return np.stack(backward_predictions[::-1], axis=0), np.stack(
         smoothed[::-1], axis=0
     )
@@ -235,6 +250,7 @@ def forward_backward(
     *,
     truncate=4.0,
 ):
+    import gc
     """double pass (forwards and backwards) of the spatial HMM filter
 
     Parameters
@@ -256,6 +272,7 @@ def forward_backward(
         A measure of how well the model parameter fits the data.
     """
 
+    print('in forward_backward:before forward_prediction')
     forward_predictions, forward_states = forward(
         emission=emission,
         sigma=sigma,
@@ -263,11 +280,18 @@ def forward_backward(
         mask=mask,
         truncate=truncate,
     )
-    backwards_predictions, backwards_states = backward(
+    gc.collect()
+    print('in forward_backward:before backward_prediction')
+#    backwards_predictions, backwards_states = backward(
+    _, backwards_states = backward(
         states=forward_states,
         predictions=forward_predictions,
         sigma=sigma,
         mask=mask,
         truncate=truncate,
     )
+    forward_predictions=None 
+    forward_states=None 
+    gc.collect()
+    print('in forward_backward:after backward_prediction after collect')
     return backwards_states

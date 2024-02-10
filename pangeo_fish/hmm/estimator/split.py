@@ -128,6 +128,7 @@ class EagerScoreEstimator:
             raise ValueError("unset sigma, cannot run the filter")
 
         def _algorithm(emission, mask, initial, *, sigma, truncate):
+            import gc
             backward_state = forward_backward(
                 emission=emission,
                 sigma=sigma,
@@ -135,6 +136,8 @@ class EagerScoreEstimator:
                 initial_probability=initial,
                 truncate=truncate,
             )
+            gc.collect()
+            print( 'gc.collect: in _forward_backward_algorithm:_algorithm, after backward_state')
 
             return backward_state
 
@@ -149,6 +152,8 @@ class EagerScoreEstimator:
             spatial_dims,
         ]
 
+        print( 'in _forward_backward_algorithm:before apply u_func')
+
         return xr.apply_ufunc(
             _algorithm,
             X.pdf,
@@ -161,6 +166,7 @@ class EagerScoreEstimator:
         )
 
     def predict_proba(self, X, *, spatial_dims=None, temporal_dims=None):
+        import gc
         """predict the state probabilities
 
         This is done by applying the forward-backward algorithm to the data.
@@ -185,6 +191,7 @@ class EagerScoreEstimator:
         state = self._forward_backward_algorithm(
             X.fillna(0), spatial_dims=spatial_dims, temporal_dims=temporal_dims
         )
+        gc.collect()
         return state.rename("states")
 
     def score(self, X, *, spatial_dims=None, temporal_dims=None):
