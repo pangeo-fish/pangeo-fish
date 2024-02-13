@@ -176,6 +176,7 @@ def open_copernicus_catalog(cat):
                 ),
             }
         )
+        .chunk({"lat": -1, "lon": -1})
     )
 
     return ds
