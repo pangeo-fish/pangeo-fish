@@ -153,30 +153,30 @@ def open_copernicus_catalog(cat):
     ds : xarray.Dataset
         The assembled dataset.
     """
+    chunks = {"lat": -1, "lon": -1, "time": 21}
     ds = (
-        cat.data(type="TEM")
+        cat.data(type="TEM", chunks=chunks)
         .to_dask()
         .rename({"thetao": "TEMP"})
         .get(["TEMP"])
         .assign_coords({"time": lambda ds: ds["time"].astype("datetime64[ns]")})
         .assign(
             {
-                "XE": cat.data(type="SSH").to_dask().get("zos"),
+                "XE": cat.data(type="SSH", chunks=chunks).to_dask().get("zos"),
                 "H0": (
-                    cat.data_tmp(type="mdt")
+                    cat.data_tmp(type="mdt", chunks=chunks)
                     .to_dask()
                     .get("deptho")
                     .rename({"latitude": "lat", "longitude": "lon"})
                 ),
                 "mask": (
-                    cat.data_tmp(type="mdt")
+                    cat.data_tmp(type="mdt", chunks=chunks)
                     .to_dask()
                     .get("mask")
                     .rename({"latitude": "lat", "longitude": "lon"})
                 ),
             }
         )
-        .chunk({"lat": -1, "lon": -1})
     )
 
     return ds
