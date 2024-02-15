@@ -113,18 +113,19 @@ def open_tag(root, name, storage_options=None):
 
     metadata = json.load(mapper.dirfs.open(f"{name}/metadata.json"))
 
-    stations = pd.read_csv(
-        mapper.dirfs.open("stations.csv"),
-        parse_dates=["deploy_time", "recover_time"],
-        index_col="deployment_id",
-    ).pipe(tz_convert, {"deploy_time": None, "recover_time": None})
-
     mapping = {
         "/": xr.Dataset(attrs=metadata),
-        "stations": stations.to_xarray(),
         "dst": dst.to_xarray(),
         "tagging_events": tagging_events.to_xarray(),
     }
+
+    if mapper.dirfs.exists(f"{name}/stations.csv"):
+        stations = pd.read_csv(
+            mapper.dirfs.open("stations.csv"),
+            parse_dates=["deploy_time", "recover_time"],
+            index_col="deployment_id",
+        ).pipe(tz_convert, {"deploy_time": None, "recover_time": None})
+        mapping["stations"] = stations.to_xarray()
 
     if mapper.dirfs.exists(f"{name}/acoustic.csv"):
         acoustic = pd.read_csv(
