@@ -104,3 +104,23 @@ For example:
 ```json
 { "pit_tag_id": "A19124", "acoustic_tag_id": "OPI-372" }
 ```
+
+## `stations.csv`: deployment data of the acoustic receivers
+
+This file contains deployment information about acoustic receivers.
+
+If there are no acoustic detections, it may be removed.
+
+It must contain at least 8 columns: `deployment_id` and `station_name`, plus `deploy_time`, `deploy_longitude`, `deploy_latitude`, `recover_time`, `recover_longitude`, and `recover_latitude`.
+
+It may contain arbitrary additional columns.
+
+If the recover position is unknown or the same as the deployment position, it may be set to `NA`.
+
+For example:
+
+```csv
+deployment_id,station_name,deploy_time,deploy_longitude,deploy_latitude,recover_time,recover_longitude,recover_latitude
+28689,ancrage_mahuda,2022-06-13T06:14:00Z,-5.10307,48.44993,2022-06-20T14:07:00Z,NA,NA
+28690,baie_de_lampaul,2022-06-13T05:51:00Z,-5.112455,48.44689,2022-06-20T14:00:00Z,NA,NA
+```
