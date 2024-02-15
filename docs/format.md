@@ -69,9 +69,10 @@ release,2023-07-13T13:21:57Z,48.21842,-4.08578
 fish_death,2023-09-17T05:21:07Z,NA,NA
 ```
 
-## `acoustic.csv`: Acoustic detections
+## `acoustic.csv`: acoustic detections
 
-This file contains information about acoustic detections.
+This file contains information about acoustic detections. If there are
+no acoustic detections, it may be removed entirely or just contain the header (the column names).
 
 It must contain at least two columns: `deployment_id` and `time`.
 
