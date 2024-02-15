@@ -6,6 +6,14 @@ from tlz.functoolz import curry, do, pipe
 from .functoolz import lookup
 
 
+def _pipe(self, f, *args, **kwargs):
+    return f(self, *args, **kwargs)
+
+
+mpd.Trajectory.pipe = _pipe
+mpd.TrajectoryCollection.pipe = _pipe
+
+
 def to_trajectory(ds, name, crs=None):
     return ds.to_pandas().pipe(
         mpd.Trajectory, traj_id=name, x="longitude", y="latitude"
