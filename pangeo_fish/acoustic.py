@@ -238,8 +238,10 @@ def emission_probability(tag, grid, buffer_size, nondetections="mask"):
     return (
         maps.weighted(weights)
         .sum(dim="deployment_id")
+        .transpose("time", "y", "x")
         .where((weights != 0).any(dim="deployment_id"), fill_map)
         .pipe(utils.normalize, dim=["x", "y"])
         .assign_attrs({"buffer_size": buffer_size.m_as("m")})
+        .where(grid["mask"])
         .to_dataset(name="acoustic")
     )
