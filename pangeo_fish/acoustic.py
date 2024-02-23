@@ -6,6 +6,12 @@ from tlz.itertoolz import first
 from xarray_healpy.conversions import geographic_to_cartesian
 from xarray_healpy.operations import buffer_points
 
+from pangeo_fish.healpy import (
+    astronomic_to_cartesian,
+    astronomic_to_cell_ids,
+    geographic_to_astronomic,
+)
+
 from . import utils
 from .cf import bounds_to_bins
 
@@ -140,16 +146,30 @@ def select_detections_by_tag_id(database, tag_id):
     )
 
 
-def deployment_reception_masks(stations, grid, buffer_size):
-    cell_ids = grid["cell_ids"]
-    rot = {"lat": cell_ids.attrs["lat"], "lon": cell_ids.attrs["lon"]}
+def deployment_reception_masks(stations, grid, buffer_size, method="recompute"):
+    rot = {"lat": grid["cell_ids"].attrs["lat"], "lon": grid["cell_ids"].attrs["lon"]}
+    if method == "recompute":
+        phi, theta = geographic_to_astronomic(
+            lon=grid["longitude"], lat=grid["latitude"], rot=rot
+        )
 
-    positions = geographic_to_cartesian(
-        lon=stations["deploy_longitude"],
-        lat=stations["deploy_latitude"],
-        rot=rot,
-        dim="deployment_id",
-    )
+        cell_ids = astronomic_to_cell_ids(
+            nside=grid.attrs["nside"], theta=theta, phi=phi
+        ).assign_attrs(grid["cell_ids"].attrs)
+
+        phi, theta = geographic_to_astronomic(
+            lon=stations["deploy_longitude"], lat=stations["deploy_latitude"], rot=rot
+        )
+        positions = astronomic_to_cartesian(theta=theta, phi=phi, dim="deployment_id")
+    elif method == "keep":
+        cell_ids = grid["cell_ids"]
+
+        positions = geographic_to_cartesian(
+            lon=stations["deploy_longitude"],
+            lat=stations["deploy_latitude"],
+            rot=rot,
+            dim="deployment_id",
+        )
 
     masks = buffer_points(
         cell_ids,
@@ -160,7 +180,7 @@ def deployment_reception_masks(stations, grid, buffer_size):
         intersect=True,
     )
 
-    return masks
+    return masks.drop_vars(["cell_ids"])
 
 
 def emission_probability(tag, grid, buffer_size, nondetections="mask"):
@@ -201,7 +221,9 @@ def emission_probability(tag, grid, buffer_size, nondetections="mask"):
     )
 
     maps = deployment_reception_masks(
-        tag["stations"].to_dataset(), grid[["cell_ids"]], buffer_size
+        tag["stations"].to_dataset(),
+        grid[["cell_ids", "longitude", "latitude"]],
+        buffer_size,
     )
 
     if nondetections == "ignore":
