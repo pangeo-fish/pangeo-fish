@@ -183,7 +183,9 @@ def deployment_reception_masks(stations, grid, buffer_size, method="recompute"):
     return masks.drop_vars(["cell_ids"])
 
 
-def emission_probability(tag, grid, buffer_size, nondetections="mask"):
+def emission_probability(
+    tag, grid, buffer_size, nondetections="mask", cell_ids="recompute"
+):
     """construct emission probability maps from acoustic detections
 
     Parameters
@@ -201,6 +203,11 @@ def emission_probability(tag, grid, buffer_size, nondetections="mask"):
 
         - "mask": set the buffer around stations without detections to `0`.
         - "ignore": all valid pixels are equally probable.
+    cell_ids : {"recompute", "keep"}, default: "recompute"
+        How to deal with model cell ids for the computation of reception masks.
+
+        - "keep": use the cell ids given by the model. This is the more correct method.
+        - "recompute": recompute the cell ids based on the rotated lat / lon coords.
 
     Returns
     -------
@@ -224,6 +231,7 @@ def emission_probability(tag, grid, buffer_size, nondetections="mask"):
         tag["stations"].to_dataset(),
         grid[["cell_ids", "longitude", "latitude"]],
         buffer_size,
+        method=cell_ids,
     )
 
     if nondetections == "ignore":
