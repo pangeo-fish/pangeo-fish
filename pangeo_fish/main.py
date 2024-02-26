@@ -1,7 +1,10 @@
+import json
 import pathlib
 
 import pint_xarray
 import rich_click as click
+
+from pangeo_fish.cluster import create_cluster
 
 ureg = pint_xarray.unit_registry
 
@@ -75,8 +78,52 @@ def prepare(parameters, scratch_root, dask_cluster):
 
 
 @main.command("estimate", short_help="estimate the model parameter")
-def estimate():
-    pass
+@click.option(
+    "--compute/--no-compute",
+    type=bool,
+    default=True,
+    help="load the emission pdf into memory before the parameter estimation",
+)
+@click.argument("parameters", type=click.File(mode="r"))
+@click.argument("runtime_config", type=click.File(mode="r"))
+def estimate(parameters, runtime_config, compute):
+    import xarray as xr
+
+    from pangeo_fish.hmm.estimator import EagerScoreEstimator
+    from pangeo_fish.hmm.optimize import EagerBoundsSearch
+    from pangeo_fish.pdf import combine_emission_pdf
+
+    runtime_config = json.load(runtime_config)
+    parameters = json.load(parameters, object_hook=decode_parameters)
+    target_root = construct_target_root(runtime_config, parameters)
+
+    with create_cluster(**runtime_config["dask-cluster"]) as client:
+        print(f"dashboard link: {client.dashboard_link}", flush=True)
+
+        emission = (
+            xr.open_dataset(
+                f"{target_root}/emission.zarr",
+                engine="zarr",
+                chunks={"x": -1, "y": -1, "time": 1},
+                inline_array=True,
+            )
+            .pipe(combine_emission_pdf)
+            .pipe(maybe_compute, compute=compute)
+        )
+
+        # TODO: make this estimator and optimizer configurable somehow
+        estimator = EagerScoreEstimator()
+        optimizer = EagerBoundsSearch(
+            estimator,
+            (1e-4, emission.attrs["max_sigma"]),
+            optimizer_kwargs={"disp": 3, "xtol": parameters.get("tolerance", 0.01)},
+        )
+
+        optimized = optimizer.fit(emission)
+
+    params = optimized.to_dict()
+    with target_root.joinpath("parameters.json").open(mode="w") as f:
+        json.dump(params, f)
 
 
 @main.command("decode", short_help="produce the model output")
