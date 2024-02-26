@@ -28,6 +28,9 @@ dynamic = ["version"]
 [project.urls]
 "Homepage" = "https://github.com/iaocea/pangeo-fish"
 
+[project.scripts]
+pangeo-fish = "pangeo_fish.main:main"
+
 [tool.setuptools]
 packages = ["pangeo_fish"]
 
