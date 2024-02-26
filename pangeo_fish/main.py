@@ -6,6 +6,8 @@ import rich_click as click
 
 from pangeo_fish.io import open_tag
 
+from .cluster import create_cluster
+
 ureg = pint_xarray.unit_registry
 
 click.rich_click.USE_MARKDOWN = True
@@ -20,26 +22,6 @@ def decode_parameters(f):
         return ureg.Quantity(obj["magnitude"], obj["units"])
 
     return json.load(f, object_hook=decoder)
-
-
-def connect_to_cluster(cluster_config):
-    if cluster_config == "local":
-        from distributed import LocalCluster
-
-        cluster = LocalCluster()
-
-        return cluster.get_client()
-    elif is_scheduler_address(cluster_config):
-        from distributed import Client
-
-        return Client(cluster_config)
-    elif "/" in cluster_config:
-        raise NotImplementedError("not yet supported")
-    else:
-        import dask_hpcconfig
-
-        cluster = dask_hpcconfig.cluster(cluster_config)
-        return cluster.get_client()
 
 
 @click.group()
@@ -62,7 +44,7 @@ def main():
 @click.argument("scratch_root", type=click.Path(path_type=pathlib.Path, writable=True))
 def prepare(parameters, scratch_root, dask_cluster):
     """transform the input data into a set of emission parameters"""
-    client = connect_to_cluster(dask_cluster)
+    client = create_cluster(dask_cluster)
 
     decoded = decode_parameters(parameters)
 
