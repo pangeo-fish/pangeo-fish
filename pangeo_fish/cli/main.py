@@ -4,7 +4,7 @@ import pathlib
 import pint_xarray
 import rich_click as click
 
-from pangeo_fish.cluster import create_cluster
+from pangeo_fish.cli.cluster import create_cluster
 
 ureg = pint_xarray.unit_registry
 
