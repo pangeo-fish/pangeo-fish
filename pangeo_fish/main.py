@@ -44,6 +44,13 @@ def construct_target_root(runtime_config, parameters):
     return target_root
 
 
+def maybe_compute(ds, compute):
+    if not compute:
+        return ds
+
+    return ds.compute()
+
+
 @click.group()
 def main():
     """Run the pangeo-fish model."""
