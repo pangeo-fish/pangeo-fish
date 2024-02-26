@@ -1,12 +1,7 @@
-import json
 import pathlib
 
 import pint_xarray
 import rich_click as click
-
-from pangeo_fish.io import open_tag
-
-from .cluster import create_cluster
 
 ureg = pint_xarray.unit_registry
 
@@ -41,16 +36,7 @@ def main():
 @click.argument("scratch_root", type=click.Path(path_type=pathlib.Path, writable=True))
 def prepare(parameters, scratch_root, dask_cluster):
     """transform the input data into a set of emission parameters"""
-    client = create_cluster(dask_cluster)
-
-    decoded = json.load(parameters, object_hook=decode_parameters)
-
-    tag_root = decoded["paths"]["tag_root"]
-    catalog_url = decoded["paths"]["catalog_url"]
-
-    parameters = decoded["parameters"]
-
-    tag = open_tag(tag_root, parameters["tag_name"])
+    pass
 
 
 @main.command("estimate", short_help="estimate the model parameter")
