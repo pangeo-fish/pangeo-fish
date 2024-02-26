@@ -4,7 +4,7 @@ scheduler_address_re = re.compile(r"tcp://\[?[0-9a-f:.]+\]?:[0-9]+")
 scheme_re = re.compile(r"(?P<type>[^:]+):(?P<data>.+)")
 
 
-def create_cluster(spec, *, scale=None, **kwargs):
+def create_cluster(spec, *, scale=None, additional_kwargs=None):
     """create a cluster from a spec and return a client
 
     Parameters
@@ -18,17 +18,20 @@ def create_cluster(spec, *, scale=None, **kwargs):
         - `dask-hpcconfig:<name>`
     scale : int or mapping, optional
         Scale the cluster after creation. Not allowed with scheduler addresses.
-    **kwargs
+    additional_kwargs : mapping, optional
         Additional keyword arguments passed to the cluster
     """
+    if additional_kwargs is None:
+        additional_kwargs = {}
+
     if spec == "local":
         from distributed import LocalCluster
 
-        cluster = LocalCluster(**kwargs)
+        cluster = LocalCluster(**additional_kwargs)
     elif scheduler_address_re.match(spec) is not None:
         from distributed import Client
 
-        client = Client(spec, **kwargs)
+        client = Client(spec, **additional_kwargs)
 
         if scale is not None:
             raise ValueError(
@@ -47,7 +50,7 @@ def create_cluster(spec, *, scale=None, **kwargs):
         elif groups["type"] == "dask-hpcconfig":
             import dask_hpcconfig
 
-            cluster = dask_hpcconfig.cluster(groups["data"], **kwargs)
+            cluster = dask_hpcconfig.cluster(groups["data"], **additional_kwargs)
         else:
             raise ValueError("unknown cluster scheme")
 
