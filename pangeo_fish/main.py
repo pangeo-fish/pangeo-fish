@@ -14,14 +14,11 @@ click.rich_click.USE_MARKDOWN = True
 click.rich_click.SHOW_ARGUMENTS = True
 
 
-def decode_parameters(f):
-    def decoder(obj):
-        if list(obj) != ["magnitude", "units"]:
-            return obj
+def decode_parameters(obj):
+    if list(obj) != ["magnitude", "units"]:
+        return obj
 
-        return ureg.Quantity(obj["magnitude"], obj["units"])
-
-    return json.load(f, object_hook=decoder)
+    return ureg.Quantity(obj["magnitude"], obj["units"])
 
 
 @click.group()
@@ -46,7 +43,7 @@ def prepare(parameters, scratch_root, dask_cluster):
     """transform the input data into a set of emission parameters"""
     client = create_cluster(dask_cluster)
 
-    decoded = decode_parameters(parameters)
+    decoded = json.load(parameters, object_hook=decode_parameters)
 
     tag_root = decoded["paths"]["tag_root"]
     catalog_url = decoded["paths"]["catalog_url"]
