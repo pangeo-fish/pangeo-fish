@@ -87,7 +87,7 @@ def estimate(parameters, runtime_config, cluster_definition, compute):
             .pipe(maybe_compute, compute=compute)
         )
 
-        # TODO: make this estimator and optimizer configurable somehow
+        # TODO: make estimator and optimizer configurable somehow
         estimator = EagerScoreEstimator()
         optimizer = EagerBoundsSearch(
             estimator,
