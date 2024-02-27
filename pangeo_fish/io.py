@@ -147,6 +147,9 @@ def open_copernicus_catalog(cat, chunks=None):
     ----------
     cat : intake.Catalog
         The pre-opened intake catalog
+    chunks : mapping, optional
+        The initial chunk size. Should be multiples of the on-disk chunk sizes. By
+        default, the chunksizes are ``{"lat": -1, "lon": -1, "depth": 11, "time": 8}``
 
     Returns
     -------
