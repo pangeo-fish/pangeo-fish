@@ -51,6 +51,7 @@ def prepare(parameters, scratch_root, dask_cluster):
 
 
 @main.command("estimate", short_help="estimate the model parameter")
+@click.option("--cluster-definition", type=click.File(mode="r"))
 @click.option(
     "--compute/--no-compute",
     type=bool,
@@ -59,7 +60,7 @@ def prepare(parameters, scratch_root, dask_cluster):
 )
 @click.argument("parameters", type=click.File(mode="r"))
 @click.argument("runtime_config", type=click.File(mode="r"))
-def estimate(parameters, runtime_config, compute):
+def estimate(parameters, runtime_config, cluster_definition, compute):
     import xarray as xr
 
     from pangeo_fish.hmm.estimator import EagerScoreEstimator
@@ -68,9 +69,11 @@ def estimate(parameters, runtime_config, compute):
 
     runtime_config = json.load(runtime_config)
     parameters = json.load(parameters, object_hook=decode_parameters)
+    cluster_definition = json.load(cluster_definition)
+
     target_root = construct_target_root(runtime_config, parameters)
 
-    with create_cluster(**runtime_config["dask-cluster"]) as client:
+    with create_cluster(**cluster_definition) as client:
         print(f"dashboard link: {client.dashboard_link}", flush=True)
 
         emission = (
