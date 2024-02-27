@@ -137,7 +137,7 @@ def open_tag(root, name, storage_options=None):
     return datatree.DataTree.from_dict(mapping)
 
 
-def open_copernicus_catalog(cat):
+def open_copernicus_catalog(cat, chunks=None):
     """assemble the given intake catalog into a dataset
 
     .. warning::
@@ -153,7 +153,9 @@ def open_copernicus_catalog(cat):
     ds : xarray.Dataset
         The assembled dataset.
     """
-    chunks = {"lat": -1, "lon": -1, "time": 21}
+    if chunks is None:
+        chunks = {"lat": -1, "lon": -1, "time": 21}
+
     ds = (
         cat.data(type="TEM", chunks=chunks)
         .to_dask()
