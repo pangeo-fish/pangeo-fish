@@ -244,11 +244,12 @@ class EagerScoreEstimator:
             - ``"viterbi"``: use the viterbi algorithm to determine the most probable states
         additional_quantities : None or list of str, default: ["distance", "velocity"]
             Additional quantities to compute from the decoded tracks. Use ``None`` or an
-            empty list to not compute any quantities.
+            empty list to not compute anything.
 
             Possible values are:
             - "distance": distance to the previous track point in ``[km]``
-            - "velocity": velocity for moving from the previous to the current track point in ``[km/h]``
+            - "speed": average speed for the movement from the previous to the current
+              track point, in ``[km/h]``
         spatial_dims : list of hashable, optional
             The spatial dimensions of the dataset.
         temporal_dims : list of hashable, optional
