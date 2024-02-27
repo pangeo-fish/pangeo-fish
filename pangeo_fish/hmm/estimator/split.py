@@ -272,11 +272,6 @@ class EagerScoreEstimator:
             "viterbi2": compose_left(first, curry(viterbi2, sigma=self.sigma)),
         }
 
-        # check modes available
-        # decode
-        # to_trajectory
-        # convert to TrajectoryCollection / extract single trajectory
-
         if not isinstance(mode, list):
             modes = [mode]
         else:
