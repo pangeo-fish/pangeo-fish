@@ -80,7 +80,7 @@ def estimate(parameters, runtime_config, cluster_definition, compute):
             xr.open_dataset(
                 f"{target_root}/emission.zarr",
                 engine="zarr",
-                chunks={"x": -1, "y": -1, "time": 1},
+                chunks={"x": -1, "y": -1},
                 inline_array=True,
             )
             .pipe(combine_emission_pdf)
