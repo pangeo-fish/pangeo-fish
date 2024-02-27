@@ -154,7 +154,7 @@ def open_copernicus_catalog(cat, chunks=None):
         The assembled dataset.
     """
     if chunks is None:
-        chunks = {"lat": -1, "lon": -1, "time": 21}
+        chunks = {"lat": -1, "lon": -1, "depth": 11, "time": 8}
 
     ds = (
         cat.data(type="TEM", chunks=chunks)
