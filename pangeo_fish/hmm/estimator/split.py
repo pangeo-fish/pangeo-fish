@@ -6,8 +6,7 @@ import xarray as xr
 from tlz.functoolz import compose_left, curry, pipe
 from tlz.itertoolz import first
 
-from ... import utils
-from ...tracks import to_trajectory
+from ... import tracks, utils
 from ..decode import mean_track, modal_track, viterbi, viterbi2
 from ..filter import forward, forward_backward, score
 
@@ -223,6 +222,7 @@ class EagerScoreEstimator:
         spatial_dims=None,
         temporal_dims=None,
         progress=False,
+        additional_quantities=["distance", "velocity"],
     ):
         """decode the state sequence from the selected model and the data
 
@@ -237,11 +237,21 @@ class EagerScoreEstimator:
         states : Dataset, optional
             The precomputed state probability maps. The dataset should contain these variables:
             - `states`, the state probabilities
-        mode : {"mean", "mode", "viterbi"}, default: "viterbi"
+        mode : str or list of str, default: "viterbi"
             The decoding method. Can be one of
             - ``"mean"``: use the centroid of the state probabilities as decoded state
             - ``"mode"``: use the maximum of the state probabilities as decoded state
             - ``"viterbi"``: use the viterbi algorithm to determine the most probable states
+
+            If a list of methods is given, decode using all methods in sequence.
+        additional_quantities : None or list of str, default: ["distance", "velocity"]
+            Additional quantities to compute from the decoded tracks. Use ``None`` or an
+            empty list to not compute anything.
+
+            Possible values are:
+            - "distance": distance to the previous track point in ``[km]``
+            - "speed": average speed for the movement from the previous to the current
+              track point, in ``[km/h]``
         spatial_dims : list of hashable, optional
             The spatial dimensions of the dataset.
         temporal_dims : list of hashable, optional
@@ -264,11 +274,6 @@ class EagerScoreEstimator:
             "viterbi": compose_left(first, curry(viterbi, sigma=self.sigma)),
             "viterbi2": compose_left(first, curry(viterbi2, sigma=self.sigma)),
         }
-
-        # check modes available
-        # decode
-        # to_trajectory
-        # convert to TrajectoryCollection / extract single trajectory
 
         if not isinstance(mode, list):
             modes = [mode]
@@ -298,7 +303,8 @@ class EagerScoreEstimator:
                 [X, states],
                 decoders.get(mode),
                 lambda x: x.compute(),
-                curry(to_trajectory, name=mode),
+                curry(tracks.to_trajectory, name=mode),
+                curry(tracks.additional_quantities, quantities=additional_quantities),
             )
             for mode in maybe_show_progress(modes)
         ]
