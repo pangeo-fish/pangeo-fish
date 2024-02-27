@@ -237,11 +237,13 @@ class EagerScoreEstimator:
         states : Dataset, optional
             The precomputed state probability maps. The dataset should contain these variables:
             - `states`, the state probabilities
-        mode : {"mean", "mode", "viterbi"}, default: "viterbi"
+        mode : str or list of str, default: "viterbi"
             The decoding method. Can be one of
             - ``"mean"``: use the centroid of the state probabilities as decoded state
             - ``"mode"``: use the maximum of the state probabilities as decoded state
             - ``"viterbi"``: use the viterbi algorithm to determine the most probable states
+
+            If a list of methods is given, decode using all methods in sequence.
         additional_quantities : None or list of str, default: ["distance", "velocity"]
             Additional quantities to compute from the decoded tracks. Use ``None`` or an
             empty list to not compute anything.
