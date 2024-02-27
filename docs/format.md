@@ -121,6 +121,6 @@ For example:
 
 ```csv
 deployment_id,station_name,deploy_time,deploy_longitude,deploy_latitude,recover_time,recover_longitude,recover_latitude
-28689,ancrage_mahuda,2022-06-13T06:14:00Z,-5.10307,48.44993,2022-06-20T14:07:00Z,NA,NA
-28690,baie_de_lampaul,2022-06-13T05:51:00Z,-5.112455,48.44689,2022-06-20T14:00:00Z,NA,NA
+12345,station_1,2022-06-13T06:14:00Z,-4.12345,49.56789,2022-06-20T14:07:00Z,NA,NA
+12348,station_2,2022-06-13T05:51:00Z,-3.34567,46.23456,2022-06-20T14:00:00Z,NA,NA
 ```
