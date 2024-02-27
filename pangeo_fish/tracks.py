@@ -21,6 +21,9 @@ def to_trajectory(ds, name, crs=None):
 
 
 def additional_quantities(traj, quantities):
+    if not quantities:
+        return traj
+
     quantity_methods = {
         "speed": operator.methodcaller("add_speed", name="speed", units=("km", "h")),
         "distance": operator.methodcaller("add_distance", name="distance", units="km"),

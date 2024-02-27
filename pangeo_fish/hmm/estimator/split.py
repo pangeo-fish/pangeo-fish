@@ -6,8 +6,7 @@ import xarray as xr
 from tlz.functoolz import compose_left, curry, pipe
 from tlz.itertoolz import first
 
-from ... import utils
-from ...tracks import to_trajectory
+from ... import tracks, utils
 from ..decode import mean_track, modal_track, viterbi, viterbi2
 from ..filter import forward, forward_backward, score
 
@@ -223,6 +222,7 @@ class EagerScoreEstimator:
         spatial_dims=None,
         temporal_dims=None,
         progress=False,
+        additional_quantities=["distance", "velocity"],
     ):
         """decode the state sequence from the selected model and the data
 
@@ -242,6 +242,13 @@ class EagerScoreEstimator:
             - ``"mean"``: use the centroid of the state probabilities as decoded state
             - ``"mode"``: use the maximum of the state probabilities as decoded state
             - ``"viterbi"``: use the viterbi algorithm to determine the most probable states
+        additional_quantities : None or list of str, default: ["distance", "velocity"]
+            Additional quantities to compute from the decoded tracks. Use ``None`` or an
+            empty list to not compute any quantities.
+
+            Possible values are:
+            - "distance": distance to the previous track point in ``[km]``
+            - "velocity": velocity for moving from the previous to the current track point in ``[km/h]``
         spatial_dims : list of hashable, optional
             The spatial dimensions of the dataset.
         temporal_dims : list of hashable, optional
@@ -298,7 +305,8 @@ class EagerScoreEstimator:
                 [X, states],
                 decoders.get(mode),
                 lambda x: x.compute(),
-                curry(to_trajectory, name=mode),
+                curry(tracks.to_trajectory, name=mode),
+                curry(tracks.additional_quantities, quantities=additional_quantities),
             )
             for mode in maybe_show_progress(modes)
         ]
