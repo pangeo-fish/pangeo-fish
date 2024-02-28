@@ -1,5 +1,6 @@
 import json
 import pathlib
+from contextlib import nullcontext
 
 import pint_xarray
 import rich_click as click
@@ -73,14 +74,20 @@ def estimate(parameters, runtime_config, cluster_definition, compute):
 
     target_root = construct_target_root(runtime_config, parameters)
 
-    with create_cluster(**cluster_definition) as client:
+    if compute:
+        chunks = None
+        client = nullcontext()
+    else:
+        chunks = {"x": -1, "y": -1}
+        client = create_cluster(**cluster_definition)
         print(f"dashboard link: {client.dashboard_link}", flush=True)
 
+    with client:
         emission = (
             xr.open_dataset(
                 f"{target_root}/emission.zarr",
                 engine="zarr",
-                chunks={"x": -1, "y": -1},
+                chunks=chunks,
                 inline_array=True,
             )
             .pipe(combine_emission_pdf)
