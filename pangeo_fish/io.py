@@ -1,8 +1,28 @@
 import io
+import json
 import os
 
+import datatree
 import fsspec
 import pandas as pd
+import xarray as xr
+
+
+def tz_convert(df, timezones):
+    """Convert the timezone of columns in a dataframe
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        The dataframe.
+    timezones : mapping of str to str
+        The time zones to convert to per column.
+    """
+    new_columns = {
+        column: pd.Index(df[column]).tz_convert(tz) for column, tz in timezones.items()
+    }
+
+    return df.assign(**new_columns)
 
 
 def read_tag_database(url):
@@ -56,7 +76,71 @@ def read_detection_database(url):
     )
 
 
-def open_copernicus_catalog(cat):
+def open_tag(root, name, storage_options=None):
+    """open a tag
+
+    Parameters
+    ----------
+    root : str or fsspec.FSMap
+        The tag root. If not a mapper object, ``storage_options`` need
+        to contain the necessary access options.
+    name : str
+        The DST name of the tag.
+    storage_options : mapping, optional
+        The storage options required to open the mapper. Only used if ``root`` is a url.
+
+    Returns
+    -------
+    tag : datatree.DataTree
+        The opened tag with involved stations, acoustic tags, tag log and metadata
+    """
+    if isinstance(root, str):
+        if storage_options is None:
+            storage_options = {}
+        mapper = fsspec.get_mapper(root, **storage_options)
+    else:
+        mapper = root
+
+    dst = pd.read_csv(
+        mapper.dirfs.open(f"{name}/dst.csv"), parse_dates=["time"], index_col="time"
+    ).tz_convert(None)
+
+    tagging_events = pd.read_csv(
+        mapper.dirfs.open(f"{name}/tagging_events.csv"),
+        parse_dates=["time"],
+        index_col="event_name",
+    ).pipe(tz_convert, {"time": None})
+
+    metadata = json.load(mapper.dirfs.open(f"{name}/metadata.json"))
+
+    mapping = {
+        "/": xr.Dataset(attrs=metadata),
+        "dst": dst.to_xarray(),
+        "tagging_events": tagging_events.to_xarray(),
+    }
+
+    if mapper.dirfs.exists(f"{name}/stations.csv"):
+        stations = pd.read_csv(
+            mapper.dirfs.open("stations.csv"),
+            parse_dates=["deploy_time", "recover_time"],
+            index_col="deployment_id",
+        ).pipe(tz_convert, {"deploy_time": None, "recover_time": None})
+        if len(stations) > 0:
+            mapping["stations"] = stations.to_xarray()
+
+    if mapper.dirfs.exists(f"{name}/acoustic.csv"):
+        acoustic = pd.read_csv(
+            mapper.dirfs.open(f"{name}/acoustic.csv"),
+            parse_dates=["time"],
+            index_col="time",
+        ).tz_convert(None)
+        if len(acoustic) > 0:
+            mapping["acoustic"] = acoustic.to_xarray()
+
+    return datatree.DataTree.from_dict(mapping)
+
+
+def open_copernicus_catalog(cat, chunks=None):
     """assemble the given intake catalog into a dataset
 
     .. warning::
@@ -66,29 +150,35 @@ def open_copernicus_catalog(cat):
     ----------
     cat : intake.Catalog
         The pre-opened intake catalog
+    chunks : mapping, optional
+        The initial chunk size. Should be multiples of the on-disk chunk sizes. By
+        default, the chunksizes are ``{"lat": -1, "lon": -1, "depth": 11, "time": 8}``
 
     Returns
     -------
     ds : xarray.Dataset
         The assembled dataset.
     """
+    if chunks is None:
+        chunks = {"lat": -1, "lon": -1, "depth": 11, "time": 8}
+
     ds = (
-        cat.data(type="TEM")
+        cat.data(type="TEM", chunks=chunks)
         .to_dask()
         .rename({"thetao": "TEMP"})
         .get(["TEMP"])
         .assign_coords({"time": lambda ds: ds["time"].astype("datetime64[ns]")})
         .assign(
             {
-                "XE": cat.data(type="SSH").to_dask().get("zos"),
+                "XE": cat.data(type="SSH", chunks=chunks).to_dask().get("zos"),
                 "H0": (
-                    cat.data_tmp(type="mdt")
+                    cat.data_tmp(type="mdt", chunks=chunks)
                     .to_dask()
                     .get("deptho")
                     .rename({"latitude": "lat", "longitude": "lon"})
                 ),
                 "mask": (
-                    cat.data_tmp(type="mdt")
+                    cat.data_tmp(type="mdt", chunks=chunks)
                     .to_dask()
                     .get("mask")
                     .rename({"latitude": "lat", "longitude": "lon"})
@@ -98,3 +188,26 @@ def open_copernicus_catalog(cat):
     )
 
     return ds
+
+
+def save_trajectories(traj, root, format="geoparquet"):
+    from .tracks import to_dataframe
+
+    converters = {
+        "geoparquet": lambda x: x.drop(columns="traj_id"),
+        "parquet": to_dataframe,
+    }
+    converter = converters.get(format)
+    if converter is None:
+        raise ValueError(f"unknown format: {format!r}")
+
+    trajectories = getattr(traj, "trajectories", [traj])
+
+    fs, _ = fsspec.core.url_to_fs(root)
+    fs.mkdirs(root, exist_ok=True)
+
+    for traj in trajectories:
+        path = f"{root}/{traj.id}.parquet"
+
+        df = converter(traj.df)
+        df.to_parquet(path)

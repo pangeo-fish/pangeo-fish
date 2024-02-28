@@ -5,8 +5,8 @@ import xarray as xr
 def to_time_slice(times):
     subset = times.where(times.notnull(), drop=True)
 
-    min_ = subset.isel(events=0)
-    max_ = subset.isel(events=1)
+    min_ = subset.isel(event_name=0)
+    max_ = subset.isel(event_name=1)
 
     return slice(min_.data, max_.data)
 
