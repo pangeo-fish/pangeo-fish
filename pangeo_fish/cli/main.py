@@ -1,12 +1,13 @@
 import json
-import pathlib
 from contextlib import nullcontext
 
 import pint_xarray
 import rich_click as click
+import xarray as xr
 
 from pangeo_fish.cli.cluster import create_cluster
 from pangeo_fish.cli.path import construct_target_root
+from pangeo_fish.pdf import combine_emission_pdf
 
 ureg = pint_xarray.unit_registry
 
@@ -38,17 +39,93 @@ def main():
     "prepare",
     short_help="transform the data into something suitable for the model to run",
 )
-@click.option(
-    "--dask-cluster",
-    type=str,
-    default="local",
-    help="dask cluster to run on. May be 'local', a scheduler address, or the path to a file containing 'dask_jobqueue' parameters",
-)
+@click.option("--cluster-definition", type=click.File(mode="r"))
 @click.argument("parameters", type=click.File(mode="r"))
-@click.argument("scratch_root", type=click.Path(path_type=pathlib.Path, writable=True))
-def prepare(parameters, scratch_root, dask_cluster):
+@click.argument("runtime_config", type=click.File(mode="r"))
+def prepare(parameters, runtime_config, cluster_definition):
     """transform the input data into a set of emission parameters"""
-    pass
+    import intake
+
+    from pangeo_fish import acoustic
+    from pangeo_fish.cli.prepare import (
+        regrid,
+        subtract_data,
+        temperature_emission_matrices,
+    )
+    from pangeo_fish.io import open_copernicus_catalog, open_tag
+
+    target_root = runtime_config["target_root"]
+
+    with create_cluster(**cluster_definition) as client:
+        print(f"dashboard link: {client.dashboard_link}", flush=True)
+
+        # open tag
+        tag = open_tag(runtime_config["tag_root"], parameters["tag_name"])
+
+        # open model
+        cat = intake.open_catalog(runtime_config["catalog_url"])
+        model = open_copernicus_catalog(cat)
+
+        # compute differences
+        differences = subtract_data(tag, model, parameters)
+        differences.chunk({"time": 1, "lat": -1, "lon": -1}).to_zarr(
+            f"{target_root}/diff.zarr", mode="w", consolidated=True
+        )
+
+        # open back the diff
+        differences = (
+            xr.open_dataset(f"{target_root}/diff.zarr", engine="zarr", chunks={})
+            .pipe(lambda ds: ds.merge(ds[["latitude", "longitude"]].compute()))
+            .swap_dims({"lat": "yi", "lon": "xi"})
+            .drop_vars(["lat", "lon"])
+        )
+
+        counts = differences["diff"].count(["xi", "yi"]).compute()
+        if (counts == 0).any():
+            raise RuntimeError(
+                "some time slices are 0. Try rerunning the step or"
+                " checking the connection to the data server."
+            )
+
+        # regrid
+        regridded = regrid(differences, parameters)
+        regridded.chunk({"x": -1, "y": -1, "time": 1}).to_zarr(
+            f"{target_root}/diff-regridded.zarr",
+            mode="w",
+            consolidated=True,
+        )
+
+        # temperature emission matrices
+        differences = xr.open_dataset(
+            f"{target_root}/diff-regridded.zarr", engine="zarr", chunks={}
+        )
+
+        emission = temperature_emission_matrices(differences, tag, parameters)
+        emission.chunk({"x": -1, "y": -1, "time": 1}).to_zarr(
+            f"{target_root}/emission.zarr",
+            mode="w",
+            consolidated=True,
+        )
+
+        del differences
+
+        # acoustic emission matrices
+        emission = xr.open_dataset(
+            f"{target_root}/emission.zarr", engine="zarr", chunks={}
+        )
+        combined = emission.merge(
+            acoustic.emission_probability(
+                tag,
+                emission[["time", "cell_ids", "mask"]].compute(),
+                parameters["receiver_buffer"],
+            )
+        )
+
+        combined.chunk({"x": -1, "y": -1, "time": 1}).to_zarr(
+            f"{target_root}/emission-acoustic.zarr", mode="w", consolidated=True
+        )
+
+        del combined
 
 
 @main.command("estimate", short_help="estimate the model parameter")
@@ -62,11 +139,8 @@ def prepare(parameters, scratch_root, dask_cluster):
 @click.argument("parameters", type=click.File(mode="r"))
 @click.argument("runtime_config", type=click.File(mode="r"))
 def estimate(parameters, runtime_config, cluster_definition, compute):
-    import xarray as xr
-
     from pangeo_fish.hmm.estimator import EagerScoreEstimator
     from pangeo_fish.hmm.optimize import EagerBoundsSearch
-    from pangeo_fish.pdf import combine_emission_pdf
 
     runtime_config = json.load(runtime_config)
     parameters = json.load(parameters, object_hook=decode_parameters)
