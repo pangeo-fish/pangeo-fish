@@ -120,5 +120,6 @@ def plot_map(
         geo=geo,
         coastline=coastline,
         tiles=tiles,
+        cmap=cmap,
         **kwargs,
     )
