@@ -54,7 +54,11 @@ def prepare(parameters, runtime_config, cluster_definition):
     )
     from pangeo_fish.io import open_copernicus_catalog, open_tag
 
-    target_root = runtime_config["target_root"]
+    runtime_config = json.load(runtime_config)
+    parameters = json.load(parameters, object_hook=decode_parameters)
+    cluster_definition = json.load(cluster_definition)
+
+    target_root = construct_target_root(runtime_config, parameters)
 
     with create_cluster(**cluster_definition) as client:
         print(f"dashboard link: {client.dashboard_link}", flush=True)

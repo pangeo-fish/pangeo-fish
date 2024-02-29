@@ -2,7 +2,7 @@ import numpy as np
 import xarray as xr
 from xarray_healpy import HealpyGridInfo, HealpyRegridder
 
-from pangeo_fish.cf import bounds_to_bin
+from pangeo_fish.cf import bounds_to_bins
 from pangeo_fish.diff import diff_z
 from pangeo_fish.distributions import create_covariances, normal_at
 from pangeo_fish.grid import center_longitude
@@ -39,7 +39,7 @@ def subtract_data(tag, model, parameters):
         dim="time",
         bins=(
             reference_model.cf.add_bounds(["time"], output_dim="bounds")
-            .pipe(bounds_to_bin, bounds_dims="bounds")
+            .pipe(bounds_to_bins, bounds_dim="bounds")
             .get("time_bins")
         ),
         bin_dim="bincount",
