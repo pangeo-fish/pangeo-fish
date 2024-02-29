@@ -95,6 +95,16 @@ def open_copernicus_catalog(cat):
                 ),
             }
         )
+        .assign(
+            {
+                "dynamic_depth": lambda ds: (ds["depth"] + ds["XE"]).assign_attrs(
+                    {"units": "m", "positive": "down"}
+                ),
+                "dynamic_bathymetry": lambda ds: (ds["H0"] + ds["XE"]).assign_attrs(
+                    {"units": "m", "positive": "down"}
+                ),
+            }
+        )
     )
 
     return ds
