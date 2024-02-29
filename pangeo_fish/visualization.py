@@ -99,3 +99,26 @@ def create_frame(ds, figure, index, *args, **kwargs):
     figure.subplots_adjust(top=0.9, wspace=-0.9)
 
     return None, None
+
+
+def plot_map(
+    arr,
+    x="longitude",
+    y="latitude",
+    rasterize=True,
+    geo=True,
+    coastline="10m",
+    tiles=None,
+    cmap="cmo.amp",
+    **kwargs,
+):
+    """wrapper around `DataArray.hvplot.quadmesh`, with different defaults"""
+    return arr.hvplot.quadmesh(
+        x=x,
+        y=y,
+        rasterize=rasterize,
+        geo=geo,
+        coastline=coastline,
+        tiles=tiles,
+        **kwargs,
+    )
