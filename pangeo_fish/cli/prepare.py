@@ -57,7 +57,7 @@ def subtract_data(tag, model, parameters):
 
 def regrid(ds, parameters):
     grid = HealpyGridInfo(
-        resolution=int(np.log2(parameters["nside"])), rot=parameters["rot"]
+        level=int(np.log2(parameters["nside"])), rot=parameters["rot"]
     )
     target_grid = grid.target_grid(ds).pipe(center_longitude, 0)
 
@@ -121,6 +121,7 @@ def temperature_emission_matrices(ds, tag, parameters):
             tag["tagging_events"].ds.sel(event_name="fish_death"),
             sigma=parameters["recapture_std"],
         ),
+        "mask": ds["mask"],
     }
     if additional_variables["final"] is None:
         del additional_variables["final"]

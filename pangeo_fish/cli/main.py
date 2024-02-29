@@ -86,7 +86,7 @@ def prepare(parameters, runtime_config, cluster_definition):
 
         counts = differences["diff"].count(["xi", "yi"]).compute()
         if (counts == 0).any():
-            raise RuntimeError(
+            raise click.ClickException(
                 "some time slices are 0. Try rerunning the step or"
                 " checking the connection to the data server."
             )
