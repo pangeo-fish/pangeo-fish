@@ -3,6 +3,26 @@ import os
 
 import fsspec
 import pandas as pd
+import xarray as xr
+
+from pangeo_fish.dataset_utils import broadcast_variables
+
+
+def tz_convert(df, timezones):
+    """Convert the timezone of columns in a dataframe
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        The dataframe.
+    timezones : mapping of str to str
+        The time zones to convert to per column.
+    """
+    new_columns = {
+        column: pd.Index(df[column]).tz_convert(tz) for column, tz in timezones.items()
+    }
+
+    return df.assign(**new_columns)
 
 
 def read_tag_database(url):
@@ -105,6 +125,7 @@ def open_copernicus_catalog(cat):
                 ),
             }
         )
+        .pipe(broadcast_variables, {"lat": "latitude", "lon": "longitude"})
     )
 
     return ds
