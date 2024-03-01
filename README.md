@@ -24,7 +24,7 @@ The main dependencies are:
 Install them by creating a new `conda` environment:
 
 ```sh
-conda env create -n pangeo-fish -f ci/requirements/environment.yaml
+mamba env create -n pangeo-fish -f ci/requirements/environment.yaml
 conda activate pangeo-fish
 ```
 

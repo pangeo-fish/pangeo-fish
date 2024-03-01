@@ -2,34 +2,41 @@ channels:
   - conda-forge
 dependencies:
   # development
-  - python=3.11.*
-  - jupyterlab=3.*
+  - python=3.11
+  - jupyterlab
   - ipython
   - ipykernel
   - graphviz
   - python-graphviz
   # plotting
   - cmocean
-  - holoviews=1.16.2
-  - hvplot=0.8.3
-  - geoviews=1.10.0
+  - holoviews
+  - hvplot
+  - geoviews
   # I/O
-  - fsspec=2023.03.0
+  - fsspec
   - h5netcdf
-  - intake-xarray 
-  - zstandard 
+  - intake-xarray
+  - zstandard
   # units, bounds, and cf-conventions
   - cf_xarray
   - pint-xarray
   # general computing
   - flox
   - xarray
+  - xarray-datatree
   - more-itertools
   - scipy
+  - opt_einsum
+  - sparse
   # geographic manipulations
   - movingpandas
   - geopandas
   - cartopy
+  - healpy
+  - cdshealpix
+  - scikit-learn
+  - astropy
   # video processing
   - ffmpeg
   - xmovie
@@ -47,5 +54,7 @@ dependencies:
   - pre-commit
   # other utilities
   - jupyterlab-git
-  - git 
-  
+  - git
+  - pip
+  - pip:
+      - git+https://github.com/iaocea/xarray-healpy

@@ -60,6 +60,6 @@ def diff_z(model, tag, depth_threshold=0.8):
         dask="parallelized",
         output_dtypes=[model.dtypes["TEMP"]],
     )
-    original_units = model.TEMP.attrs["units"]
+    original_units = model["TEMP"].attrs["units"]
 
     return diff.assign_attrs({"units": original_units}).to_dataset(name="diff")
