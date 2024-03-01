@@ -61,6 +61,7 @@ def prepare(parameters, runtime_config, cluster_definition):
     cluster_definition = json.load(cluster_definition)
 
     target_root = construct_target_root(runtime_config, parameters)
+    target_root.mkdir(parents=True, exist_ok=True)
 
     with create_cluster(**cluster_definition) as client, console.status(
         "[bold blue]processing[/]"
