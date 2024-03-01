@@ -4,6 +4,7 @@ from contextlib import nullcontext
 import pint_xarray
 import rich_click as click
 import xarray as xr
+from rich.console import Console
 
 from pangeo_fish.cli.cluster import create_cluster
 from pangeo_fish.cli.path import construct_target_root
@@ -13,6 +14,7 @@ ureg = pint_xarray.unit_registry
 
 click.rich_click.USE_MARKDOWN = True
 click.rich_click.SHOW_ARGUMENTS = True
+console = Console()
 
 
 def decode_parameters(obj):
@@ -60,21 +62,30 @@ def prepare(parameters, runtime_config, cluster_definition):
 
     target_root = construct_target_root(runtime_config, parameters)
 
-    with create_cluster(**cluster_definition) as client:
-        print(f"dashboard link: {client.dashboard_link}", flush=True)
+    with create_cluster(**cluster_definition) as client, console.status(
+        "[bold blue]processing[/]"
+    ) as status:
+        console.print(
+            f"[bold white]dashboard link[/]: {client.dashboard_link}", flush=True
+        )
 
         # open tag
         tag = open_tag(runtime_config["tag_root"], parameters["tag_name"])
+        console.log("opened tag log")
 
         # open model
         cat = intake.open_catalog(runtime_config["catalog_url"])
         model = open_copernicus_catalog(cat)
+        console.log("opened reference model")
 
-        # compute differences
+        status.update(
+            "[bold blue]compare temperature from reference model and tag log[/]"
+        )
         differences = subtract_data(tag, model, parameters)
         differences.chunk({"time": 1, "lat": -1, "lon": -1}).to_zarr(
             f"{target_root}/diff.zarr", mode="w", consolidated=True
         )
+        console.log("done writing temperature differences")
 
         # open back the diff
         differences = (
@@ -83,39 +94,48 @@ def prepare(parameters, runtime_config, cluster_definition):
             .swap_dims({"lat": "yi", "lon": "xi"})
             .drop_vars(["lat", "lon"])
         )
+        console.log("reopened temperature differences")
 
+        status.update("[bold blue]verifying result[/]")
         counts = differences["diff"].count(["xi", "yi"]).compute()
+        console.log("done detecting missing time slices")
         if (counts == 0).any():
             raise click.ClickException(
                 "some time slices are 0. Try rerunning the step or"
                 " checking the connection to the data server."
             )
 
-        # regrid
+        status.update("[bold blue]regridding[/]")
         regridded = regrid(differences, parameters)
         regridded.chunk({"x": -1, "y": -1, "time": 1}).to_zarr(
             f"{target_root}/diff-regridded.zarr",
             mode="w",
             consolidated=True,
         )
+        console.log("finished regridding")
 
         # temperature emission matrices
         differences = xr.open_dataset(
             f"{target_root}/diff-regridded.zarr", engine="zarr", chunks={}
         )
 
+        status.update("[bold blue]constructing emission matrices from temperature[/]")
         emission = temperature_emission_matrices(differences, tag, parameters)
         emission.chunk({"x": -1, "y": -1, "time": 1}).to_zarr(
             f"{target_root}/emission.zarr",
             mode="w",
             consolidated=True,
         )
+        console.log("finished constructing emission matrices from temperature data")
 
         del differences
 
         # acoustic emission matrices
         emission = xr.open_dataset(
             f"{target_root}/emission.zarr", engine="zarr", chunks={}
+        )
+        status.update(
+            "[bold blue]constructing emission matrices from acoustic detections[/]"
         )
         combined = emission.merge(
             acoustic.emission_probability(
@@ -128,6 +148,7 @@ def prepare(parameters, runtime_config, cluster_definition):
         combined.chunk({"x": -1, "y": -1, "time": 1}).to_zarr(
             f"{target_root}/emission-acoustic.zarr", mode="w", consolidated=True
         )
+        console.log("finished writing emission matrices from acoustic detections")
 
         del combined
 
