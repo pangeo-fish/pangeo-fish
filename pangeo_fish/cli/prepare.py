@@ -47,7 +47,7 @@ def subtract_data(tag, model, parameters):
     ).chunk({"time": 1})
 
     diff = diff_z(
-        reference_model,
+        reference_model.chunk({"depth": -1}),
         reshaped_tag,
         depth_threshold=parameters["relative_depth_threshold"],
     ).assign({"H0": reference_model["H0"], "mask": reference_model["H0"].notnull()})
