@@ -4,6 +4,8 @@ import os
 
 import datatree
 import fsspec
+import geopandas as gpd
+import movingpandas as mpd
 import pandas as pd
 import xarray as xr
 
@@ -211,3 +213,47 @@ def save_trajectories(traj, root, format="geoparquet"):
 
         df = converter(traj.df)
         df.to_parquet(path)
+
+
+def read_trajectories(root, names, format="geoparquet"):
+    """read trajectories from disk
+
+    Parameters
+    ----------
+    root : str or path-like
+        The root directory containing the track files.
+    names : list of str
+        The names of the tracks to read.
+    format : {"parquet", "geoparquet"}, default: "geoparquet"
+        The format of the files.
+
+    Returns
+    -------
+    mpd.TrajectoryCollection
+        The read tracks as a collection.
+    """
+
+    def read_geoparquet(root, name):
+        path = f"{root}/{name}.parquet"
+
+        gdf = gpd.read_parquet(path)
+
+        return mpd.Trajectory(gdf, name)
+
+    def read_parquet(root, name):
+        path = f"{root}/{name}.parquet"
+
+        df = pd.read_parquet(path)
+
+        return mpd.Trajectory(df, name, x="longitude", y="latitude")
+
+    readers = {
+        "geoparquet": read_geoparquet,
+        "parquet": read_parquet,
+    }
+
+    reader = readers.get(format)
+    if reader is None:
+        raise ValueError(f"unknown format: {format}")
+
+    return mpd.TrajectoryCollection([reader(root, name) for name in names])
