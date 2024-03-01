@@ -9,6 +9,8 @@ import movingpandas as mpd
 import pandas as pd
 import xarray as xr
 
+from pangeo_fish.dataset_utils import broadcast_variables
+
 
 def tz_convert(df, timezones):
     """Convert the timezone of columns in a dataframe
@@ -187,6 +189,18 @@ def open_copernicus_catalog(cat, chunks=None):
                 ),
             }
         )
+        # TODO: figure out the definition of `depth` and if there are standard names for these
+        .assign(
+            {
+                "dynamic_depth": lambda ds: (ds["depth"] + ds["XE"]).assign_attrs(
+                    {"units": "m", "positive": "down"}
+                ),
+                "dynamic_bathymetry": lambda ds: (ds["H0"] + ds["XE"]).assign_attrs(
+                    {"units": "m", "positive": "down"}
+                ),
+            }
+        )
+        .pipe(broadcast_variables, {"lat": "latitude", "lon": "longitude"})
     )
 
     return ds
