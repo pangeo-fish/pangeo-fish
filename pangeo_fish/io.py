@@ -115,6 +115,7 @@ def open_copernicus_catalog(cat):
                 ),
             }
         )
+        # TODO: figure out the definition of `depth` and if there are standard names for these
         .assign(
             {
                 "dynamic_depth": lambda ds: (ds["depth"] + ds["XE"]).assign_attrs(
