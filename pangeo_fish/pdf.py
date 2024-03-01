@@ -2,6 +2,7 @@ import cf_xarray  # noqa: F401
 import more_itertools
 import scipy.stats
 import xarray as xr
+from more_itertools import first
 
 from .utils import _detect_spatial_dims, clear_attrs, normalize
 
@@ -55,7 +56,7 @@ def combine_emission_pdf(raw, exclude=("initial", "final", "mask")):
 
     to_combine = [name for name in raw.data_vars if name not in exclude]
     if len(to_combine) == 1:
-        pdf = raw[to_combine]
+        pdf = raw[first(to_combine)].rename("pdf")
     else:
         pdf = (
             raw[to_combine]
