@@ -69,9 +69,10 @@ release,2023-07-13T13:21:57Z,48.21842,-4.08578
 fish_death,2023-09-17T05:21:07Z,NA,NA
 ```
 
-## `acoustic.csv`: Acoustic detections
+## `acoustic.csv`: acoustic detections
 
-This file contains information about acoustic detections.
+This file contains information about acoustic detections. If there are
+no acoustic detections, it may be removed entirely or just contain the header (the column names).
 
 It must contain at least two columns: `deployment_id` and `time`.
 
@@ -102,4 +103,24 @@ For example:
 
 ```json
 { "pit_tag_id": "A19124", "acoustic_tag_id": "OPI-372" }
+```
+
+## `stations.csv`: deployment data of the acoustic receivers
+
+This file contains deployment information about acoustic receivers.
+
+If there are no acoustic detections, it may be removed.
+
+It must contain at least 8 columns: `deployment_id` and `station_name`, plus `deploy_time`, `deploy_longitude`, `deploy_latitude`, `recover_time`, `recover_longitude`, and `recover_latitude`.
+
+It may contain arbitrary additional columns.
+
+If the recover position is unknown or the same as the deployment position, it may be set to `NA`.
+
+For example:
+
+```csv
+deployment_id,station_name,deploy_time,deploy_longitude,deploy_latitude,recover_time,recover_longitude,recover_latitude
+12345,station_1,2022-06-13T06:14:00Z,-4.12345,49.56789,2022-06-20T14:07:00Z,NA,NA
+12348,station_2,2022-06-13T05:51:00Z,-3.34567,46.23456,2022-06-20T14:00:00Z,NA,NA
 ```

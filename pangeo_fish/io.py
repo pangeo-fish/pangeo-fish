@@ -4,6 +4,8 @@ import os
 
 import datatree
 import fsspec
+import geopandas as gpd
+import movingpandas as mpd
 import pandas as pd
 import xarray as xr
 
@@ -113,18 +115,20 @@ def open_tag(root, name, storage_options=None):
 
     metadata = json.load(mapper.dirfs.open(f"{name}/metadata.json"))
 
-    stations = pd.read_csv(
-        mapper.dirfs.open("stations.csv"),
-        parse_dates=["deploy_time", "recover_time"],
-        index_col="deployment_id",
-    ).pipe(tz_convert, {"deploy_time": None, "recover_time": None})
-
     mapping = {
         "/": xr.Dataset(attrs=metadata),
-        "stations": stations.to_xarray(),
         "dst": dst.to_xarray(),
         "tagging_events": tagging_events.to_xarray(),
     }
+
+    if mapper.dirfs.exists(f"{name}/stations.csv"):
+        stations = pd.read_csv(
+            mapper.dirfs.open("stations.csv"),
+            parse_dates=["deploy_time", "recover_time"],
+            index_col="deployment_id",
+        ).pipe(tz_convert, {"deploy_time": None, "recover_time": None})
+        if len(stations) > 0:
+            mapping["stations"] = stations.to_xarray()
 
     if mapper.dirfs.exists(f"{name}/acoustic.csv"):
         acoustic = pd.read_csv(
@@ -132,12 +136,13 @@ def open_tag(root, name, storage_options=None):
             parse_dates=["time"],
             index_col="time",
         ).tz_convert(None)
-        mapping["acoustic"] = acoustic.to_xarray()
+        if len(acoustic) > 0:
+            mapping["acoustic"] = acoustic.to_xarray()
 
     return datatree.DataTree.from_dict(mapping)
 
 
-def open_copernicus_catalog(cat):
+def open_copernicus_catalog(cat, chunks=None):
     """assemble the given intake catalog into a dataset
 
     .. warning::
@@ -147,29 +152,35 @@ def open_copernicus_catalog(cat):
     ----------
     cat : intake.Catalog
         The pre-opened intake catalog
+    chunks : mapping, optional
+        The initial chunk size. Should be multiples of the on-disk chunk sizes. By
+        default, the chunksizes are ``{"lat": -1, "lon": -1, "depth": 11, "time": 8}``
 
     Returns
     -------
     ds : xarray.Dataset
         The assembled dataset.
     """
+    if chunks is None:
+        chunks = {"lat": -1, "lon": -1, "depth": 11, "time": 8}
+
     ds = (
-        cat.data(type="TEM")
+        cat.data(type="TEM", chunks=chunks)
         .to_dask()
         .rename({"thetao": "TEMP"})
         .get(["TEMP"])
         .assign_coords({"time": lambda ds: ds["time"].astype("datetime64[ns]")})
         .assign(
             {
-                "XE": cat.data(type="SSH").to_dask().get("zos"),
+                "XE": cat.data(type="SSH", chunks=chunks).to_dask().get("zos"),
                 "H0": (
-                    cat.data_tmp(type="mdt")
+                    cat.data_tmp(type="mdt", chunks=chunks)
                     .to_dask()
                     .get("deptho")
                     .rename({"latitude": "lat", "longitude": "lon"})
                 ),
                 "mask": (
-                    cat.data_tmp(type="mdt")
+                    cat.data_tmp(type="mdt", chunks=chunks)
                     .to_dask()
                     .get("mask")
                     .rename({"latitude": "lat", "longitude": "lon"})
@@ -202,3 +213,47 @@ def save_trajectories(traj, root, format="geoparquet"):
 
         df = converter(traj.df)
         df.to_parquet(path)
+
+
+def read_trajectories(root, names, format="geoparquet"):
+    """read trajectories from disk
+
+    Parameters
+    ----------
+    root : str or path-like
+        The root directory containing the track files.
+    names : list of str
+        The names of the tracks to read.
+    format : {"parquet", "geoparquet"}, default: "geoparquet"
+        The format of the files.
+
+    Returns
+    -------
+    mpd.TrajectoryCollection
+        The read tracks as a collection.
+    """
+
+    def read_geoparquet(root, name):
+        path = f"{root}/{name}.parquet"
+
+        gdf = gpd.read_parquet(path)
+
+        return mpd.Trajectory(gdf, name)
+
+    def read_parquet(root, name):
+        path = f"{root}/{name}.parquet"
+
+        df = pd.read_parquet(path)
+
+        return mpd.Trajectory(df, name, x="longitude", y="latitude")
+
+    readers = {
+        "geoparquet": read_geoparquet,
+        "parquet": read_parquet,
+    }
+
+    reader = readers.get(format)
+    if reader is None:
+        raise ValueError(f"unknown format: {format}")
+
+    return mpd.TrajectoryCollection([reader(root, name) for name in names])

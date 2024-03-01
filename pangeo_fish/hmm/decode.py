@@ -19,7 +19,7 @@ def mean_track(X, coords=["latitude", "longitude"]):
 
 
 def modal_track(X, coords=["latitude", "longitude"]):
-    probabilities = X["states"]
+    probabilities = X["states"].drop_vars("cell_ids")
     dims = list(
         set(itertools.chain.from_iterable(probabilities[name].dims for name in coords))
     )
@@ -178,9 +178,9 @@ def viterbi(emission, sigma):
     )
 
     coords = emission[["longitude", "latitude"]].stack(z=["x", "y"])
-    track = coords.isel(z=positions)
+    track = coords.isel(z=positions, drop=True)
 
-    return track
+    return track.drop_vars(["cell_ids", "z", "x", "y"])
 
 
 @numba.njit
