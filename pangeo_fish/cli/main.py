@@ -183,7 +183,7 @@ def estimate(parameters, runtime_config, cluster_definition, compute):
     with client:
         emission = (
             xr.open_dataset(
-                f"{target_root}/emission.zarr",
+                f"{target_root}/emission-acoustic.zarr",
                 engine="zarr",
                 chunks=chunks,
                 inline_array=True,
