@@ -60,4 +60,7 @@ def create_cluster(spec, *, scale=None, additional_kwargs=None):
         else:
             cluster.scale(scale)
 
-    return cluster.get_client()
+    client = cluster.get_client()
+    client.wait_for_workers(1)
+
+    return client
