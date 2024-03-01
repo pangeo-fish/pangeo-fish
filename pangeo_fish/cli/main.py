@@ -65,9 +65,7 @@ def prepare(parameters, runtime_config, cluster_definition):
     with create_cluster(**cluster_definition) as client, console.status(
         "[bold blue]processing[/]"
     ) as status:
-        console.print(
-            f"[bold white]dashboard link[/]: {client.dashboard_link}", flush=True
-        )
+        console.print(f"[bold white]dashboard link[/]: {client.dashboard_link}")
 
         # open tag
         tag = open_tag(runtime_config["tag_root"], parameters["tag_name"])
