@@ -13,6 +13,7 @@ dependencies:
   - holoviews
   - hvplot
   - geoviews
+  - selenium
   # I/O
   - fsspec
   - h5netcdf
