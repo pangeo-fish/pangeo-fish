@@ -297,3 +297,107 @@ def decode(parameters, runtime_config, cluster_definition):
 
         save_trajectories(trajectories, tracks_root, format="parquet")
         console.log("tracks: stored to disk")
+
+
+@main.command("visualize", short_help="visualize the decoded results")
+@click.option("--cluster-definition", type=click.File(mode="r"))
+@click.argument("parameters", type=click.File(mode="r"))
+@click.argument("runtime_config", type=click.File(mode="r"))
+def visualize(parameters, runtime_config, cluster_definition):
+    import cmocean  # noqa: F401
+    import holoviews as hv
+    import hvplot.xarray  # noqa: F401
+    import xmovie
+
+    from pangeo_fish import visualization
+    from pangeo_fish.io import read_trajectories
+
+    hv.extension("matplotlib")
+
+    runtime_config = json.load(runtime_config)
+    parameters = json.load(parameters, object_hook=decode_parameters)
+    cluster_definition = json.load(cluster_definition)
+
+    viz_params = parameters.get("visualization", {})
+    movie_params = viz_params.get("movie", {})
+    track_params = viz_params.get("tracks", {})
+
+    target_root = construct_target_root(runtime_config, parameters)
+    tracks_root = target_root / "tracks"
+    viz_root = target_root / "plots"
+    viz_root.mkdir(exist_ok=True, parents=True)
+
+    with create_cluster(**cluster_definition) as client, console.status(
+        "[bold blue]visualizing the results...[/]"
+    ) as status:
+        console.print(f"dashboard link: {client.dashboard_link}")
+
+        status.update("[bold blue]tracks:[/] reading tracks")
+        trajectories = read_trajectories(
+            tracks_root, parameters["track_modes"], format="parquet"
+        )
+        console.log("tracks: reading successful")
+
+        cmap = track_params.get("cmap", "cmo.speed")
+        tiles = track_params.get("tiles", "CartoLight")
+        format = track_params.get("format", "png")
+
+        status.update("[bold blue]tracks:[/] plotting")
+        plot = visualization.plot_trajectories(
+            trajectories, subplots=False, c="speed", tiles=tiles, cmap=cmap
+        )
+        hv.save(plot, f"{viz_root}/tracks_combined.{format}", fmt=format)
+        console.log("tracks: done plotting")
+
+        status.update("[bold blue]tracks:[/] plotting with multiple subplots")
+        plot = visualization.plot_trajectories(
+            trajectories, subplots=True, c="speed", tiles=tiles, cmap=cmap
+        )
+        hv.save(plot, f"{viz_root}/tracks.{format}", fmt=format)
+        console.log("tracks: done plotting with subplots")
+
+        status.update(
+            "[bold blue]movie:[/] opening and combining state and emission probabilities"
+        )
+        emission = (
+            xr.open_dataset(
+                f"{target_root}/emission-acoustic.zarr",
+                engine="zarr",
+                chunks={},
+                inline_array=True,
+            )
+            .pipe(combine_emission_pdf)
+            .rename_vars({"pdf": "emission"})
+            .drop_vars(["final", "initial"])
+        )
+        states = xr.open_dataset(
+            f"{target_root}/states.zarr", engine="zarr", chunks={}, inline_array=True
+        ).where(emission["mask"].notnull())
+        data = xr.merge([states, emission.drop_vars(["mask"])])
+        console.log("successfully combined state and emission probabilities")
+
+        status.update("[bold blue]movie:[/] creating definition")
+        height = movie_params.get("height", 15)
+        width = movie_params.get("width", 12)
+        dpi = movie_params.get("dpi", 300)
+        format = movie_params.get("format", "mp4")
+        mov = xmovie.Movie(
+            (
+                data.pipe(
+                    lambda ds: ds.merge(ds[["longitude", "latitude"]].compute())
+                ).pipe(visualization.filter_by_states)
+            ),
+            plotfunc=visualization.create_frame,
+            input_check=False,
+            pixelwidth=width * dpi,
+            pixelheight=height * dpi,
+            dpi=dpi,
+        )
+        console.log("movie: definition")
+        status.update("[bold blue]movie:[/] creating frames and saving")
+        mov.save(
+            f"{target_root}/states.{format}",
+            parallel=True,
+            overwrite_existing=True,
+        )
+        console.log("movie: stored to disk")
