@@ -70,12 +70,12 @@ def prepare(parameters, runtime_config, cluster_definition):
 
         # open tag
         tag = open_tag(runtime_config["tag_root"], parameters["tag_name"])
-        console.log("opened tag log")
+        console.log("successfully opened tag log")
 
         # open model
         cat = intake.open_catalog(runtime_config["catalog_url"])
         model = open_copernicus_catalog(cat)
-        console.log("opened reference model")
+        console.log("successfully opened reference model")
 
         status.update(
             "[bold blue]compare temperature from reference model and tag log[/]"
@@ -84,7 +84,7 @@ def prepare(parameters, runtime_config, cluster_definition):
         differences.chunk({"time": 1, "lat": -1, "lon": -1}).to_zarr(
             f"{target_root}/diff.zarr", mode="w", consolidated=True
         )
-        console.log("done writing temperature differences")
+        console.log("stored temperature differences")
 
         # open back the diff
         differences = (
@@ -97,12 +97,13 @@ def prepare(parameters, runtime_config, cluster_definition):
 
         status.update("[bold blue]verifying result[/]")
         counts = differences["diff"].count(["xi", "yi"]).compute()
-        console.log("done detecting missing time slices")
+        console.log("finished detecting missing time slices")
         if (counts == 0).any():
             raise click.ClickException(
                 "some time slices are 0. Try rerunning the step or"
                 " checking the connection to the data server."
             )
+        console.log("detecting missing time slices: none found")
 
         status.update("[bold blue]regridding[/]")
         regridded = regrid(differences, parameters)
