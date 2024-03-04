@@ -248,6 +248,7 @@ def decode(parameters, runtime_config, cluster_definition):
 
     target_root = construct_target_root(runtime_config, parameters)
     tracks_root = target_root / "tracks"
+    tracks_root.mkdir(exist_ok=True, parents=True)
 
     with create_cluster(**cluster_definition) as client, console.status(
         "[bold blue]decoding...[/]"
