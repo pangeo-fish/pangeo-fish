@@ -38,6 +38,7 @@ def create_frame(ds, figure, index, *args, **kwargs):
     x0, y0, x1, y1 = bbox
     formatter = mticker.ScalarFormatter(useMathText=True)
     formatter.set_scientific(True)
+    formatter.set_powerlimits((0, 0))
     cbar_kwargs = {
         "orientation": "horizontal",
         "shrink": 0.65,
