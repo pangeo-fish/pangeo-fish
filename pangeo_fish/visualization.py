@@ -47,7 +47,7 @@ def create_frame(ds, figure, index, *args, **kwargs):
         "format": formatter,
     }
 
-    gs = figure.add_gridspec(nrows=1, ncols=2, hspace=0, wspace=-0.2, top=0.95)
+    gs = figure.add_gridspec(nrows=1, ncols=2, hspace=0, wspace=-0.2, top=0.9)
     (ax1, ax2) = gs.subplots(
         subplot_kw={"projection": projection, "frameon": True},
         sharex=True,
