@@ -75,8 +75,6 @@ def create_frame(ds, figure, index, *args, **kwargs):
         alpha=0.5,
         linestyle="-.",
     )
-    # gl1.xlabel_style = {"size": 15}
-    # gl1.ylabel_style = {"size": 15}
     gl1.right_labels = False
     gl1.top_labels = False
 
@@ -100,8 +98,6 @@ def create_frame(ds, figure, index, *args, **kwargs):
         alpha=0.5,
         linestyle="-.",
     )
-    # gl2.xlabel_style = {"size": 15}
-    # gl2.ylabel_style = {"size": 15}
     gl2.left_labels = False
     gl2.top_labels = False
 
