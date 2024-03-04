@@ -6,6 +6,10 @@ import numpy as np
 from shapely.errors import ShapelyDeprecationWarning
 
 
+def filter_by_states(ds):
+    return ds.where(ds["states"].sum(dim="time", skipna=True).compute() > 0, drop=True)
+
+
 def create_frame(ds, figure, index, *args, **kwargs):
     warnings.filterwarnings(
         action="ignore",
