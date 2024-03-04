@@ -179,9 +179,11 @@ def estimate(parameters, runtime_config, cluster_definition, compute):
     else:
         chunks = {"x": -1, "y": -1}
         client = create_cluster(**cluster_definition)
-        console.print(f"dashboard link: {client.dashboard_link}", flush=True)
+        console.print(f"dashboard link: {client.dashboard_link}")
 
-    with client, console.status("[bold blue]processing[/]") as status:
+    with client, console.status(
+        "[bold blue]estimating the model parameter...[/]"
+    ) as status:
         emission = (
             xr.open_dataset(
                 f"{target_root}/emission-acoustic.zarr",
@@ -195,7 +197,7 @@ def estimate(parameters, runtime_config, cluster_definition, compute):
         console.log("opened emission probabilities")
 
         console.status("[bold blue]detecting missing timesteps[/]")
-        counts = emission.count(["y", "x"]).compute()
+        counts = emission["pdf"].count(["y", "x"]).compute()
         if (counts == 0).any():
             raise click.ClickException(
                 "Some time slices are all-nan, which will cause the optimization to fail."
