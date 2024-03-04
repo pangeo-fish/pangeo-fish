@@ -234,5 +234,66 @@ def estimate(parameters, runtime_config, cluster_definition, compute):
 
 
 @main.command("decode", short_help="produce the model output")
-def decode():
-    pass
+@click.option("--cluster-definition", type=click.File(mode="r"))
+@click.argument("parameters", type=click.File(mode="r"))
+@click.argument("runtime_config", type=click.File(mode="r"))
+def decode(parameters, runtime_config, cluster_definition):
+    # read input data: emission, sigma
+    from pangeo_fish.hmm.estimator import EagerScoreEstimator
+    from pangeo_fish.io import save_trajectories
+
+    runtime_config = json.load(runtime_config)
+    parameters = json.load(parameters, object_hook=decode_parameters)
+    cluster_definition = json.load(cluster_definition)
+
+    target_root = construct_target_root(runtime_config, parameters)
+    tracks_root = target_root / "tracks"
+
+    with create_cluster(**cluster_definition) as client, console.status(
+        "[bold blue]decoding...[/]"
+    ) as status:
+        console.print(f"dashboard link: {client.dashboard_link}")
+
+        emission = (
+            xr.open_dataset(
+                f"{target_root}/emission-acoustic.zarr",
+                engine="zarr",
+                chunks={"x": -1, "y": -1},
+                inline_array=True,
+            ).pipe(combine_emission_pdf)
+            # .pipe(maybe_compute, compute=compute)
+        )
+        console.log("opened emission probabilities")
+
+        with target_root.joinpath("parameters.json").open(mode="r") as f:
+            params = json.load(f)
+        console.log("read model parameter")
+
+        optimized = EagerScoreEstimator(**params)
+        console.log("created the estimator")
+
+        status.update("[bold blue]predicting the state probabilities...[/]")
+        states = optimized.predict_proba(emission)
+        console.log("constructed task graph")
+        states.chunk({"time": 1, "x": -1, "y": -1}).to_zarr(
+            f"{target_root}/states.zarr", mode="w", consolidated=True
+        )
+        console.log("finished writing the state probabilities")
+
+        states = xr.open_dataset(
+            f"{target_root}/states.zarr", engine="zarr", chunks={}, inline_array=True
+        )
+        console.log("reopened the state probabilities")
+
+        status.update("[bold blue]decoding tracks[/]")
+        trajectories = optimized.decode(
+            emission,
+            states,
+            mode=parameters["track_modes"],
+            progress=True,
+            additional_quantities=parameters["additional_track_quantities"],
+        )
+        console.log("tracks: computed successfully")
+
+        save_trajectories(trajectories, tracks_root, format="parquet")
+        console.log("tracks: stored to disk")
