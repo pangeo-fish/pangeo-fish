@@ -73,8 +73,8 @@ def create_frame(ds, figure, index, *args, **kwargs):
         alpha=0.5,
         linestyle="-.",
     )
-    gl1.xlabel_style = {"size": 15}
-    gl1.ylabel_style = {"size": 15}
+    # gl1.xlabel_style = {"size": 15}
+    # gl1.ylabel_style = {"size": 15}
     gl1.right_labels = False
     gl1.top_labels = False
 
@@ -86,8 +86,6 @@ def create_frame(ds, figure, index, *args, **kwargs):
         transform=ccrs.PlateCarree(),
         cmap="cool",
     )
-    ax1.label_outer()
-
     ax2.add_feature(cf.COASTLINE.with_scale("10m"), lw=0.5)
     ax2.add_feature(cf.BORDERS.with_scale("10m"), lw=0.3)
     ax2.set_extent([x0, x1, y0, y1], crs=crs)
@@ -100,12 +98,11 @@ def create_frame(ds, figure, index, *args, **kwargs):
         alpha=0.5,
         linestyle="-.",
     )
-    gl2.xlabel_style = {"size": 15}
-    gl2.ylabel_style = {"size": 15}
+    # gl2.xlabel_style = {"size": 15}
+    # gl2.ylabel_style = {"size": 15}
     gl2.left_labels = False
     gl2.top_labels = False
 
-    ax2.label_outer()
     figure.suptitle(title)
 
     return None, None
