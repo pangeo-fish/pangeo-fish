@@ -179,9 +179,9 @@ def estimate(parameters, runtime_config, cluster_definition, compute):
     else:
         chunks = {"x": -1, "y": -1}
         client = create_cluster(**cluster_definition)
-        print(f"dashboard link: {client.dashboard_link}", flush=True)
+        console.print(f"dashboard link: {client.dashboard_link}", flush=True)
 
-    with client:
+    with client, console.status("[bold blue]processing[/]") as status:
         emission = (
             xr.open_dataset(
                 f"{target_root}/emission-acoustic.zarr",
@@ -192,6 +192,18 @@ def estimate(parameters, runtime_config, cluster_definition, compute):
             .pipe(combine_emission_pdf)
             .pipe(maybe_compute, compute=compute)
         )
+        console.log("opened emission probabilities")
+
+        console.status("[bold blue]detecting missing timesteps[/]")
+        counts = emission.count(["y", "x"]).compute()
+        if (counts == 0).any():
+            raise click.ClickException(
+                "Some time slices are all-nan, which will cause the optimization to fail."
+                " This can happen if a component of the emission probability matrices has"
+                " all-nan time slices, or if the components don't have overlaps in"
+                " all-nan areas."
+            )
+        console.log("detecting missing timesteps: none found")
 
         # TODO: make estimator and optimizer configurable somehow
         estimator = EagerScoreEstimator()
@@ -201,11 +213,22 @@ def estimate(parameters, runtime_config, cluster_definition, compute):
             optimizer_kwargs={"disp": 3, "xtol": parameters.get("tolerance", 0.01)},
         )
 
+        status.update("[bold blue]searching for optimal model parameters[/]")
         optimized = optimizer.fit(emission)
+        console.log("model parameter: completed search")
 
-    params = optimized.to_dict()
-    with target_root.joinpath("parameters.json").open(mode="w") as f:
-        json.dump(params, f)
+        if optimized.sigma == emission.attrs["max_sigma"]:
+            raise click.ClickException(
+                "Found the upper limit of the parameter search space."
+                " Make sure the search space is big enough."
+            )
+        console.log("model parameter: checks passed")
+
+        status.update("[bold blue]storing the optimized model parameter[/]")
+        params = optimized.to_dict()
+        with target_root.joinpath("parameters.json").open(mode="w") as f:
+            json.dump(params, f)
+        console.log("model parameter: finished writing the optimized model parameter")
 
 
 @main.command("decode", short_help="produce the model output")
