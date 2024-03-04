@@ -64,10 +64,9 @@ def create_frame(ds, figure, index, *args, **kwargs):
     formatter.set_scientific(True)
     cbar_kwargs = {
         "orientation": "horizontal",
-        "shrink": 0.9,
-        "fraction": 0.009,
+        "shrink": 0.65,
         "pad": 0.05,
-        "aspect": 80,
+        "aspect": 50,
         "format": formatter,
     }
 
