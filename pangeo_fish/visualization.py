@@ -36,12 +36,30 @@ def create_frame(ds, figure, index, *args, **kwargs):
         ds_["latitude"].max(),
     )
     x0, y0, x1, y1 = bbox
+    formatter = mticker.ScalarFormatter(useMathText=True)
+    formatter.set_scientific(True)
+    cbar_kwargs = {
+        "orientation": "horizontal",
+        "shrink": 0.65,
+        "pad": 0.05,
+        "aspect": 50,
+        "format": formatter,
+    }
 
     gs = figure.add_gridspec(ncols=2, hspace=0, wspace=0.05)
     (ax1, ax2) = gs.subplots(
         subplot_kw={"projection": projection, "frameon": True},
         sharex=True,
         sharey=True,
+    )
+
+    ds_["states"].plot(
+        ax=ax1,
+        x="longitude",
+        y="latitude",
+        cbar_kwargs=cbar_kwargs | {"label": "State Probability"},
+        transform=ccrs.PlateCarree(),
+        cmap="cool",
     )
 
     ax1.add_feature(cf.COASTLINE.with_scale("10m"), lw=0.5)
@@ -60,21 +78,11 @@ def create_frame(ds, figure, index, *args, **kwargs):
     gl1.right_labels = False
     gl1.top_labels = False
 
-    formatter = mticker.ScalarFormatter(useMathText=True)
-    formatter.set_scientific(True)
-    cbar_kwargs = {
-        "orientation": "horizontal",
-        "shrink": 0.65,
-        "pad": 0.05,
-        "aspect": 50,
-        "format": formatter,
-    }
-
-    ds_["states"].plot(
-        ax=ax1,
+    ds_["emission"].plot(
+        ax=ax2,
         x="longitude",
         y="latitude",
-        cbar_kwargs=cbar_kwargs | {"label": "State Probability"},
+        cbar_kwargs=cbar_kwargs | {"label": "Emission Probability"},
         transform=ccrs.PlateCarree(),
         cmap="cool",
     )
@@ -97,14 +105,6 @@ def create_frame(ds, figure, index, *args, **kwargs):
     gl2.left_labels = False
     gl2.top_labels = False
 
-    ds_["emission"].plot(
-        ax=ax2,
-        x="longitude",
-        y="latitude",
-        cbar_kwargs=cbar_kwargs | {"label": "Emission Probability"},
-        transform=ccrs.PlateCarree(),
-        cmap="cool",
-    )
     ax2.label_outer()
     figure.suptitle(title)
 
