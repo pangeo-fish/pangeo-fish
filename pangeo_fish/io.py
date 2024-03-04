@@ -217,6 +217,9 @@ def save_trajectories(traj, root, format="geoparquet"):
     if converter is None:
         raise ValueError(f"unknown format: {format!r}")
 
+    if not isinstance(root, str):
+        root = str(root)
+
     trajectories = getattr(traj, "trajectories", [traj])
 
     fs, _ = fsspec.core.url_to_fs(root)
