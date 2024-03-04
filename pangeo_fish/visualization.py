@@ -36,15 +36,17 @@ def create_frame(ds, figure, index, *args, **kwargs):
     )
     x0, y0, x1, y1 = bbox
 
-    (ax, ax2) = figure.subplots(
-        ncols=2,
+    gs = figure.add_gridspec(ncols=2, hspace=0, wspace=0.05)
+    (ax1, ax2) = gs.subplots(
         subplot_kw={"projection": projection, "frameon": True},
+        sharex=True,
+        sharey=True,
     )
 
-    ax.add_feature(cf.COASTLINE.with_scale("10m"), lw=0.5)
-    ax.add_feature(cf.BORDERS.with_scale("10m"), lw=0.3)
-    ax.set_extent([x0, x1, y0, y1], crs=crs)
-    gl1 = ax.gridlines(
+    ax1.add_feature(cf.COASTLINE.with_scale("10m"), lw=0.5)
+    ax1.add_feature(cf.BORDERS.with_scale("10m"), lw=0.3)
+    ax1.set_extent([x0, x1, y0, y1], crs=crs)
+    gl1 = ax1.gridlines(
         crs=crs,
         draw_labels=True,
         linewidth=0.6,
@@ -60,19 +62,20 @@ def create_frame(ds, figure, index, *args, **kwargs):
     cbar_kwargs = {
         "orientation": "horizontal",
         "shrink": 0.9,
-        "fraction": 0.001,
+        "fraction": 0.009,
         "pad": 0.05,
         "aspect": 80,
     }
 
     ds_["states"].plot(
-        ax=ax,
+        ax=ax1,
         x="longitude",
         y="latitude",
         cbar_kwargs=cbar_kwargs | {"label": "State Probability"},
         transform=ccrs.PlateCarree(),
         cmap="cool",
     )
+    ax1.label_outer()
 
     ax2.add_feature(cf.COASTLINE.with_scale("10m"), lw=0.5)
     ax2.add_feature(cf.BORDERS.with_scale("10m"), lw=0.3)
@@ -99,8 +102,8 @@ def create_frame(ds, figure, index, *args, **kwargs):
         transform=ccrs.PlateCarree(),
         cmap="cool",
     )
+    ax2.label_outer()
     figure.suptitle(title)
-    figure.subplots_adjust(top=0.9, wspace=-0.9)
 
     return None, None
 
