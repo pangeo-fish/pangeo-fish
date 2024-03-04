@@ -45,6 +45,7 @@ def create_frame(ds, figure, index, *args, **kwargs):
         "pad": 0.05,
         "aspect": 50,
         "format": formatter,
+        "use_gridspec": True,
     }
 
     gs = figure.add_gridspec(nrows=1, ncols=2, hspace=0, wspace=-0.2, top=0.9)
