@@ -2,6 +2,7 @@ import warnings
 
 import cartopy.crs as ccrs
 import cartopy.feature as cf
+import matplotlib.ticker as mticker
 import numpy as np
 from shapely.errors import ShapelyDeprecationWarning
 
@@ -59,12 +60,15 @@ def create_frame(ds, figure, index, *args, **kwargs):
     gl1.right_labels = False
     gl1.top_labels = False
 
+    formatter = mticker.ScalarFormatter(useMathText=True)
+    formatter.set_scientific(True)
     cbar_kwargs = {
         "orientation": "horizontal",
         "shrink": 0.9,
         "fraction": 0.009,
         "pad": 0.05,
         "aspect": 80,
+        "format": formatter,
     }
 
     ds_["states"].plot(
