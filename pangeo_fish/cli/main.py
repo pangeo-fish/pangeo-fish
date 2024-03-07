@@ -302,9 +302,15 @@ def decode(parameters, runtime_config, cluster_definition):
 
 @main.command("visualize", short_help="visualize the decoded results")
 @click.option("--cluster-definition", type=click.File(mode="r"))
+@click.option(
+    "--compute/--no-compute",
+    type=bool,
+    default=True,
+    help="load the emission pdf into memory before the parameter estimation",
+)
 @click.argument("parameters", type=click.File(mode="r"))
 @click.argument("runtime_config", type=click.File(mode="r"))
-def visualize(parameters, runtime_config, cluster_definition):
+def visualize(parameters, runtime_config, cluster_definition, compute):
     import cmocean  # noqa: F401
     import holoviews as hv
     import hvplot.xarray  # noqa: F401
@@ -328,9 +334,15 @@ def visualize(parameters, runtime_config, cluster_definition):
     viz_root = target_root / "plots"
     viz_root.mkdir(exist_ok=True, parents=True)
 
-    with create_cluster(**cluster_definition) as client, console.status(
-        "[bold blue]visualizing the results...[/]"
-    ) as status:
+    if compute:
+        chunks = None
+        client = nullcontext()
+    else:
+        chunks = {"x": -1, "y": -1}
+        client = create_cluster(**cluster_definition)
+        console.print(f"dashboard link: {client.dashboard_link}")
+
+    with client, console.status("[bold blue]visualizing the results...[/]") as status:
         console.print(f"dashboard link: {client.dashboard_link}")
 
         status.update("[bold blue]tracks:[/] reading tracks")
@@ -364,7 +376,7 @@ def visualize(parameters, runtime_config, cluster_definition):
             xr.open_dataset(
                 f"{target_root}/emission-acoustic.zarr",
                 engine="zarr",
-                chunks={},
+                chunks=chunks,
                 inline_array=True,
             )
             .pipe(combine_emission_pdf)
@@ -372,9 +384,14 @@ def visualize(parameters, runtime_config, cluster_definition):
             .drop_vars(["final", "initial"])
         )
         states = xr.open_dataset(
-            f"{target_root}/states.zarr", engine="zarr", chunks={}, inline_array=True
+            f"{target_root}/states.zarr",
+            engine="zarr",
+            chunks=chunks,
+            inline_array=True,
         ).where(emission["mask"].notnull())
-        data = xr.merge([states, emission.drop_vars(["mask"])])
+        data = xr.merge([states, emission.drop_vars(["mask"])]).pipe(
+            maybe_compute, compute=compute
+        )
         console.log("successfully combined state and emission probabilities")
 
         status.update("[bold blue]movie:[/] creating definition")
