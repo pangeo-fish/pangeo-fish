@@ -18,16 +18,15 @@ authors:
     affiliation: 1
   - name: Marine Gonse
     orcid: 0000-0002-5378-8482
-    affiliation: 2  
+    affiliation: 2
   - name: Jean-Marc Delouis
     orcid: 0000-0002-0713-1658
     affiliation: 1
   - name: Mathieu Woillez
     orcid: 0000-0002-1032-2105
     affiliation: 2
-    
 affiliations:
-  - name: LOPS (Laboratory for Ocean Physics and Satellite remote sensing) UMR 6523, Univ Brest-Ifremer-CNRS-IRD, Plouzané, France 
+  - name: LOPS (Laboratory for Ocean Physics and Satellite remote sensing) UMR 6523, Univ Brest-Ifremer-CNRS-IRD, Plouzané, France
     index: 1
   - name: DECOD (Ecosystem Dynamics and Sustainability), IFREMER-Institut Agro-INRAE, Plouzané, France
     index: 2
