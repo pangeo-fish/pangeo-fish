@@ -13,6 +13,9 @@ dependencies:
   - holoviews
   - hvplot
   - geoviews
+  - selenium
+  - firefox
+  - geckodriver
   # I/O
   - fsspec
   - h5netcdf

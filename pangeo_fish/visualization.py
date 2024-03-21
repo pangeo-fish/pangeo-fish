@@ -128,3 +128,13 @@ def plot_map(
         cmap=cmap,
         **kwargs,
     )
+
+
+def plot_trajectories(trajectories, *, subplots=False, **kwargs):
+    import holoviews as hv
+
+    if not subplots:
+        return trajectories.hvplot(**kwargs)
+    else:
+        plots = [traj.hvplot(title=traj.id, **kwargs) for traj in trajectories]
+        return hv.Layout(plots).cols(2)
