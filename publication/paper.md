@@ -1,31 +1,37 @@
 ---
-title: "Gala: A Python package for galactic dynamics"
+title: "Pangeo-fish: A Python package for studying fish movement using bio-logging and earth science data"
 tags:
   - Python
-  - astronomy
-  - dynamics
-  - galactic dynamics
-  - milky way
+  - Pangeo
+  - Dask
+  - Xarray
+  - Kerchunk
+  - biologging
+  - geolocation
+  - Earth science
 authors:
   - name: Justus Magin
     orcid: 0000-0002-4254-8002
-    affiliation: "1, 2"
-  - name: Mathieu Woillez
-    affiliation: 3
-  - name: Alexandre Derrien
     affiliation: 1
-  - name: Jean-Marc Delouis
-    affiliation: 2
   - name: Tina Odaka
+    orcid: 0000-0002-1500-0156
     affiliation: 1
+  - name: Marine Gonse
+    orcid: 0000-0002-5378-8482
+    affiliation: 2  
+  - name: Jean-Marc Delouis
+    orcid: 0000-0002-0713-1658
+    affiliation: 1
+  - name: Mathieu Woillez
+    orcid: 0000-0002-1032-2105
+    affiliation: 2
+    
 affiliations:
-  - name: Lyman Spitzer, Jr. Fellow, Princeton University, USA
+  - name: LOPS (Laboratory for Ocean Physics and Satellite remote sensing) UMR 6523, Univ Brest-Ifremer-CNRS-IRD, Plouzané, France 
     index: 1
-  - name: Institution Name, Country
+  - name: DECOD (Ecosystem Dynamics and Sustainability), IFREMER-Institut Agro-INRAE, Plouzané, France
     index: 2
-  - name: Independent Researcher, Country
-    index: 3
-date: 13 August 2017
+date: 21 March 2024
 bibliography: paper.bib
 ---
 
