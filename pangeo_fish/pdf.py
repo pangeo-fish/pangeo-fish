@@ -52,7 +52,7 @@ def normal(samples, mean, std, *, dims):
 
 
 def combine_emission_pdf(raw, exclude=("initial", "final", "mask")):
-    exclude = list(more_itertools.always_iterable(exclude))
+    exclude = [n for n in more_itertools.always_iterable(exclude) if n in raw.variables]
 
     to_combine = [name for name in raw.data_vars if name not in exclude]
     if len(to_combine) == 1:
