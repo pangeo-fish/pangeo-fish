@@ -7,20 +7,17 @@ tags:
   - galactic dynamics
   - milky way
 authors:
-  - name: Adrian M. Price-Whelan
-    orcid: 0000-0000-0000-0000
-    equal-contrib: true
-    affiliation: "1, 2" # (Multiple affiliations must be quoted)
-  - name: Author Without ORCID
-    equal-contrib: true # (This is how you can denote equal contributions between multiple authors)
+  - name: Justus Magin
+    orcid: 0000-0002-4254-8002
+    affiliation: "1, 2"
+  - name: Mathieu Woillez
+    affiliation: 3
+  - name: Alexandre Derrien
+    affiliation: 1
+  - name: Jean-Marc Delouis
     affiliation: 2
-  - name: Author with no affiliation
-    corresponding: true # (This is how to denote the corresponding author)
-    affiliation: 3
-  - given-names: Ludwig
-    dropping-particle: van
-    surname: Beethoven
-    affiliation: 3
+  - name: Tina Odaka
+    affiliation: 1
 affiliations:
   - name: Lyman Spitzer, Jr. Fellow, Princeton University, USA
     index: 1
