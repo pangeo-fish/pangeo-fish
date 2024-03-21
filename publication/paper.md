@@ -35,38 +35,25 @@ bibliography: paper.bib
 ---
 
 # Summary
+Geo-referenced data plays an important role in understanding and conserving natural resources, particularly when investigating biological phenomena such as fish migration and it's habitats. Biologging, the practice of attaching small devices to animals for behavior tracking and environmental data collection, proves invaluable in this field. However, directly tracking fish underwater presents persistent challenges. To address this, models have emerged to estimate fish locations by correlating data from biologging devices—such as temperature and pressure readings—with ocean temperature and bathymetry models. The accuracy and resolution of these reference datasets significantly impact the precision of reconstructed fish trajectories. Despite recent advancements in earth observation technology and modeling methodologies like digital twins, accessing vast earth science datasets remains cumbersome due to their size and diversity. Additionally, the computational demands for analysis pose technical barriers. The Pangeo ecosystem was created by a community of engineers and geoscientists specifically to address these big earth data analysis challenges. Pangeo-fish is a Python package that utilizes Pangeo to leverage advancements in biologging data analysis for fish.
 
-The forces on stars, galaxies, and dark matter under external gravitational
-fields lead to the dynamical evolution of structures in the universe. The orbits
-of these bodies are therefore key to understanding the formation, history, and
-future state of galaxies. The field of "galactic dynamics," which aims to model
-the gravitating components of galaxies to study their structure and evolution,
-is now well-established, commonly taught, and frequently used in astronomy.
-Aside from toy problems and demonstrations, the majority of problems require
-efficient numerical tools, many of which require the same base code (e.g., for
-performing numerical orbit integration).
 
 # Statement of need
 
-`Gala` is an Astropy-affiliated Python package for galactic dynamics. Python
-enables wrapping low-level languages (e.g., C) for speed without losing
-flexibility or ease-of-use in the user-interface. The API for `Gala` was
-designed to provide a class-based and user-friendly interface to fast (C or
-Cython-optimized) implementations of common operations such as gravitational
-potential and force evaluation, orbit integration, dynamical transformations,
-and chaos indicators for nonlinear dynamics. `Gala` also relies heavily on and
-interfaces well with the implementations of physical units and astronomical
-coordinate systems in the `Astropy` package [@astropy] (`astropy.units` and
-`astropy.coordinates`).
+Biologging, the process of attaching small devices to animals to monitor their behaviour and collect environmental data, is an important tool for understanding animal habitats.
 
-`Gala` was designed to be used by both astronomical researchers and by
-students in courses on gravitational dynamics or astronomy. It has already been
-used in a number of scientific publications [@Pearson:2017] and has also been
-used in graduate courses on Galactic dynamics to, e.g., provide interactive
-visualizations of textbook material [@Binney:2008]. The combination of speed,
-design, and support for Astropy functionality in `Gala` will enable exciting
-scientific explorations of forthcoming data releases from the _Gaia_ mission
-[@gaia] by students and experts alike.
+However, unlike animals, which can be tracked using GPS technology, tracking fish underwater presents significant challenges. This limitation hinders the accurate delineation of protected areas, which is crucial for the protection of important fish habitats.
+
+To address this issue, various tagging experiments have been conducted on a variety of fish species.
+
+Archival tags and acoustic tags are two common tagging systems used in various projects. Archival tags, implanted in marine animals, record and store a wide range of data including temperature, pressure, light levels and salinity. Similarly, acoustic tags emit signals and are implanted in marine animals to provide location information when fish come within range of acoustic detection devices.
+The computation of fish trajectories depends on the likelihood of observed data from fish tags, such as temperature at specific depths, alongside reference geoscience data such as satellite observations.
+
+The use of reference data with high spatial and temporal resolution can significantly improve the accuracy of reconstructed fish tracks. However, handling such high resolution data requires significant computing power, storage capacity, parallelization of computations and improved data access patterns.
+
+The Pangeo community is dedicated to fostering an ecosystem of interoperable, scalable, open source tools for interactive data analysis in the field of big data geoscience. Leveraging the Pangeo ecosystem provides an opportunity to address the challenges faced in biologging. Pangeo-fish utilises various Pangeo components, including a user-friendly interface such as JupyterLab, a robust data model such as Xarray, kerchunk and zarr, and a scalable computing system such as Dask.
+
+By using libraries such as intake, kerchunk and fsspec, data loading processes are streamlined. In addition, Xarray and Dask facilitate computations, while visualisation tools such as hvplot and Jupyter enable interactive visualisation of results. The Pangeo software stack provides researchers with the necessary tools to access data and compute high-resolution fish tracks in a scalable and interactive manner, while giving biologists the flexibility to choose their preferred platform for analysis execution, data access and computing system, whether on a traditional HPC system, in the public cloud or on a laptop.
 
 # Mathematics
 
@@ -113,7 +100,8 @@ Figure sizes can be customized by adding an optional second parameter:
 
 # Acknowledgements
 
-We acknowledge contributions from Brigitta Sipocz, Syrtis Major, and Semyeong
-Oh, and support from Kathryn Johnston during the genesis of this project.
+T Odaka, JM Delouis and J Magne thanks to the support by CNES Appel a projet R&T R-S23/DU-0002-025-01. 
+T Odaka, JM Delouis and M Woillez thanks to the support by the TAOS project funded by the IFREMER via the AMII OCEAN 2100 programme. 
 
 # References
+
