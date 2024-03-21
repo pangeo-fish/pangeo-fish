@@ -1,24 +1,63 @@
-\bibitem{pontual_seabass_migration_2023}{de Pontual, H., Heerah, K., Goossens, J., Garren, F., Martin, S., Le Ru, L., Le Roy, D., and Woillez, M. (2023). Seasonal migration, site fidelity, and population structure of European seabass (Dicentrarchus labrax). ICES Journal of Marine Science, 80(6): 1606–1618. 
-\doilink{10.1093/icesjms/fsad087}
-%https://doi.org/10.1093/icesjms/fsad087
+@article{pontual_seabass_migration_2023,
+    author = {de Pontual, Helene and Heerah, Karine and Goossens, Jolien and Garren, François and Martin, Stephane and Le Ru, Loic and Le Roy, Didier and Woillez, Mathieu},
+    title = "{Seasonal migration, site fidelity, and population structure of European seabass (Dicentrarchus labrax)}",
+    journal = {ICES Journal of Marine Science},
+    volume = {80},
+    number = {6},
+    pages = {1606-1618},
+    year = {2023},
+    month = {06},
+    abstract = "{Large-scale electronic tagging is a very powerful tool to study how fish movements and migrations shape the internal dynamics of populations. This knowledge, crucial for improving fishery management, was still limited for the European seabass, whose stocks in the Northeast Atlantic have declined drastically over the last decade. To better understand the species ecology and the spatio-temporal structure of the population, we tagged seabass in the North Sea, the English Channel, and the Bay of Biscay, from 2014 to 2016. Out of 1220 deployed DSTs, 482 have been recovered by November 2022. Approximately half of them included a period of potential spawning migration. Reconstructed trajectories confirmed seabass to be a partial migratory species, as individuals exhibited either long-distance migrations or residence. Most migrants exhibited fidelity to summer feeding areas and winter spawning areas. Our dataset enriches the knowledge of seabass biological traits (e.g. temperature and depth ranges, vulnerability to predation and fishing). Our results suggest a spatial structure of the Atlantic population that differs from the stock structure currently considered for assessment and management. The consequences should be explored at both the European level and by regional managers involved in conservation outcomes.}",
+    issn = {1054-3139},
+    doi = {10.1093/icesjms/fsad087},
+    url = {https://doi.org/10.1093/icesjms/fsad087},
+    eprint = {https://academic.oup.com/icesjms/article-pdf/80/6/1606/51096657/fsad087.pdf},
 }
 
-\bibitem{gatti}{Gatti, P., Fisher, J.A.D., Cyr, F., Galbraith, P.S., Robert, D., Le Bris, A. (2021). A review and tests of validation and sensitivity of geolocation models for marine fish tracking. Fish Fish. 22: 1041–1066. 
-\doilink{10.1111/faf.12568}
+@article{gatti,
+    author = {Gatti, Paul and Fisher, Jonathan A. D. and Cyr, Frédéric and Galbraith, Peter S. and Robert, Dominique and Le Bris, Arnault},
+    title = {A review and tests of validation and sensitivity of geolocation models for marine fish tracking},
+    journal = {Fish and Fisheries},
+    volume = {22},
+    number = {5},
+    pages = {1041-1066},
+    keywords = {archival tag, Atlantic halibut, geolocation accuracy and precision, Gulf of St. Lawrence, Hidden Markov Model, pop-up satellite archival tag},
+    doi = {https://doi.org/10.1111/faf.12568},
+    url = {https://onlinelibrary.wiley.com/doi/abs/10.1111/faf.12568},
+    eprint = {https://onlinelibrary.wiley.com/doi/pdf/10.1111/faf.12568},
+    abstract = {Abstract Uncertainties in fish tracking studies limit their integration into conservation and fisheries management plans. This is especially true for archival tagging studies that rely on geolocation models to infer fish tracks from recorded environmental variables. Hidden Markov Models (HMMs) are increasingly popular to geolocate marine fish equipped with archival tags; however, true errors and sensitivity of geolocation HMMs are seldom evaluated. In this study, we first review validation methods and implementations of geolocation HMMs to adapt to regional oceanography, fish species and tag data. We then use a case-study to evaluate strengths and limitations of each validation approach and to illustrate the sensitivity of geolocation HMMs to implementation assumptions. Simulated and fixed tag locations are the most widely implemented methods, but less common methods relying on true fish tracking, that is double-tagging or distance from recapture experiments, provide more informative estimates of model accuracy and precision. Results showed that model performance can be improved using simple assumptions when pre-processing tag data rather than using a complex movement behaviour model. In addition, accelerometer show potential to further parameterise geolocation models. Overall, results from our case-study and previous studies showed that current geolocation HMMs have average errors of ca. 30–50 and 120 km for demersal and large pelagic fish, respectively. We suggest that these errors are acceptable for investigations at the scale of fisheries management units.},
+    year = {2021}
 }
+
 \bibitem{marine's new paper}{marine,submitted}
 }
 
-\bibitem{woillez_hmm-based_2016}{Woillez, M., Fablet, R., Ngo, T.-T., Lalire, M., Lazure, P. and de Pontual, H. (2016). A HMM-based model to geolocate pelagic fish from high-resolution individual temperature and depth histories: European sea bass as a case study. Ecological Modelling, 321: 10-22. 
-\doilink{10.1016/j.ecolmodel.2015.10.024}
-%https://doi.org/10.1016/j.ecolmodel.2015.10.024
+@article{woillez_hmm-based_2016,
+    title = {A HMM-based model to geolocate pelagic fish from high-resolution individual temperature and depth histories: European sea bass as a case study},
+    journal = {Ecological Modelling},
+    volume = {321},
+    pages = {10-22},
+    year = {2016},
+    issn = {0304-3800},
+    doi = {https://doi.org/10.1016/j.ecolmodel.2015.10.024},
+    url = {https://www.sciencedirect.com/science/article/pii/S0304380015005098},
+    author = {Mathieu Woillez and Ronan Fablet and Tran-Thanh Ngo and Maxime Lalire and Pascal Lazure and Hélène {de Pontual}},
+    keywords = {Fish movement, Archival tagging, Migration, Population structure, Hidden Markov Model (HMM), State-space model},
+    abstract = {Numerous methods have been developed to geolocate fish from data storage tags. Whereas demersal species have been tracked using tide-driven geolocation models, pelagic species which undertake extensive migrations have been mainly tracked using light-based models. Here, we present a new HMM-based model that infers pelagic fish positions from the sole use of high-resolution temperature and depth histories. A key contribution of our framework lies in model parameter inference (diffusion coefficient and noise parameters with respect to the reference geophysical fields—satellite SST and temperatures derived from the MARS3D hydrodynamic model), which improves model robustness. As a case study, we consider long time series of data storage tags (DSTs) deployed on European sea bass for which individual migration tracks are reconstructed for the first time. We performed a sensitivity analysis on synthetic and real data in order to assess the robustness of the reconstructed tracks with respect to model parameters, chosen reference geophysical fields and the knowledge of fish recapture position. Model assumptions and future directions are discussed. Finally, our model opens new avenues for the reconstruction and analysis of migratory patterns of many other pelagic species in relatively contrasted geophysical environments.}
 }
 
-\bibitem{Tina0}{Odaka, T.E., Banihirwe, A., Eynard-Bontemps, G., Ponte, A., Maze, G., Paul, K., Baker, J., and Abernathey, R. (2019). The Pangeo Ecosystem: Interactive Computing Tools for the Geosciences: Benchmarking on HPC, In: Juckeland, G., Chandrasekaran, S. (eds) Tools and Techniques for High Performance Computing. HUST SE-HER WIHPC. Communications in Computer and Information Science, 1190, 2020, Springer, Cham. 
-\doilink{10.1007/978-3-030-44728-1\_12}
-%https://doi.org/10.1007/978-3-030-44728-1\_12
+@InProceedings{Tina0,
+    author = {{Odaka}, Tina Erica and {Banihirwe}, Anderson and {Eynard-Bontemps}, Guillaume and {Ponte}, Aurelien and {Maze}, Guillaume and {Paul}, Kevin and {Baker}, Jared and {Abernathey\, Ryan},
+    editor = {{Juckeland}, Guido and {Chandrasekaran}, Sunita},
+    title = {The Pangeo Ecosystem: Interactive Computing Tools for the Geosciences: Benchmarking on HPC},
+    booktitle = {Tools and Techniques for High Performance Computing},
+    year = {2020},
+    publisher = {Springer International Publishing},
+    address = {Cham},
+    pages = {190--204},
+    abstract = {The Pangeo ecosystem is an interactive computing software stack for HPC and public cloud infrastructures. In this paper, we show benchmarking results of the Pangeo platform on two different HPC systems. Four different geoscience operations were considered in this benchmarking study with varying chunk sizes and chunking schemes. Both strong and weak scaling analyses were performed. Chunk sizes between 64 MB to 512 MB were considered, with the best scalability obtained for 512 MB. Compared to certain manual chunking schemes, the auto chunking scheme scaled well.},
+    isbn = {978-3-030-44728-1}
 }
-
 
 @article{Pearson:2017,
   	url = {http://adsabs.harvard.edu/abs/2017arXiv170304627P},
