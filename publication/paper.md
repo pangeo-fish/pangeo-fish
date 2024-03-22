@@ -57,22 +57,14 @@ By using libraries such as intake, kerchunk and fsspec, data loading processes a
 
 # Mathematics
 
-Single dollars ($) are required for inline mathematics e.g. $f(x) = e^{\pi/x}$
 
-Double dollars make self-standing equations:
+Our approach follows the methods established [@woillez_hmm-based_2016].  It incorporates the use of a Hidden Markov Model (HMM) to quantify uncertainties and derive the posterior probability of the sequence of states (fish positions). 
 
-$$
-\Theta(x) = \left\{\begin{array}{l}
-0\textrm{ if } x < 0\cr
-1\textrm{ else}
-\end{array}\right.
-$$
+Here, $P(Y_t|X_t)$ express the observation likelihood, $P(X_t|X_{t-1})$ as the state prediction, where $t$ is the time, $X_t$ the hidden states  and $Y_t$ the observations a time $t$.
 
-You can also use plain \LaTeX for equations
-\begin{equation}\label{eq:fourier}
-\hat f(\omega) = \int\_{-\infty}^{\infty} f(x) e^{i\omega x} dx
-\end{equation}
-and refer to \autoref{eq:fourier} from text.
+The hidden staes $X_t$ corresponds to fish positions.  
+
+
 
 # Citations
 
