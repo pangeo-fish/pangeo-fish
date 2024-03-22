@@ -35,8 +35,8 @@ bibliography: paper.bib
 ---
 
 # Summary
-Geo-referenced data plays an important role in understanding and conserving natural resources, particularly when investigating biological phenomena such as fish migration and it's habitats. Biologging, the practice of attaching small devices to animals for behavior tracking and environmental data collection, proves invaluable in this field. However, directly tracking fish underwater presents persistent challenges. To address this, models have emerged to estimate fish locations by correlating data from biologging devices—such as temperature and pressure readings—with ocean temperature and bathymetry models. The accuracy and resolution of these reference datasets significantly impact the precision of reconstructed fish trajectories. Despite recent advancements in earth observation technology and modeling methodologies like digital twins, accessing vast earth science datasets remains cumbersome due to their size and diversity. Additionally, the computational demands for analysis pose technical barriers. The Pangeo ecosystem was created by a community of engineers and geoscientists specifically to address these big earth data analysis challenges. Pangeo-fish is a Python package that utilizes Pangeo to leverage advancements in biologging data analysis for fish.
 
+Geo-referenced data plays an important role in understanding and conserving natural resources, particularly when investigating biological phenomena such as fish migration and it's habitats. Biologging, the practice of attaching small devices to animals for behavior tracking and environmental data collection, proves invaluable in this field. However, directly tracking fish underwater presents persistent challenges. To address this, models have emerged to estimate fish locations by correlating data from biologging devices—such as temperature and pressure readings—with ocean temperature and bathymetry models. The accuracy and resolution of these reference datasets significantly impact the precision of reconstructed fish trajectories. Despite recent advancements in earth observation technology and modeling methodologies like digital twins, accessing vast earth science datasets remains cumbersome due to their size and diversity. Additionally, the computational demands for analysis pose technical barriers. The Pangeo ecosystem was created by a community of engineers and geoscientists specifically to address these big earth data analysis challenges. Pangeo-fish is a Python package that utilizes Pangeo to leverage advancements in biologging data analysis for fish.
 
 # Statement of need
 
@@ -57,14 +57,11 @@ By using libraries such as intake, kerchunk and fsspec, data loading processes a
 
 # Mathematics
 
+Our approach follows the methods established [@woillez_hmm-based_2016]. It incorporates the use of a Hidden Markov Model (HMM) to quantify uncertainties and derive the posterior probability of the sequence of states (fish positions).
 
-Our approach follows the methods established [@woillez_hmm-based_2016].  It incorporates the use of a Hidden Markov Model (HMM) to quantify uncertainties and derive the posterior probability of the sequence of states (fish positions). 
+Here, $P(Y_t|X_t)$ express the observation likelihood, $P(X_t|X_{t-1})$ as the state prediction, where $t$ is the time, $X_t$ the hidden states and $Y_t$ the observations a time $t$.
 
-Here, $P(Y_t|X_t)$ express the observation likelihood, $P(X_t|X_{t-1})$ as the state prediction, where $t$ is the time, $X_t$ the hidden states  and $Y_t$ the observations a time $t$.
-
-The hidden staes $X_t$ corresponds to fish positions.  
-
-
+The hidden staes $X_t$ corresponds to fish positions.
 
 # Citations
 
@@ -92,8 +89,7 @@ Figure sizes can be customized by adding an optional second parameter:
 
 # Acknowledgements
 
-T Odaka, JM Delouis and J Magne thanks to the support by CNES Appel a projet R&T R-S23/DU-0002-025-01. 
-T Odaka, JM Delouis and M Woillez thanks to the support by the TAOS project funded by the IFREMER via the AMII OCEAN 2100 programme. 
+T Odaka, JM Delouis and J Magin thanks to the support by CNES Appel a projet R&T R-S23/DU-0002-025-01.
+T Odaka, JM Delouis and M Woillez thanks to the support by the TAOS project funded by the IFREMER via the AMII OCEAN 2100 programme.
 
 # References
-
