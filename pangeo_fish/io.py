@@ -220,16 +220,17 @@ def save_trajectories(traj, root, format="geoparquet"):
     if not isinstance(root, str):
         root = str(root)
 
-    trajectories = getattr(traj, "trajectories", [traj])
+#    trajectories = getattr(traj, "trajectories", [traj])
 
-    fs, _ = fsspec.core.url_to_fs(root)
-    fs.mkdirs(root, exist_ok=True)
+#    fs, _ = fsspec.core.url_to_fs(root)
+#    fs.mkdirs(root, exist_ok=True)
 
     for traj in trajectories:
         path = f"{root}/{traj.id}.parquet"
 
         df = converter(traj.df)
-        df.to_parquet(path)
+        df.to_parquet(path,
+                             storage_options=storage_options            )
 
 
 def read_trajectories(root, names, format="geoparquet"):
