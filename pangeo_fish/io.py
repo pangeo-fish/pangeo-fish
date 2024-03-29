@@ -206,7 +206,7 @@ def open_copernicus_catalog(cat, chunks=None):
     return ds
 
 
-def save_trajectories(traj, root, format="geoparquet"):
+def save_trajectories(traj, root, storage_options=None, format="geoparquet"):
     from .tracks import to_dataframe
 
     converters = {
@@ -220,7 +220,7 @@ def save_trajectories(traj, root, format="geoparquet"):
     if not isinstance(root, str):
         root = str(root)
 
-#    trajectories = getattr(traj, "trajectories", [traj])
+    trajectories = getattr(traj, "trajectories", [traj])
 
 #    fs, _ = fsspec.core.url_to_fs(root)
 #    fs.mkdirs(root, exist_ok=True)
