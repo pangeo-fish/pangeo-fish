@@ -222,18 +222,15 @@ def save_trajectories(traj, root, storage_options=None, format="geoparquet"):
 
     trajectories = getattr(traj, "trajectories", [traj])
 
-#    fs, _ = fsspec.core.url_to_fs(root)
-#    fs.mkdirs(root, exist_ok=True)
-
     for traj in trajectories:
         path = f"{root}/{traj.id}.parquet"
 
         df = converter(traj.df)
         df.to_parquet(path,
-                             storage_options=storage_options            )
+                             storage_options=storage_options)
 
 
-def read_trajectories(root, names, format="geoparquet"):
+def read_trajectories( names, root, storage_options=None, format="geoparquet"):
     """read trajectories from disk
 
     Parameters
@@ -251,18 +248,20 @@ def read_trajectories(root, names, format="geoparquet"):
         The read tracks as a collection.
     """
 
-    def read_geoparquet(root, name):
+    def read_geoparquet(root, name,storage_options):
         path = f"{root}/{name}.parquet"
 
-        gdf = gpd.read_parquet(path)
+        gdf = gpd.read_parquet(path,
+                             storage_options=storage_options)
 
         return mpd.Trajectory(gdf, name)
 
     def read_parquet(root, name):
         path = f"{root}/{name}.parquet"
 
-        df = pd.read_parquet(path)
-
+        df = pd.read_parquet(path,
+                             storage_options=storage_options)
+        
         return mpd.Trajectory(df, name, x="longitude", y="latitude")
 
     readers = {
