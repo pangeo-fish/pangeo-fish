@@ -108,6 +108,7 @@ def create_frame(ds, figure, index, *args, **kwargs):
 
 def plot_map(
     arr,
+    bbox,
     x="longitude",
     y="latitude",
     rasterize=True,
@@ -121,11 +122,14 @@ def plot_map(
     return arr.hvplot.quadmesh(
         x=x,
         y=y,
+        xlim=bbox['lon'],
+        ylim=bbox['lat'],
         rasterize=rasterize,
         geo=geo,
         coastline=coastline,
         tiles=tiles,
         cmap=cmap,
+        xlim=
         **kwargs,
     )
 
