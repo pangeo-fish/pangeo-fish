@@ -236,7 +236,7 @@ def emission_probability(
 
     if nondetections == "ignore":
         fill_map = xr.ones_like(grid["cell_ids"], dtype=float).pipe(
-            utils.normalize, dim="cells"
+            utils.normalize, dim=["x","y"]
         )
     elif nondetections == "mask":
         fill_map = maps.any(dim="deployment_id").pipe(np.logical_not).astype(float)
