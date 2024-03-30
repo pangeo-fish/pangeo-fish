@@ -274,3 +274,33 @@ def read_trajectories( names, root, storage_options=None, format="geoparquet"):
         raise ValueError(f"unknown format: {format}")
 
     return mpd.TrajectoryCollection([reader(root, name) for name in names])
+
+def save_html_hvplot(plot, filepath, storage_options=None):
+    """
+    Save a Holoviews plot to an HTML file either locally or on an S3 bucket.
+
+    Parameters:
+    - plot: Holoviews plot object.
+    - filepath (str): The file path where the plot HTML file will be saved. If the file path starts with 's3://', the plot will be saved to an S3 bucket.
+    - storage_options (dict, optional): Dictionary containing storage options for connecting to the S3 bucket (required if saving to S3).
+
+    Returns:
+    - success (bool): True if the plot was saved successfully, False otherwise.
+    - message (str): A message describing the outcome of the operation.
+    """
+    try:
+        if filepath.startswith('s3://'):
+            import s3fs
+            if storage_options is None:
+                raise ValueError("Storage options must be provided for S3 storage.")
+                
+            s3 = s3fs.S3FileSystem(**storage_options)
+            with s3.open(filepath, 'w') as f:
+                hvplot.save(plot, f)
+        else:
+            hvplot.save(plot, filepath)
+        
+        return True, "Plot saved successfully."
+    
+    except Exception as e:
+        return False, f"Error occurred: {str(e)}"
