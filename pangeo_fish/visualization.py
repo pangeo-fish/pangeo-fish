@@ -122,14 +122,13 @@ def plot_map(
     return arr.hvplot.quadmesh(
         x=x,
         y=y,
-        xlim=bbox['lon'],
-        ylim=bbox['lat'],
+        xlim=bbox['longitude'],
+        ylim=bbox['latitude'],
         rasterize=rasterize,
         geo=geo,
         coastline=coastline,
         tiles=tiles,
         cmap=cmap,
-        xlim=
         **kwargs,
     )
 
