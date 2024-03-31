@@ -2,6 +2,8 @@ import warnings
 
 import cartopy.crs as ccrs
 import cartopy.feature as cf
+import hvplot.xarray
+import cmocean
 import matplotlib.ticker as mticker
 import numpy as np
 from shapely.errors import ShapelyDeprecationWarning
