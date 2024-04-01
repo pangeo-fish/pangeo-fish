@@ -123,9 +123,9 @@ def open_tag(root, name, storage_options=None):
         "tagging_events": tagging_events.to_xarray(),
     }
 
-    if mapper.dirfs.exists(f"{name}/stations.csv"):
+    if mapper.dirfs.exists(f"{name}/../stations.csv"):
         stations = pd.read_csv(
-            mapper.dirfs.open("stations.csv"),
+            mapper.dirfs.open("../stations.csv"),
             parse_dates=["deploy_time", "recover_time"],
             index_col="deployment_id",
         ).pipe(tz_convert, {"deploy_time": None, "recover_time": None})
@@ -206,7 +206,7 @@ def open_copernicus_catalog(cat, chunks=None):
     return ds
 
 
-def save_trajectories(traj, root, format="geoparquet"):
+def save_trajectories(traj, root, storage_options=None, format="geoparquet"):
     from .tracks import to_dataframe
 
     converters = {
@@ -222,17 +222,15 @@ def save_trajectories(traj, root, format="geoparquet"):
 
     trajectories = getattr(traj, "trajectories", [traj])
 
-    fs, _ = fsspec.core.url_to_fs(root)
-    fs.mkdirs(root, exist_ok=True)
-
     for traj in trajectories:
         path = f"{root}/{traj.id}.parquet"
 
         df = converter(traj.df)
-        df.to_parquet(path)
+        df.to_parquet(path,
+                             storage_options=storage_options)
 
 
-def read_trajectories(root, names, format="geoparquet"):
+def read_trajectories( names, root, storage_options=None, format="geoparquet"):
     """read trajectories from disk
 
     Parameters
@@ -250,18 +248,20 @@ def read_trajectories(root, names, format="geoparquet"):
         The read tracks as a collection.
     """
 
-    def read_geoparquet(root, name):
+    def read_geoparquet(root, name,storage_options):
         path = f"{root}/{name}.parquet"
 
-        gdf = gpd.read_parquet(path)
+        gdf = gpd.read_parquet(path,
+                             storage_options=storage_options)
 
         return mpd.Trajectory(gdf, name)
 
     def read_parquet(root, name):
         path = f"{root}/{name}.parquet"
 
-        df = pd.read_parquet(path)
-
+        df = pd.read_parquet(path,
+                             storage_options=storage_options)
+        
         return mpd.Trajectory(df, name, x="longitude", y="latitude")
 
     readers = {
@@ -274,3 +274,33 @@ def read_trajectories(root, names, format="geoparquet"):
         raise ValueError(f"unknown format: {format}")
 
     return mpd.TrajectoryCollection([reader(root, name) for name in names])
+
+def save_html_hvplot(plot, filepath, storage_options=None):
+    """
+    Save a Holoviews plot to an HTML file either locally or on an S3 bucket.
+
+    Parameters:
+    - plot: Holoviews plot object.
+    - filepath (str): The file path where the plot HTML file will be saved. If the file path starts with 's3://', the plot will be saved to an S3 bucket.
+    - storage_options (dict, optional): Dictionary containing storage options for connecting to the S3 bucket (required if saving to S3).
+
+    Returns:
+    - success (bool): True if the plot was saved successfully, False otherwise.
+    - message (str): A message describing the outcome of the operation.
+    """
+    try:
+        if filepath.startswith('s3://'):
+            import s3fs
+            if storage_options is None:
+                raise ValueError("Storage options must be provided for S3 storage.")
+                
+            s3 = s3fs.S3FileSystem(**storage_options)
+            with s3.open(filepath, 'w') as f:
+                hvplot.save(plot, f)
+        else:
+            hvplot.save(plot, filepath)
+        
+        return True, "Plot saved successfully."
+    
+    except Exception as e:
+        return False, f"Error occurred: {str(e)}"
