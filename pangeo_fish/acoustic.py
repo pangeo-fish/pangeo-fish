@@ -184,7 +184,7 @@ def deployment_reception_masks(stations, grid, buffer_size, method="recompute"):
 
 
 def emission_probability(
-    tag, grid, buffer_size, nondetections="mask", cell_ids="recompute"
+    tag, grid, buffer_size, nondetections="ignore", cell_ids="keep"
 ):
     """construct emission probability maps from acoustic detections
 
