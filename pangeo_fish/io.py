@@ -122,10 +122,9 @@ def open_tag(root, name, storage_options=None):
         "dst": dst.to_xarray(),
         "tagging_events": tagging_events.to_xarray(),
     }
-
-    if mapper.dirfs.exists(f"{name}/../stations.csv"):
+    if mapper.dirfs.exists("stations.csv"):
         stations = pd.read_csv(
-            mapper.dirfs.open("../stations.csv"),
+            mapper.dirfs.open("stations.csv"),
             parse_dates=["deploy_time", "recover_time"],
             index_col="deployment_id",
         ).pipe(tz_convert, {"deploy_time": None, "recover_time": None})
