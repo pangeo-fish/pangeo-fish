@@ -219,12 +219,15 @@ def create_masked_fill_map(tag, grid, maps):
     stations = stations.where(stations.sum(dim='time') != 0, drop=True)
 
     # Expand the maps dataset to match the dimensions of the active stations dataset
+    chunk_time=24
     all_detecting_stations = maps.sel(
         deployment_id=stations.deployment_id).expand_dims(
-        {'time': stations.time})
-
-    ds = (stations.sel(time=all_detecting_stations.time
-                       ) * all_detecting_stations).sum(dim='deployment_id')
+        {'time': stations.time}).chunk({"time": chunk_time})
+    a=stations.sel(time=all_detecting_stations.time).chunk({"time": chunk_time})
+    print(a)
+    b=all_detecting_stations
+    print(b)
+    ds = (a * b).sum(dim='deployment_id')
 
     all_detecting_stations = xr.where(ds == 0, 1, np.nan)
     fill_map = all_detecting_stations.detecting.pipe(
