@@ -216,17 +216,14 @@ def create_masked_fill_map(tag, grid, maps):
     # Add a new dimension 'time' to the dataset with the boolean mask
     stations['detecting'] = time_mask
     stations = stations.drop_vars(['time_bounds'])
-    stations = stations.where(stations.sum(dim='time') != 0, drop=True)
+    stations = stations.where(stations.sum(dim='time') != 0, True, False)#, drop=True)
 
     # Expand the maps dataset to match the dimensions of the active stations dataset
-    chunk_time=24
     all_detecting_stations = maps.sel(
         deployment_id=stations.deployment_id).expand_dims(
         {'time': stations.time}).chunk({"time": chunk_time})
     a=stations.sel(time=all_detecting_stations.time).chunk({"time": chunk_time})
-    print(a)
     b=all_detecting_stations
-    print(b)
     ds = (a * b).sum(dim='deployment_id')
 
     all_detecting_stations = xr.where(ds == 0, 1, np.nan)
@@ -237,7 +234,7 @@ def create_masked_fill_map(tag, grid, maps):
     return fill_map
 
 def emission_probability(
-    tag, grid, buffer_size, nondetections="ignore", cell_ids="keep"
+    tag, grid, buffer_size, nondetections="ignore", cell_ids="keep",chunk_time=1
 ):
     """construct emission probability maps from acoustic detections
 
