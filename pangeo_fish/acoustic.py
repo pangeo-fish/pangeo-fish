@@ -182,7 +182,7 @@ def deployment_reception_masks(stations, grid, buffer_size, method="recompute"):
 
     return masks.drop_vars(["cell_ids"])
 
-def create_masked_fill_map(tag, grid, maps):
+def create_masked_fill_map(tag, grid, maps,chunk_time=24):
     """
     Create a masked fill map indicating the detection zones.
 
@@ -234,7 +234,7 @@ def create_masked_fill_map(tag, grid, maps):
     return fill_map
 
 def emission_probability(
-    tag, grid, buffer_size, nondetections="ignore", cell_ids="keep",chunk_time=1
+    tag, grid, buffer_size, nondetections="ignore", cell_ids="keep",chunk_time=24
 ):
     """construct emission probability maps from acoustic detections
 
@@ -290,7 +290,7 @@ def emission_probability(
         )
     elif nondetections == "mask":
         #fill_map = maps.any(dim="deployment_id").pipe(np.logical_not).astype(float)
-        fill_map = create_masked_fill_map(tag, grid, maps)
+        fill_map = create_masked_fill_map(tag, grid, maps,chunk_time)
     else:
         raise ValueError("invalid nondetections treatment argument")
 
