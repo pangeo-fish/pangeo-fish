@@ -182,7 +182,7 @@ def deployment_reception_masks(stations, grid, buffer_size, method="recompute"):
 
     return masks.drop_vars(["cell_ids"])
 
-def create_masked_fill_map(tag, grid, maps):
+def create_masked_fill_map(tag, grid, maps,chunk_time=24):
     """
     Create a masked fill map indicating the detection zones.
 
@@ -216,15 +216,15 @@ def create_masked_fill_map(tag, grid, maps):
     # Add a new dimension 'time' to the dataset with the boolean mask
     stations['detecting'] = time_mask
     stations = stations.drop_vars(['time_bounds'])
-    stations = stations.where(stations.sum(dim='time') != 0, drop=True)
+    stations = stations.where(stations.sum(dim='time') != 0, True, False)#, drop=True)
 
     # Expand the maps dataset to match the dimensions of the active stations dataset
     all_detecting_stations = maps.sel(
         deployment_id=stations.deployment_id).expand_dims(
-        {'time': stations.time})
-
-    ds = (stations.sel(time=all_detecting_stations.time
-                       ) * all_detecting_stations).sum(dim='deployment_id')
+        {'time': stations.time}).chunk({"time": chunk_time})
+    a=stations.sel(time=all_detecting_stations.time).chunk({"time": chunk_time})
+    b=all_detecting_stations
+    ds = (a * b).sum(dim='deployment_id')
 
     all_detecting_stations = xr.where(ds == 0, 1, np.nan)
     fill_map = all_detecting_stations.detecting.pipe(
@@ -234,7 +234,7 @@ def create_masked_fill_map(tag, grid, maps):
     return fill_map
 
 def emission_probability(
-    tag, grid, buffer_size, nondetections="ignore", cell_ids="keep"
+    tag, grid, buffer_size, nondetections="ignore", cell_ids="keep",chunk_time=24
 ):
     """construct emission probability maps from acoustic detections
 
@@ -290,7 +290,7 @@ def emission_probability(
         )
     elif nondetections == "mask":
         #fill_map = maps.any(dim="deployment_id").pipe(np.logical_not).astype(float)
-        fill_map = create_masked_fill_map(tag, grid, maps)
+        fill_map = create_masked_fill_map(tag, grid, maps,chunk_time)
     else:
         raise ValueError("invalid nondetections treatment argument")
 

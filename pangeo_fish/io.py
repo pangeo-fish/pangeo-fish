@@ -275,6 +275,8 @@ def read_trajectories( names, root, storage_options=None, format="geoparquet"):
     return mpd.TrajectoryCollection([reader(root, name) for name in names])
 
 def save_html_hvplot(plot, filepath, storage_options=None):
+    import hvplot.xarray
+    import hvplot
     """
     Save a Holoviews plot to an HTML file either locally or on an S3 bucket.
 
