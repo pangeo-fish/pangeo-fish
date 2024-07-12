@@ -10,7 +10,7 @@ from tlz.itertoolz import first
 
 from ... import tracks, utils
 from ..decode import mean_track, modal_track, viterbi, viterbi2
-from ..filter import forward, forward_backward, score
+from ..filter import _backward_zarr, _forward_zarr, forward, score
 
 
 @dataclass
@@ -35,7 +35,9 @@ class EagerScoreEstimator:
     cache: str | os.PathLike | zarr.Store = None
 
     def to_dict(self):
-        return asdict(self)
+        exclude = {"cache"}
+
+        return {k: v for k, v in asdict(self).items() if k not in exclude}
 
     def set_params(self, **params):
         """set the parameters on a new instance
@@ -128,44 +130,52 @@ class EagerScoreEstimator:
         def _algorithm(emission, mask, initial, *, sigma, truncate):
             pass
 
-    def _forward_backward_algorithm(self, X, *, spatial_dims=None, temporal_dims=None):
+    def _forward_backward_algorithm(
+        self, X, cache, *, spatial_dims=None, temporal_dims=None, progress=False
+    ):
         if self.sigma is None:
             raise ValueError("unset sigma, cannot run the filter")
 
-        def _algorithm(emission, mask, initial, *, sigma, truncate):
-            backward_state = forward_backward(
-                emission=emission,
-                sigma=sigma,
-                mask=mask,
-                initial_probability=initial,
-                truncate=truncate,
-            )
-
-            return backward_state
+        if not isinstance(cache, zarr.Store):
+            raise ValueError("requires a zarr store for now")
+        else:
+            cache_store = cache
 
         if spatial_dims is None:
             spatial_dims = utils._detect_spatial_dims(X)
         if temporal_dims is None:
             temporal_dims = utils._detect_temporal_dims(X)
 
-        input_core_dims = [
-            temporal_dims + spatial_dims,
-            spatial_dims,
-            spatial_dims,
-        ]
+        dims = temporal_dims + spatial_dims
 
-        return xr.apply_ufunc(
-            _algorithm,
-            X.pdf,
-            X.mask,
-            X.initial,
-            kwargs={"sigma": self.sigma, "truncate": self.truncate},
-            input_core_dims=input_core_dims,
-            output_core_dims=[temporal_dims + spatial_dims],
-            dask="allowed",
+        # write the dataset to disk
+        X.transpose(*dims).to_zarr(
+            cache_store, group="emission", mode="w", consolidated=True
         )
 
-    def predict_proba(self, X, *, spatial_dims=None, temporal_dims=None):
+        # create the group
+        group = zarr.group(cache_store, overwrite=False)
+
+        _forward_zarr(
+            group["emission"],
+            group.create_group("forward"),
+            sigma=self.sigma,
+            truncate=self.truncate,
+            progress=progress,
+        )
+        _backward_zarr(
+            group["forward"],
+            group.create_group("backward"),
+            sigma=self.sigma,
+            truncate=self.truncate,
+            progress=progress,
+        )
+
+        return xr.open_dataset(cache_store, engine="zarr", chunks={}, group="backward")
+
+    def predict_proba(
+        self, X, *, cache=None, spatial_dims=None, temporal_dims=None, progress=False
+    ):
         """predict the state probabilities
 
         This is done by applying the forward-backward algorithm to the data.
@@ -177,7 +187,9 @@ class EagerScoreEstimator:
             - `initial`, the initial probability map
             - `pdf`, the emission probabilities
             - `mask`, a mask to select ocean pixels
-            Due to the convolution method we use today, we can't pass np.nan, thus we send x.fillna(0), but drop the values whihch are less than 0 and put them back to np.nan when we return the value.
+        cache : str, pathlib.Path or zarr.Store
+            Path to the cache store. Used to compute the state probabilities with nearly
+            constant memory usage.
         spatial_dims : list of hashable, optional
             The spatial dimensions of the dataset.
         temporal_dims : list of hashable, optional
@@ -187,14 +199,25 @@ class EagerScoreEstimator:
         -------
         state_probabilities : DataArray
             The computed state probabilities
+
+        Notes
+        -----
+        The convolution implementation does not allow skipping nan values. Thus, we
+        replace these with zeroes, apply the filter, and at the end revert back to nans.
         """
+        if cache is None and self.cache is None:
+            raise ValueError("need to provide the cache file")
+        elif cache is None:
+            cache = self.cache
+
         state = self._forward_backward_algorithm(
             X.fillna(0),
+            cache=cache,
             spatial_dims=spatial_dims,
             temporal_dims=temporal_dims,
+            progress=progress,
         )
-        state = state.where((state > 0))
-        return state.rename("states")
+        return state.where(X["mask"]).rename("states")
 
     def score(self, X, *, spatial_dims=None, temporal_dims=None):
         """score the fit of the selected model to the data
