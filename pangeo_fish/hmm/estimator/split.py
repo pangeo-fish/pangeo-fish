@@ -1,8 +1,10 @@
+import os
 from dataclasses import asdict, dataclass, replace
 
 import movingpandas as mpd
 import numpy as np
 import xarray as xr
+import zarr
 from tlz.functoolz import compose_left, curry, pipe
 from tlz.itertoolz import first
 
@@ -23,10 +25,14 @@ class EagerScoreEstimator:
     truncate : float, default: 4.0
         The cut-off limit of the filter. This can be used, together with `sigma`, to
         calculate the maximum distance per time unit traveled by the fish.
+    cache : str or zarr.Store
+        Zarr store to write intermediate results to.
     """
 
     sigma: float = None
     truncate: float = 4.0
+
+    cache: str | os.PathLike | zarr.Store = None
 
     def to_dict(self):
         return asdict(self)
@@ -168,10 +174,10 @@ class EagerScoreEstimator:
         ----------
         X : Dataset
             The emission probability maps. The dataset should contain these variables:
-       s    - `initial`, the initial probability map
+            - `initial`, the initial probability map
             - `pdf`, the emission probabilities
             - `mask`, a mask to select ocean pixels
-            Due to the convolution method we use today, we can't pass np.nan, thus we send x.fillna(0), but drop the values whihch are less than 0 and put them back to np.nan when we return the value.  
+            Due to the convolution method we use today, we can't pass np.nan, thus we send x.fillna(0), but drop the values whihch are less than 0 and put them back to np.nan when we return the value.
         spatial_dims : list of hashable, optional
             The spatial dimensions of the dataset.
         temporal_dims : list of hashable, optional
@@ -183,11 +189,11 @@ class EagerScoreEstimator:
             The computed state probabilities
         """
         state = self._forward_backward_algorithm(
-            X.fillna(0), 
-            spatial_dims=spatial_dims, 
+            X.fillna(0),
+            spatial_dims=spatial_dims,
             temporal_dims=temporal_dims,
         )
-        state=state.where((state > 0))
+        state = state.where((state > 0))
         return state.rename("states")
 
     def score(self, X, *, spatial_dims=None, temporal_dims=None):
