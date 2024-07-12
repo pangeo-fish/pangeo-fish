@@ -123,13 +123,6 @@ class EagerScoreEstimator:
             dask="allowed",
         )
 
-    def _backward_algorithm(self, X, *, spatial_dims=None, temporal_dims=None):
-        if self.sigma is None:
-            raise ValueError("unset sigma, cannot run the filter")
-
-        def _algorithm(emission, mask, initial, *, sigma, truncate):
-            pass
-
     def _forward_backward_algorithm(
         self, X, cache, *, spatial_dims=None, temporal_dims=None, progress=False
     ):
