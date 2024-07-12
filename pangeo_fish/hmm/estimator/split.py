@@ -152,14 +152,14 @@ class EagerScoreEstimator:
         # propagate
         _forward_zarr(
             group["emission"],
-            group.create_group("forward"),
+            group.create_group("forward", overwrite=True),
             sigma=self.sigma,
             truncate=self.truncate,
             progress=progress,
         )
         _backward_zarr(
             group["forward"],
-            group.create_group("backward"),
+            group.create_group("backward", overwrite=True),
             sigma=self.sigma,
             truncate=self.truncate,
             progress=progress,
@@ -212,7 +212,7 @@ class EagerScoreEstimator:
             temporal_dims=temporal_dims,
             progress=progress,
         )
-        return state.where(X["mask"]).rename("states")
+        return state.where(X["mask"])
 
     def score(self, X, *, spatial_dims=None, temporal_dims=None):
         """score the fit of the selected model to the data
