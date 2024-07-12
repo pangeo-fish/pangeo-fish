@@ -118,12 +118,11 @@ def score(
 
     initial, mask = dask.compute(initial_probability, mask)
     if isinstance(initial_probability, da.Array):
-        initial= dask.compute(initial_probability)
+        initial = dask.compute(initial_probability)
     else:
-        initial= initial_probability
+        initial = initial_probability
     if isinstance(mask, da.Array):
-        mask= dask.compute(mask)
-
+        mask = dask.compute(mask)
 
     normalizations.append(np.sum(initial * dask.compute(emission[0, ...])[0]))
     previous = initial
@@ -271,3 +270,127 @@ def forward_backward(
         truncate=truncate,
     )
     return backwards_states
+
+
+def copy_coords_of(arr, source, dest):
+    for name in arr.attrs["coordinates"].split():
+        dest[name] = source[name]
+        dest[name].attrs.update(source[name].attrs)
+
+
+def empty_like(group, name, arr, **kwargs):
+    new = group.empty_like(name, arr, **kwargs)
+    new.attrs.update(arr.attrs)
+
+    return new
+
+
+def track(sequence, *, display=False, **kwargs):
+    if not display:
+        return sequence
+
+    try:
+        from rich.progress import track as rich_track
+    except ImportError as e:
+        if display:
+            raise ValueError("cannot display the progress bar") from e
+
+    return rich_track(sequence, **kwargs)
+
+
+def _forward_zarr(ingroup, outgroup, sigma, truncate=4.0, progress=False):
+    """single pass (forwards) of the spatial HMM filter while writing to zarr
+
+    Parameters
+    ----------
+    ingroup: zarr.Group
+        zarr group containing:
+        - the probability density function of the observations (emission probabilities)
+        - the initial probability
+        - (optionally) a mask to apply after each step. No shadowing yet.
+    outgroup : zarr.Group
+        Zarr object to write the result to.
+    sigma : float
+        standard deviation of the gaussian kernel, in units of pixels
+    truncate : float, default: 4.0
+        Truncate the kernel after this many multiples of sigma.
+    progress : bool, default: False
+        Whether to display a progress bar.
+    """
+
+    emission = ingroup["pdf"]
+    initial_probability = ingroup["initial_probability"]
+    mask = ingroup.get("mask")
+
+    copy_coords_of(emission, ingroup, outgroup)
+
+    predictions = empty_like(outgroup, "predictions", emission)
+    states = empty_like(outgroup, "states", emission)
+
+    predictions[0, ...] = initial_probability
+    states[0, ...] = initial_probability
+
+    n_max = emission.shape[0]
+    for index in track(
+        range(1, n_max), description="forwards filter", display=progress
+    ):
+        prediction = predict(
+            states[index - 1, ...], sigma=sigma, mask=mask, truncate=truncate
+        )
+        predictions[index, ...] = prediction
+
+        updated = prediction * emission[index, ...]
+        normalization = np.sum(updated)
+        normalized = updated / normalization
+        states[index, ...] = normalized
+
+    return outgroup
+
+
+def _backward_zarr(ingroup, outgroup, sigma, truncate=4.0, progress=False):
+    """single pass (forwards) of the spatial HMM filter while writing to zarr
+
+    Parameters
+    ----------
+    ingroup: zarr.Group
+        zarr group containing:
+        - the probability density function of the observations (emission probabilities)
+        - the initial probability
+        - (optionally) a mask to apply after each step. No shadowing yet.
+    outgroup : zarr.Group
+        Zarr object to write the result to.
+    sigma : float
+        standard deviation of the gaussian kernel, in units of pixels
+    truncate : float, default: 4.0
+        Truncate the kernel after this many multiples of sigma.
+    progress : bool, default: False
+        Whether to display a progress bar.
+    """
+    eps = 2.204e-16**20
+
+    predictions = ingroup["predictions"]
+    states = ingroup["states"]
+
+    copy_coords_of(states, ingroup, outgroup)
+
+    smoothed = empty_like(outgroup, "states", states)
+    backward_pred = empty_like(outgroup, "predictions", states)
+
+    smoothed[-1, ...] = states[-1, ...]
+    backward_pred[-1, ...] = states[-1, ...]
+
+    n_max = states.shape[0]
+    for index in track(
+        range(1, n_max), description="backwards filter", display=progress
+    ):
+        ratio = smoothed[-index, ...] / (predictions[-index, ...] + eps)
+        backward_prediction = predict(ratio, sigma=sigma, mask=None, truncate=truncate)
+        normalized = backward_prediction / np.sum(backward_prediction)
+        backward_pred[-index - 1, ...] = normalized
+
+        updated = normalized * states[-index, ...]
+        updated_normalized = updated / np.sum(updated)
+
+        smoothed[-index - 1, ...] = updated_normalized
+
+    return outgroup
