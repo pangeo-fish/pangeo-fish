@@ -326,9 +326,14 @@ def _forward_zarr(ingroup, outgroup, sigma, truncate=4.0, progress=False):
 
     predictions = empty_like(outgroup, "predictions", emission)
     states = empty_like(outgroup, "states", emission)
+    normalizations = outgroup.create(
+        "normalizations", dtype=emission.dtype, shape=emission.shape[:1]
+    )
+    normalizations.attrs["_ARRAY_DIMENSIONS"] = emission.attrs["_ARRAY_DIMENSIONS"][:1]
 
     predictions[0, ...] = initial_probability
     states[0, ...] = initial_probability
+    normalizations[0] = 1  # this is constant, so doesn't make a difference
 
     n_max = emission.shape[0]
     for index in track(
