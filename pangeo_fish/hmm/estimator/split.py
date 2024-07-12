@@ -146,9 +146,10 @@ class EagerScoreEstimator:
             cache_store, group="emission", mode="w", consolidated=True
         )
 
-        # create the group
+        # open the root group
         group = zarr.group(cache_store, overwrite=False)
 
+        # propagate
         _forward_zarr(
             group["emission"],
             group.create_group("forward"),
@@ -164,6 +165,7 @@ class EagerScoreEstimator:
             progress=progress,
         )
 
+        # open and return a dataset
         return xr.open_dataset(cache_store, engine="zarr", chunks={}, group="backward")
 
     def predict_proba(
