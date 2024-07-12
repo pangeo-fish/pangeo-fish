@@ -319,14 +319,14 @@ def _forward_zarr(ingroup, outgroup, sigma, truncate=4.0, progress=False):
     """
 
     emission = ingroup["pdf"]
-    initial_probability = ingroup["initial_probability"]
+    initial_probability = ingroup["initial"]
     mask = ingroup.get("mask")
 
     copy_coords_of(emission, ingroup, outgroup)
 
     predictions = empty_like(outgroup, "predictions", emission)
     states = empty_like(outgroup, "states", emission)
-    normalizations = outgroup.create(
+    normalizations = outgroup.empty(
         "normalizations", dtype=emission.dtype, shape=emission.shape[:1]
     )
     normalizations.attrs["_ARRAY_DIMENSIONS"] = emission.attrs["_ARRAY_DIMENSIONS"][:1]
