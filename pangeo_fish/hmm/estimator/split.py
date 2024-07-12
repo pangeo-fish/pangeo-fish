@@ -10,7 +10,7 @@ from tlz.itertoolz import first
 
 from ... import tracks, utils
 from ..decode import mean_track, modal_track, viterbi, viterbi2
-from ..filter import _backward_zarr, _forward_zarr, forward, score
+from ..filter import _backward_zarr, _forward_zarr
 
 
 @dataclass
@@ -49,79 +49,45 @@ class EagerScoreEstimator:
         """
         return replace(self, **params)
 
-    def _score(self, X, *, spatial_dims=None, temporal_dims=None):
-        import gc
-
+    def _score(
+        self, X, *, cache, spatial_dims=None, temporal_dims=None, progress=False
+    ):
         if self.sigma is None:
             raise ValueError("unset sigma, cannot run the filter")
 
-        def _algorithm(emission, mask, initial, *, sigma, truncate):
-            return score(
-                emission,
-                mask=mask,
-                initial_probability=initial,
-                sigma=sigma,
-                truncate=truncate,
-            )
+        if not isinstance(cache, zarr.storage.Store):
+            raise ValueError("requires a zarr store for now")
+        else:
+            cache_store = cache
 
         if spatial_dims is None:
             spatial_dims = utils._detect_spatial_dims(X)
         if temporal_dims is None:
             temporal_dims = utils._detect_temporal_dims(X)
 
-        input_core_dims = [
-            temporal_dims + spatial_dims,
-            spatial_dims,
-            spatial_dims,
-        ]
+        dims = temporal_dims + spatial_dims
 
-        value = xr.apply_ufunc(
-            _algorithm,
-            X.pdf.fillna(0),
-            X.mask,
-            X.initial,
-            kwargs={"sigma": self.sigma, "truncate": self.truncate},
-            input_core_dims=input_core_dims,
-            output_core_dims=[()],
-            dask="allowed",
+        # write the dataset to disk
+        X.transpose(*dims).to_zarr(
+            cache_store, group="emission", mode="w", consolidated=True
         )
-        gc.collect()
-        return value.fillna(np.inf)
+        group = zarr.group(cache_store, overwrite=False)
+        if "forward" in group:
+            del group["forward"]
 
-    def _forward_algorithm(self, X, *, spatial_dims=None, temporal_dims=None):
-        if self.sigma is None:
-            raise ValueError("unset sigma, cannot run the filter")
-
-        def _algorithm(emission, mask, initial, *, sigma, truncate):
-            return forward(
-                emission=emission,
-                mask=mask,
-                initial_probability=initial,
-                sigma=sigma,
-                truncate=truncate,
-            )
-
-        if spatial_dims is None:
-            spatial_dims = utils._detect_spatial_dims(X)
-        if temporal_dims is None:
-            temporal_dims = utils._detect_temporal_dims(X)
-
-        input_core_dims = [
-            temporal_dims + spatial_dims,
-            spatial_dims,
-            spatial_dims,
-        ]
-
-        return xr.apply_ufunc(
-            _algorithm,
-            X.pdf,
-            X.mask,
-            X.initial,
-            kwargs={"sigma": self.sigma, "truncate": self.truncate},
-            input_core_dims=input_core_dims,
-            output_core_dims=[temporal_dims + spatial_dims],
-            dask="allowed",
+        # propagate
+        forward = _forward_zarr(
+            group["emission"],
+            group.create_group("forward"),
+            sigma=self.sigma,
+            truncate=self.truncate,
+            progress=progress,
         )
+
+        # open and return the score
+        with np.errstate(divide="ignore"):
+            value = -np.log(forward["normalizations"]).sum()
+            return value if not np.isnan(value) else np.inf
 
     def _forward_backward_algorithm(
         self, X, cache, *, spatial_dims=None, temporal_dims=None, progress=False
@@ -214,7 +180,9 @@ class EagerScoreEstimator:
         )
         return state.where(X["mask"])
 
-    def score(self, X, *, spatial_dims=None, temporal_dims=None):
+    def score(
+        self, X, *, cache=None, spatial_dims=None, temporal_dims=None, progress=False
+    ):
         """score the fit of the selected model to the data
 
         Apply the forward-backward algorithm to the given data, then return the
@@ -237,8 +205,17 @@ class EagerScoreEstimator:
         score : float
             The score for the fit with the current parameters.
         """
+        if cache is None and self.cache is None:
+            raise ValueError("need to provide the cache file")
+        elif cache is None:
+            cache = self.cache
+
         return self._score(
-            X.fillna(0), spatial_dims=spatial_dims, temporal_dims=temporal_dims
+            X.fillna(0),
+            cache=cache,
+            spatial_dims=spatial_dims,
+            temporal_dims=temporal_dims,
+            progress=progress,
         )
 
     def decode(
