@@ -32,7 +32,7 @@ class EagerScoreEstimator:
     sigma: float = None
     truncate: float = 4.0
 
-    cache: str | os.PathLike | zarr.Store = None
+    cache: str | os.PathLike | zarr.storage.Store = None
 
     def to_dict(self):
         exclude = {"cache"}
@@ -129,7 +129,7 @@ class EagerScoreEstimator:
         if self.sigma is None:
             raise ValueError("unset sigma, cannot run the filter")
 
-        if not isinstance(cache, zarr.Store):
+        if not isinstance(cache, zarr.storage.Store):
             raise ValueError("requires a zarr store for now")
         else:
             cache_store = cache
