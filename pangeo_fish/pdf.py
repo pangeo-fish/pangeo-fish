@@ -4,7 +4,7 @@ import scipy.stats
 import xarray as xr
 from more_itertools import first
 
-from .utils import _detect_spatial_dims, clear_attrs, normalize
+from pangeo_fish.utils import _detect_spatial_dims, clear_attrs, normalize
 
 
 # also try: multivariate_normal, gaussian_kde
@@ -32,7 +32,7 @@ def normal(samples, mean, std, *, dims):
     def _pdf(samples, mean, std):
         return scipy.stats.norm.pdf(samples, mean, std)
 
-    if isinstance(std, (int, float)) or std.size == 1:
+    if isinstance(std, int | float) or std.size == 1:
         param_dims = []
     else:
         param_dims = mean.dims

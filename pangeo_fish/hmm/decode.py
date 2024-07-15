@@ -6,7 +6,7 @@ import numba
 import numpy as np
 import xarray as xr
 
-from ..distributions import gaussian_kernel
+from pangeo_fish.distributions import gaussian_kernel
 
 
 def mean_track(X, coords=["latitude", "longitude"]):

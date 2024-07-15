@@ -77,7 +77,7 @@ select = [
 extend-safe-fixes = [
     "TID252",  # absolute imports
 ]
-fixable = ["I", "TID"]
+fixable = ["I", "TID", "UP"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["pangeo_fish"]
@@ -86,4 +86,3 @@ known-third-party = []
 [tool.ruff.lint.flake8-tidy-imports]
 # Disallow all relative imports.
 ban-relative-imports = "all"
-

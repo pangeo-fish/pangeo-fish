@@ -63,9 +63,10 @@ def prepare(parameters, runtime_config, cluster_definition):
     target_root = construct_target_root(runtime_config, parameters)
     target_root.mkdir(parents=True, exist_ok=True)
 
-    with create_cluster(**cluster_definition) as client, console.status(
-        "[bold blue]processing[/]"
-    ) as status:
+    with (
+        create_cluster(**cluster_definition) as client,
+        console.status("[bold blue]processing[/]") as status,
+    ):
         console.print(f"[bold white]dashboard link[/]: {client.dashboard_link}")
 
         # open tag
@@ -181,9 +182,10 @@ def estimate(parameters, runtime_config, cluster_definition, compute):
         client = create_cluster(**cluster_definition)
         console.print(f"dashboard link: {client.dashboard_link}")
 
-    with client, console.status(
-        "[bold blue]estimating the model parameter...[/]"
-    ) as status:
+    with (
+        client,
+        console.status("[bold blue]estimating the model parameter...[/]") as status,
+    ):
         emission = (
             xr.open_dataset(
                 f"{target_root}/emission-acoustic.zarr",
@@ -250,9 +252,10 @@ def decode(parameters, runtime_config, cluster_definition):
     tracks_root = target_root / "tracks"
     tracks_root.mkdir(exist_ok=True, parents=True)
 
-    with create_cluster(**cluster_definition) as client, console.status(
-        "[bold blue]decoding...[/]"
-    ) as status:
+    with (
+        create_cluster(**cluster_definition) as client,
+        console.status("[bold blue]decoding...[/]") as status,
+    ):
         console.print(f"dashboard link: {client.dashboard_link}")
 
         emission = (
