@@ -394,7 +394,7 @@ def _backward_zarr(ingroup, outgroup, sigma, truncate=4.0, progress=False):
         normalized = backward_prediction / np.sum(backward_prediction)
         backward_pred[-index - 1, ...] = normalized
 
-        updated = normalized * states[-index, ...]
+        updated = normalized * states[-index - 1, ...]
         updated_normalized = updated / np.sum(updated)
 
         smoothed[-index - 1, ...] = updated_normalized
