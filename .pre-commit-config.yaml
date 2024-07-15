@@ -3,9 +3,12 @@ repos:
     rev: v4.4.0
     hooks:
       - id: trailing-whitespace
+      - id: check-docstring-first
       - id: end-of-file-fixer
       - id: check-yaml
       - id: check-toml
+      - id: debug-statements
+      - id: mixed-line-ending
       - id: check-merge-conflict
 
   - repo: https://github.com/pycqa/isort
