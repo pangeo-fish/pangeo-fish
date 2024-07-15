@@ -345,8 +345,8 @@ def _forward_zarr(ingroup, outgroup, sigma, truncate=4.0, progress=False):
         predictions[index, ...] = prediction
 
         updated = prediction * emission[index, ...]
-        normalization = np.sum(updated)
-        normalized = updated / normalization
+        normalizations[index] = np.sum(updated)
+        normalized = updated / normalizations[index]
         states[index, ...] = normalized
 
     return outgroup
