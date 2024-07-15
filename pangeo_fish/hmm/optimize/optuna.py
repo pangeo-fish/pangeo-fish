@@ -6,7 +6,7 @@ from contextlib import contextmanager
 
 from distributed import Client, LocalCluster
 
-from .logging import setup_logging
+from pangeo_fish.hmm.optimize.logging import setup_logging
 
 clients = {}
 logger = setup_logging(logging.getLogger(__name__))

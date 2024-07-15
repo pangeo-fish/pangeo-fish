@@ -6,7 +6,7 @@ from scipy.stats import multivariate_normal
 
 
 def create_covariances(cov, coord_names):
-    if isinstance(cov, (int, float)) or cov.size == 1:
+    if isinstance(cov, int | float) or cov.size == 1:
         # only for 2D, so we have to repeat
         cov_ = cov * np.eye(2)
     elif cov.size == 2:

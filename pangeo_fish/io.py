@@ -206,7 +206,7 @@ def open_copernicus_catalog(cat, chunks=None):
 
 
 def save_trajectories(traj, root, storage_options=None, format="geoparquet"):
-    from .tracks import to_dataframe
+    from pangeo_fish.tracks import to_dataframe
 
     converters = {
         "geoparquet": lambda x: x.drop(columns="traj_id"),
@@ -225,11 +225,10 @@ def save_trajectories(traj, root, storage_options=None, format="geoparquet"):
         path = f"{root}/{traj.id}.parquet"
 
         df = converter(traj.df)
-        df.to_parquet(path,
-                             storage_options=storage_options)
+        df.to_parquet(path, storage_options=storage_options)
 
 
-def read_trajectories( names, root, storage_options=None, format="geoparquet"):
+def read_trajectories(names, root, storage_options=None, format="geoparquet"):
     """read trajectories from disk
 
     Parameters
@@ -247,20 +246,18 @@ def read_trajectories( names, root, storage_options=None, format="geoparquet"):
         The read tracks as a collection.
     """
 
-    def read_geoparquet(root, name,storage_options):
+    def read_geoparquet(root, name, storage_options):
         path = f"{root}/{name}.parquet"
 
-        gdf = gpd.read_parquet(path,
-                             storage_options=storage_options)
+        gdf = gpd.read_parquet(path, storage_options=storage_options)
 
         return mpd.Trajectory(gdf, name)
 
     def read_parquet(root, name):
         path = f"{root}/{name}.parquet"
 
-        df = pd.read_parquet(path,
-                             storage_options=storage_options)
-        
+        df = pd.read_parquet(path, storage_options=storage_options)
+
         return mpd.Trajectory(df, name, x="longitude", y="latitude")
 
     readers = {
@@ -274,9 +271,11 @@ def read_trajectories( names, root, storage_options=None, format="geoparquet"):
 
     return mpd.TrajectoryCollection([reader(root, name) for name in names])
 
+
 def save_html_hvplot(plot, filepath, storage_options=None):
-    import hvplot.xarray
     import hvplot
+    import hvplot.xarray
+
     """
     Save a Holoviews plot to an HTML file either locally or on an S3 bucket.
 
@@ -290,18 +289,19 @@ def save_html_hvplot(plot, filepath, storage_options=None):
     - message (str): A message describing the outcome of the operation.
     """
     try:
-        if filepath.startswith('s3://'):
+        if filepath.startswith("s3://"):
             import s3fs
+
             if storage_options is None:
                 raise ValueError("Storage options must be provided for S3 storage.")
-                
+
             s3 = s3fs.S3FileSystem(**storage_options)
-            with s3.open(filepath, 'w') as f:
+            with s3.open(filepath, "w") as f:
                 hvplot.save(plot, f)
         else:
             hvplot.save(plot, filepath)
-        
+
         return True, "Plot saved successfully."
-    
+
     except Exception as e:
         return False, f"Error occurred: {str(e)}"

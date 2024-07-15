@@ -8,9 +8,9 @@ import zarr
 from tlz.functoolz import compose_left, curry, pipe
 from tlz.itertoolz import first
 
-from ... import tracks, utils
-from ..decode import mean_track, modal_track, viterbi, viterbi2
-from ..filter import _backward_zarr, _forward_zarr
+from pangeo_fish import tracks, utils
+from pangeo_fish.hmm.decode import mean_track, modal_track, viterbi, viterbi2
+from pangeo_fish.hmm.filter import _backward_zarr, _forward_zarr
 
 
 @dataclass

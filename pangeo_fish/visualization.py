@@ -2,8 +2,8 @@ import warnings
 
 import cartopy.crs as ccrs
 import cartopy.feature as cf
-import hvplot.xarray
-import cmocean
+import cmocean  # noqa: F401
+import hvplot.xarray  # noqa: F401
 import matplotlib.ticker as mticker
 import numpy as np
 from shapely.errors import ShapelyDeprecationWarning
@@ -124,8 +124,8 @@ def plot_map(
     return arr.hvplot.quadmesh(
         x=x,
         y=y,
-        xlim=bbox['longitude'],
-        ylim=bbox['latitude'],
+        xlim=bbox["longitude"],
+        ylim=bbox["latitude"],
         rasterize=rasterize,
         geo=geo,
         coastline=coastline,
