@@ -63,6 +63,8 @@ def prepare(parameters, runtime_config, cluster_definition):
     target_root = construct_target_root(runtime_config, parameters)
     target_root.mkdir(parents=True, exist_ok=True)
 
+    storage_options = runtime_config.get("storage_options")
+
     with create_cluster(**cluster_definition) as client, console.status(
         "[bold blue]processing[/]"
     ) as status:
@@ -82,13 +84,21 @@ def prepare(parameters, runtime_config, cluster_definition):
         )
         differences = subtract_data(tag, model, parameters)
         differences.chunk({"time": 1, "lat": -1, "lon": -1}).to_zarr(
-            f"{target_root}/diff.zarr", mode="w", consolidated=True
+            f"{target_root}/diff.zarr",
+            mode="w",
+            consolidated=True,
+            storage_options=storage_options,
         )
         console.log("stored temperature differences")
 
         # open back the diff
         differences = (
-            xr.open_dataset(f"{target_root}/diff.zarr", engine="zarr", chunks={})
+            xr.open_dataset(
+                f"{target_root}/diff.zarr",
+                engine="zarr",
+                chunks={},
+                storage_options=storage_options,
+            )
             .pipe(lambda ds: ds.merge(ds[["latitude", "longitude"]].compute()))
             .swap_dims({"lat": "yi", "lon": "xi"})
             .drop_vars(["lat", "lon"])
@@ -111,12 +121,16 @@ def prepare(parameters, runtime_config, cluster_definition):
             f"{target_root}/diff-regridded.zarr",
             mode="w",
             consolidated=True,
+            storage_options=storage_options,
         )
         console.log("finished regridding")
 
         # temperature emission matrices
         differences = xr.open_dataset(
-            f"{target_root}/diff-regridded.zarr", engine="zarr", chunks={}
+            f"{target_root}/diff-regridded.zarr",
+            engine="zarr",
+            chunks={},
+            storage_options=storage_options,
         )
 
         status.update("[bold blue]constructing emission matrices from temperature[/]")
@@ -125,6 +139,7 @@ def prepare(parameters, runtime_config, cluster_definition):
             f"{target_root}/emission.zarr",
             mode="w",
             consolidated=True,
+            storage_options=storage_options,
         )
         console.log("finished constructing emission matrices from temperature data")
 
@@ -132,7 +147,10 @@ def prepare(parameters, runtime_config, cluster_definition):
 
         # acoustic emission matrices
         emission = xr.open_dataset(
-            f"{target_root}/emission.zarr", engine="zarr", chunks={}
+            f"{target_root}/emission.zarr",
+            engine="zarr",
+            chunks={},
+            storage_options=storage_options,
         )
         status.update(
             "[bold blue]constructing emission matrices from acoustic detections[/]"
@@ -146,7 +164,10 @@ def prepare(parameters, runtime_config, cluster_definition):
         )
 
         combined.chunk({"x": -1, "y": -1, "time": 1}).to_zarr(
-            f"{target_root}/emission-acoustic.zarr", mode="w", consolidated=True
+            f"{target_root}/emission-acoustic.zarr",
+            mode="w",
+            consolidated=True,
+            storage_options=storage_options,
         )
         console.log("finished writing emission matrices from acoustic detections")
 
@@ -172,6 +193,7 @@ def estimate(parameters, runtime_config, cluster_definition, compute):
     cluster_definition = json.load(cluster_definition)
 
     target_root = construct_target_root(runtime_config, parameters)
+    storage_options = runtime_config.get("storage_options")
 
     if compute:
         chunks = None
@@ -190,6 +212,7 @@ def estimate(parameters, runtime_config, cluster_definition, compute):
                 engine="zarr",
                 chunks=chunks,
                 inline_array=True,
+                storage_options=storage_options,
             )
             .pipe(combine_emission_pdf)
             .pipe(maybe_compute, compute=compute)
