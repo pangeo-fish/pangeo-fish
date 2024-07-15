@@ -72,9 +72,18 @@ select = [
     "E",  # Pycodestyle
     "I",  # isort
     "UP", # Pyupgrade
+    "TID", # tidy imports
 ]
-fixable = ["I"]
+extend-safe-fixes = [
+    "TID252",  # absolute imports
+]
+fixable = ["I", "TID"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["pangeo_fish"]
 known-third-party = []
+
+[tool.ruff.lint.flake8-tidy-imports]
+# Disallow all relative imports.
+ban-relative-imports = "all"
+
