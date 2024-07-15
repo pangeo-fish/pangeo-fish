@@ -6,9 +6,9 @@ import xarray as xr
 from tlz.functoolz import compose_left, curry, pipe
 from tlz.itertoolz import first
 
-from ... import tracks, utils
-from ..decode import mean_track, modal_track, viterbi, viterbi2
-from ..filter import forward, forward_backward, score
+from pangeo_fish import tracks, utils
+from pangeo_fish.hmm.decode import mean_track, modal_track, viterbi, viterbi2
+from pangeo_fish.hmm.filter import forward, forward_backward, score
 
 
 @dataclass
@@ -168,10 +168,10 @@ class EagerScoreEstimator:
         ----------
         X : Dataset
             The emission probability maps. The dataset should contain these variables:
-       s    - `initial`, the initial probability map
+            - `initial`, the initial probability map
             - `pdf`, the emission probabilities
             - `mask`, a mask to select ocean pixels
-            Due to the convolution method we use today, we can't pass np.nan, thus we send x.fillna(0), but drop the values whihch are less than 0 and put them back to np.nan when we return the value.  
+            Due to the convolution method we use today, we can't pass np.nan, thus we send x.fillna(0), but drop the values whihch are less than 0 and put them back to np.nan when we return the value.
         spatial_dims : list of hashable, optional
             The spatial dimensions of the dataset.
         temporal_dims : list of hashable, optional
@@ -183,11 +183,11 @@ class EagerScoreEstimator:
             The computed state probabilities
         """
         state = self._forward_backward_algorithm(
-            X.fillna(0), 
-            spatial_dims=spatial_dims, 
+            X.fillna(0),
+            spatial_dims=spatial_dims,
             temporal_dims=temporal_dims,
         )
-        state=state.where((state > 0))
+        state = state.where(state > 0)
         return state.rename("states")
 
     def score(self, X, *, spatial_dims=None, temporal_dims=None):
