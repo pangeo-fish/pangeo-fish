@@ -1,12 +1,13 @@
 import dask
 import dask.array as da
-import dask_image.ndfilters
 import numpy as np
 import scipy.ndimage
 
 
 def gaussian_filter(X, sigma, **kwargs):
     if isinstance(X, da.Array) and X.npartitions > 1:
+        import dask_image.ndfilters
+
         return dask_image.ndfilters.gaussian_filter(X, sigma=sigma, **kwargs)
     elif isinstance(X, da.Array):
         return X.map_blocks(
