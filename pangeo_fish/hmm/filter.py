@@ -118,12 +118,11 @@ def score(
 
     initial, mask = dask.compute(initial_probability, mask)
     if isinstance(initial_probability, da.Array):
-        initial= dask.compute(initial_probability)
+        initial = dask.compute(initial_probability)
     else:
-        initial= initial_probability
+        initial = initial_probability
     if isinstance(mask, da.Array):
-        mask= dask.compute(mask)
-
+        mask = dask.compute(mask)
 
     normalizations.append(np.sum(initial * dask.compute(emission[0, ...])[0]))
     previous = initial

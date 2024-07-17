@@ -2,13 +2,13 @@ import io
 import json
 import os
 
+import copernicusmarine as copernicusmarine
 import datatree
 import fsspec
 import geopandas as gpd
 import movingpandas as mpd
 import pandas as pd
 import xarray as xr
-import copernicusmarine as copernicusmarine
 
 from pangeo_fish.dataset_utils import broadcast_variables
 
@@ -207,7 +207,7 @@ def open_copernicus_catalog(cat, chunks=None):
 
 
 def save_trajectories(traj, root, storage_options=None, format="geoparquet"):
-    from .tracks import to_dataframe
+    from pangeo_fish.tracks import to_dataframe
 
     converters = {
         "geoparquet": lambda x: x.drop(columns="traj_id"),
@@ -226,11 +226,10 @@ def save_trajectories(traj, root, storage_options=None, format="geoparquet"):
         path = f"{root}/{traj.id}.parquet"
 
         df = converter(traj.df)
-        df.to_parquet(path,
-                             storage_options=storage_options)
+        df.to_parquet(path, storage_options=storage_options)
 
 
-def read_trajectories( names, root, storage_options=None, format="geoparquet"):
+def read_trajectories(names, root, storage_options=None, format="geoparquet"):
     """read trajectories from disk
 
     Parameters
@@ -248,20 +247,18 @@ def read_trajectories( names, root, storage_options=None, format="geoparquet"):
         The read tracks as a collection.
     """
 
-    def read_geoparquet(root, name,storage_options):
+    def read_geoparquet(root, name, storage_options):
         path = f"{root}/{name}.parquet"
 
-        gdf = gpd.read_parquet(path,
-                             storage_options=storage_options)
+        gdf = gpd.read_parquet(path, storage_options=storage_options)
 
         return mpd.Trajectory(gdf, name)
 
     def read_parquet(root, name):
         path = f"{root}/{name}.parquet"
 
-        df = pd.read_parquet(path,
-                             storage_options=storage_options)
-        
+        df = pd.read_parquet(path, storage_options=storage_options)
+
         return mpd.Trajectory(df, name, x="longitude", y="latitude")
 
     readers = {
@@ -275,9 +272,11 @@ def read_trajectories( names, root, storage_options=None, format="geoparquet"):
 
     return mpd.TrajectoryCollection([reader(root, name) for name in names])
 
+
 def save_html_hvplot(plot, filepath, storage_options=None):
-    import hvplot.xarray
     import hvplot
+    import hvplot.xarray
+
     """
     Save a Holoviews plot to an HTML file either locally or on an S3 bucket.
 
@@ -291,23 +290,25 @@ def save_html_hvplot(plot, filepath, storage_options=None):
     - message (str): A message describing the outcome of the operation.
     """
     try:
-        if filepath.startswith('s3://'):
+        if filepath.startswith("s3://"):
             import s3fs
+
             if storage_options is None:
                 raise ValueError("Storage options must be provided for S3 storage.")
-                
+
             s3 = s3fs.S3FileSystem(**storage_options)
-            with s3.open(filepath, 'w') as f:
+            with s3.open(filepath, "w") as f:
                 hvplot.save(plot, f)
         else:
             hvplot.save(plot, filepath)
-        
+
         return True, "Plot saved successfully."
-    
+
     except Exception as e:
         return False, f"Error occurred: {str(e)}"
 
-def get_copernicus_zarr(name='cmems_mod_ibi_phy_my_0.083deg', format='arco-geo-series'):
+
+def get_copernicus_zarr(name="cmems_mod_ibi_phy_my_0.083deg", format="arco-geo-series"):
     """
     Retrieve Copernicus Marine data in zarr format.
 
@@ -324,44 +325,52 @@ def get_copernicus_zarr(name='cmems_mod_ibi_phy_my_0.083deg', format='arco-geo-s
     """
     # Dictionary to store URIs by key
     uris_by_key = {}
-    
+
     # Retrieve dataset information from Copernicus Marine
     catalogue = copernicusmarine.describe(
         include_datasets=True,
         contains=[name],
     )
-    
+
     # Iterate through datasets in the catalogue
-    for value in catalogue['products'][0]['datasets']:
-        dataset_id = value['dataset_id']
-        
+    for value in catalogue["products"][0]["datasets"]:
+        dataset_id = value["dataset_id"]
+
         # Check if the dataset contains relevant data
-        if any(substring in dataset_id for substring in ['static', '2D_PT1H-m', '3D_PT1H-m', '-3D_P1D-m']):
+        if any(
+            substring in dataset_id
+            for substring in ["static", "2D_PT1H-m", "3D_PT1H-m", "-3D_P1D-m"]
+        ):
             uris = []
-            
+
             # Extract URIs for relevant services
-            for service in value['versions'][0]['parts'][0]['services']:
-                service_name = service['service_type']['service_name']
+            for service in value["versions"][0]["parts"][0]["services"]:
+                service_name = service["service_type"]["service_name"]
                 if service_name in [format, "arco-time-series", "static-arco"]:
-                    uris.append(service['uri'])
-                    
+                    uris.append(service["uri"])
+
             uris_by_key[dataset_id] = uris
-            
+
     # Open necessary datasets
-    thetao = xr.open_dataset(uris_by_key[name + '-3D_P1D-m'][0], engine='zarr', chunks={})[['thetao']]
-    zos = xr.open_dataset(uris_by_key[name + '-3D_P1D-m'][0], engine='zarr', chunks={}).zos
-    deptho = xr.open_dataset(uris_by_key[name + '-3D_static'][0], engine="zarr", chunks={}).deptho
+    thetao = xr.open_dataset(
+        uris_by_key[name + "-3D_P1D-m"][0], engine="zarr", chunks={}
+    )[["thetao"]]
+    zos = xr.open_dataset(
+        uris_by_key[name + "-3D_P1D-m"][0], engine="zarr", chunks={}
+    ).zos
+    deptho = xr.open_dataset(
+        uris_by_key[name + "-3D_static"][0], engine="zarr", chunks={}
+    ).deptho
 
     # Assign latitude from thetao to deptho
     deptho["latitude"] = thetao["latitude"]
-    
+
     # Create mask for deptho
     mask = deptho.isnull()
 
     # Merge datasets and assign relevant variables
     ds = (
-        thetao.rename({"thetao": "TEMP"})
-        .assign(
+        thetao.rename({"thetao": "TEMP"}).assign(
             {
                 "XE": zos,
                 "H0": deptho,
@@ -374,15 +383,19 @@ def get_copernicus_zarr(name='cmems_mod_ibi_phy_my_0.083deg', format='arco-geo-s
     ds["depth"] = abs(ds["depth"])
 
     # Rearrange depth coordinates and assign dynamic depth and bathymetry
-    ds = ds.isel(depth=slice(None, None, -1)).assign(
-        {
-            "dynamic_depth": lambda ds: (ds["depth"] + ds["XE"]).assign_attrs(
-                {"units": "m", "positive": "down"}
-            ),
-            "dynamic_bathymetry": lambda ds: (ds["H0"] + ds["XE"]).assign_attrs(
-                {"units": "m", "positive": "down"}
-            ),
-        }
-    ).pipe(broadcast_variables, {"lat": "latitude", "lon": "longitude"})
+    ds = (
+        ds.isel(depth=slice(None, None, -1))
+        .assign(
+            {
+                "dynamic_depth": lambda ds: (ds["depth"] + ds["XE"]).assign_attrs(
+                    {"units": "m", "positive": "down"}
+                ),
+                "dynamic_bathymetry": lambda ds: (ds["H0"] + ds["XE"]).assign_attrs(
+                    {"units": "m", "positive": "down"}
+                ),
+            }
+        )
+        .pipe(broadcast_variables, {"lat": "latitude", "lon": "longitude"})
+    )
 
     return ds

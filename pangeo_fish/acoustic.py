@@ -6,14 +6,13 @@ from tlz.itertoolz import first
 from xarray_healpy.conversions import geographic_to_cartesian
 from xarray_healpy.operations import buffer_points
 
+from pangeo_fish import utils
+from pangeo_fish.cf import bounds_to_bins
 from pangeo_fish.healpy import (
     astronomic_to_cartesian,
     astronomic_to_cell_ids,
     geographic_to_astronomic,
 )
-
-from . import utils
-from .cf import bounds_to_bins
 
 
 def extract_receivers(
@@ -182,59 +181,62 @@ def deployment_reception_masks(stations, grid, buffer_size, method="recompute"):
 
     return masks.drop_vars(["cell_ids"])
 
-def create_masked_fill_map(tag, grid, maps,chunk_time=24):
+
+def create_masked_fill_map(tag, grid, maps, chunk_time=24):
     """
     Create a masked fill map indicating the detection zones.
 
     Parameters:
     - tag (xarray.Dataset): A dataset containing station information, with variables 'recover_time' and 'deploy_time'.
     - grid (xarray.Dataset): A dataset containing grid information, with a variable 'time'.
-    - maps (xarray.Dataset): A dataset containing map information, containing locations of acoustic stations. 
+    - maps (xarray.Dataset): A dataset containing map information, containing locations of acoustic stations.
 
     Returns:
     - fill_map (xarray.DataArray): A masked fill map indicating the detection zones.
 
     The function creates a masked fill map based on the station and grid information provided. It calculates
     the detection zones based on the time intervals specified in the 'recover_time' and 'deploy_time' variables
-    in the tag station dataset. It then masks the fill map based on the grid's mask and returns the 
+    in the tag station dataset. It then masks the fill map based on the grid's mask and returns the
     resulting fill map.
     """
     # load stations informations
-    ds = tag["stations"].to_dataset()[['recover_time', 'deploy_time']]
+    ds = tag["stations"].to_dataset()[["recover_time", "deploy_time"]]
     grid_time = grid[["time"]].cf.add_bounds(keys="time")
 
     # Expand dimensions of grid_time to match the number of deployment_ids
     stations = grid_time.expand_dims(deployment_id=ds.deployment_id, axis=0)
 
-    # Create a boolean mask indicating if each time bin falls within 
+    # Create a boolean mask indicating if each time bin falls within
     # deploy_time and recover_time
-    time_mask = (
-        (stations.time_bounds[:, 0] >= ds.deploy_time) &
-        (stations.time_bounds[:, 1] <= ds.recover_time)
+    time_mask = (stations.time_bounds[:, 0] >= ds.deploy_time) & (
+        stations.time_bounds[:, 1] <= ds.recover_time
     )
 
     # Add a new dimension 'time' to the dataset with the boolean mask
-    stations['detecting'] = time_mask
-    stations = stations.drop_vars(['time_bounds'])
-    stations = stations.where(stations.sum(dim='time') != 0, True, False)#, drop=True)
+    stations["detecting"] = time_mask
+    stations = stations.drop_vars(["time_bounds"])
+    stations = stations.where(
+        stations.sum(dim="time") != 0, True, False
+    )  # , drop=True)
 
     # Expand the maps dataset to match the dimensions of the active stations dataset
-    all_detecting_stations = maps.sel(
-        deployment_id=stations.deployment_id).expand_dims(
-        {'time': stations.time}).chunk({"time": chunk_time})
-    a=stations.sel(time=all_detecting_stations.time).chunk({"time": chunk_time})
-    b=all_detecting_stations
-    ds = (a * b).sum(dim='deployment_id')
+    all_detecting_stations = (
+        maps.sel(deployment_id=stations.deployment_id)
+        .expand_dims({"time": stations.time})
+        .chunk({"time": chunk_time})
+    )
+    a = stations.sel(time=all_detecting_stations.time).chunk({"time": chunk_time})
+    b = all_detecting_stations
+    ds = (a * b).sum(dim="deployment_id")
 
     all_detecting_stations = xr.where(ds == 0, 1, np.nan)
-    fill_map = all_detecting_stations.detecting.pipe(
-        utils.normalize, dim=["x", "y"]
-    )
+    fill_map = all_detecting_stations.detecting.pipe(utils.normalize, dim=["x", "y"])
 
     return fill_map
 
+
 def emission_probability(
-    tag, grid, buffer_size, nondetections="ignore", cell_ids="keep",chunk_time=24
+    tag, grid, buffer_size, nondetections="ignore", cell_ids="keep", chunk_time=24
 ):
     """construct emission probability maps from acoustic detections
 
@@ -286,11 +288,11 @@ def emission_probability(
 
     if nondetections == "ignore":
         fill_map = xr.ones_like(grid["cell_ids"], dtype=float).pipe(
-            utils.normalize, dim=["x","y"]
+            utils.normalize, dim=["x", "y"]
         )
     elif nondetections == "mask":
-        #fill_map = maps.any(dim="deployment_id").pipe(np.logical_not).astype(float)
-        fill_map = create_masked_fill_map(tag, grid, maps,chunk_time)
+        # fill_map = maps.any(dim="deployment_id").pipe(np.logical_not).astype(float)
+        fill_map = create_masked_fill_map(tag, grid, maps, chunk_time)
     else:
         raise ValueError("invalid nondetections treatment argument")
 

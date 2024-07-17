@@ -1,8 +1,8 @@
 import numpy as np
 import xarray as xr
 
-from ... import utils
-from ..filter import single_pass
+from pangeo_fish import utils
+from pangeo_fish.hmm.filter import single_pass
 
 
 class NaiveGaussianRandomWalkSTHMM:
