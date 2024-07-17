@@ -3,7 +3,7 @@ import operator
 import movingpandas as mpd
 from tlz.functoolz import curry, do, pipe
 
-from .functoolz import lookup
+from pangeo_fish.functoolz import lookup
 
 
 def to_trajectory(ds, name, crs=None):
