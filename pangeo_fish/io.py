@@ -307,7 +307,9 @@ def save_html_hvplot(plot, filepath, storage_options=None):
         return False, f"Error occurred: {str(e)}"
 
 
-def get_copernicus_zarr(name="cmems_mod_ibi_phy_my_0.083deg", format="arco-geo-series"):
+def open_copernicus_zarr(
+    name="cmems_mod_ibi_phy_my_0.083deg", format="arco-geo-series"
+):
     """
     Retrieve Copernicus Marine data in zarr format.
 
