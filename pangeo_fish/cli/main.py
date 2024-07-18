@@ -162,10 +162,16 @@ def prepare(parameters, runtime_config, cluster_definition):
     default=True,
     help="load the emission pdf into memory before the parameter estimation",
 )
+@click.option(
+    "--estimator",
+    type=click.Choice(["cached", "eager"]),
+    default="cached",
+    help="choose the estimator",
+)
 @click.argument("parameters", type=click.File(mode="r"))
 @click.argument("runtime_config", type=click.File(mode="r"))
-def estimate(parameters, runtime_config, cluster_definition, compute):
-    from pangeo_fish.hmm.estimator import EagerEstimator
+def estimate(parameters, runtime_config, cluster_definition, estimator, compute):
+    from pangeo_fish.hmm.estimator import CachedEstimator, EagerEstimator
     from pangeo_fish.hmm.optimize import EagerBoundsSearch
 
     runtime_config = json.load(runtime_config)
@@ -181,6 +187,19 @@ def estimate(parameters, runtime_config, cluster_definition, compute):
         chunks = {"x": -1, "y": -1}
         client = create_cluster(**cluster_definition)
         console.print(f"dashboard link: {client.dashboard_link}")
+
+    def create_cached_estimator():
+        import zarr
+
+        cache_path = target_root / "cache.zarr"
+        cache_store = zarr.storage.DirectoryStore(cache_path)
+
+        return CachedEstimator(cache=cache_store)
+
+    estimators = {
+        "cached": create_cached_estimator,
+        "eager": EagerEstimator,
+    }
 
     with (
         client,
@@ -209,10 +228,9 @@ def estimate(parameters, runtime_config, cluster_definition, compute):
             )
         console.log("detecting missing timesteps: none found")
 
-        # TODO: make estimator and optimizer configurable somehow
-        estimator = EagerEstimator()
+        estimator_ = estimators.get(estimator)()
         optimizer = EagerBoundsSearch(
-            estimator,
+            estimator_,
             (1e-4, emission.attrs["max_sigma"]),
             optimizer_kwargs={"disp": 3, "xtol": parameters.get("tolerance", 0.01)},
         )
