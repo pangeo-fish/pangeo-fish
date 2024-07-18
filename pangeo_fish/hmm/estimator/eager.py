@@ -12,8 +12,10 @@ from pangeo_fish.hmm.filter import forward, forward_backward, score
 
 
 @dataclass
-class EagerScoreEstimator:
+class EagerEstimator:
     """Estimator to train and predict gaussian random walk hidden markov models
+
+    This estimator performs all calculations eagerly and assumes all data can fit into memory.
 
     Parameters
     ----------
