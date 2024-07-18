@@ -347,7 +347,7 @@ def open_copernicus_zarr(
         # Check if the dataset contains relevant data
         if any(
             substring in dataset_id
-            for substring in ["static", "2D_PT1H-m", "3D_PT1H-m", "-3D_P1D-m"]
+            for substring in ["static", "2D_PT1H-m", "3D_PT1H-m", "3D_P1D-m"]
         ):
             uris = []
 
@@ -363,36 +363,28 @@ def open_copernicus_zarr(
     thetao = xr.open_dataset(
         uris_by_key[f"{name}-3D_P1D-m"][0], engine="zarr", chunks={}
     )[["thetao"]]
-    zos = xr.open_dataset(
-        uris_by_key[f"{name}-3D_P1D-m"][0], engine="zarr", chunks={}
-    ).zos
+    zos = xr.open_dataset(uris_by_key[f"{name}-3D_P1D-m"][0], engine="zarr", chunks={})[
+        "zos"
+    ]
     deptho = xr.open_dataset(
         uris_by_key[f"{name}-3D_static"][0], engine="zarr", chunks={}
-    ).deptho
+    )["deptho"]
 
-    # Assign latitude from thetao to deptho
-    deptho["latitude"] = thetao["latitude"]
-
-    # Create mask for deptho
-    mask = deptho.isnull()
-
-    # Merge datasets and assign relevant variables
     ds = (
-        thetao.rename({"thetao": "TEMP"}).assign(
+        # assemble dataset
+        thetao.rename({"thetao": "TEMP"})
+        .assign(
             {
-                "XE": zos,
-                "H0": deptho,
-                "mask": mask,
+                "XE": zos.variable,
+                "H0": deptho.variable,
+                "mask": deptho.isnull().variable,
             }
         )
-    ).rename({"latitude": "lat", "longitude": "lon", "elevation": "depth"})
-
-    # Ensure depth is positive
-    ds["depth"] = abs(ds["depth"])
-
-    # Rearrange depth coordinates and assign dynamic depth and bathymetry
-    ds = (
-        ds.isel(depth=slice(None, None, -1))
+        .rename({"latitude": "lat", "longitude": "lon", "elevation": "depth"})
+        # Rearrange depth coordinates
+        .assign(depth=lambda ds: abs(ds["depth"]))
+        .isel(depth=slice(None, None, -1))
+        # assign dynamic depth and bathymetry
         .assign(
             {
                 "dynamic_depth": lambda ds: (ds["depth"] + ds["XE"]).assign_attrs(
