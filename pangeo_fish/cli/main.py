@@ -165,7 +165,7 @@ def prepare(parameters, runtime_config, cluster_definition):
 @click.argument("parameters", type=click.File(mode="r"))
 @click.argument("runtime_config", type=click.File(mode="r"))
 def estimate(parameters, runtime_config, cluster_definition, compute):
-    from pangeo_fish.hmm.estimator import EagerScoreEstimator
+    from pangeo_fish.hmm.estimator import EagerEstimator
     from pangeo_fish.hmm.optimize import EagerBoundsSearch
 
     runtime_config = json.load(runtime_config)
@@ -210,7 +210,7 @@ def estimate(parameters, runtime_config, cluster_definition, compute):
         console.log("detecting missing timesteps: none found")
 
         # TODO: make estimator and optimizer configurable somehow
-        estimator = EagerScoreEstimator()
+        estimator = EagerEstimator()
         optimizer = EagerBoundsSearch(
             estimator,
             (1e-4, emission.attrs["max_sigma"]),
@@ -241,7 +241,7 @@ def estimate(parameters, runtime_config, cluster_definition, compute):
 @click.argument("runtime_config", type=click.File(mode="r"))
 def decode(parameters, runtime_config, cluster_definition):
     # read input data: emission, sigma
-    from pangeo_fish.hmm.estimator import EagerScoreEstimator
+    from pangeo_fish.hmm.estimator import EagerEstimator
     from pangeo_fish.io import save_trajectories
 
     runtime_config = json.load(runtime_config)
@@ -273,7 +273,7 @@ def decode(parameters, runtime_config, cluster_definition):
             params = json.load(f)
         console.log("read model parameter")
 
-        optimized = EagerScoreEstimator(**params)
+        optimized = EagerEstimator(**params)
         console.log("created the estimator")
 
         status.update("[bold blue]predicting the state probabilities...[/]")
