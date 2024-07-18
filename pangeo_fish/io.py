@@ -311,16 +311,21 @@ def get_copernicus_zarr(name="cmems_mod_ibi_phy_my_0.083deg", format="arco-geo-s
     """
     Retrieve Copernicus Marine data in zarr format.
 
-    Args:
-        name (str): Name of the dataset to retrieve. Defaults to 'cmems_mod_ibi_phy_my_0.083deg'.
-        format (str): Format of the dataset. Can be 'arco-geo-series' or 'arco-time-series'. Defaults to 'arco-geo-series'.
-
-    Returns:
-        xarray.Dataset: Dataset containing retrieved data.
-
-    Note:
+    .. warning::
         This function is not fully finalized and may require further adjustments.
 
+
+    Parameters:
+    -----------
+    name : str, default: "cmems_mod_ibi_phy_my_0.083deg"
+        Name of the dataset to retrieve.
+    format : {"arco-geo-series", "arco-time-series"}, default: "arco-geo-series"
+        Format of the dataset.
+
+    Returns
+    -------
+    xarray.Dataset
+        Dataset containing retrieved data.
     """
     import copernicusmarine as copernicusmarine
 
