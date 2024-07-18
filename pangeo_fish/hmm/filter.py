@@ -30,61 +30,6 @@ def predict(X, sigma, *, mask=None, **kwargs):
     return np.where(mask, filtered, 0)
 
 
-def single_pass(pdf, sigma, initial_probability, mask=None, *, truncate=4.0):
-    """compute a single pass (forwards) of the HMM filter
-
-    Parameters
-    ----------
-    pdf : array-like
-        probability density function of the observations
-    sigma : float
-        standard deviation of the gaussian kernel, in units of pixels
-    initial_probability : array-like
-        The probability of the first hidden state
-    mask : array-like, optional
-        A mask to apply after each step. No shadowing yet.
-
-    Returns
-    -------
-    predictions : array-like
-        The probability of the
-    normalizations : array-like
-        The normalization factors per time step.
-    posterior_probabilities : array-like
-        The probability of the hidden state given the observation.
-    """
-    n_max = pdf.shape[0]
-
-    normalizations = []
-    posterior_probabilities = []
-    predictions = []
-
-    predictions.append(initial_probability)
-    posterior_probabilities.append(initial_probability)
-    normalizations.append(np.sum(initial_probability * pdf[0, ...]))
-
-    for index in range(1, n_max):
-        prediction = predict(
-            posterior_probabilities[index - 1],
-            sigma=sigma,
-            mask=mask,
-            truncate=truncate,
-        )
-        updated = prediction * pdf[index, ...]
-
-        normalizations.append(np.sum(updated))
-        normalized = updated / normalizations[index]
-
-        predictions.append(prediction)
-        posterior_probabilities.append(normalized)
-
-    normalizations_ = np.stack(normalizations, axis=0)
-    posterior_probabilities_ = np.stack(posterior_probabilities, axis=0)
-    predictions_ = np.stack(predictions, axis=0)
-
-    return predictions_, normalizations_, posterior_probabilities_
-
-
 def score(
     emission,
     sigma,
