@@ -106,7 +106,11 @@ class EagerBoundsSearch:
 
         def f(sigma, X):
             # computing is important to avoid recomputing as many times as the result is used
-            return self.estimator.set_params(sigma=sigma).score(X).compute().data
+            result = self.estimator.set_params(sigma=sigma).score(X)
+            if not hasattr(result, "compute"):
+                return result
+
+            return result.compute()
 
         lower, upper = self.param_bounds
         result = scipy.optimize.fminbound(
@@ -154,7 +158,11 @@ class TargetBoundsSearch:
 
         def f(sigma):
             # computing is important to avoid recomputing as many times as the result is used
-            return self.estimator.set_params(sigma=sigma).score(X).compute()
+            result = self.estimator.set_params(sigma=sigma).score(X)
+            if not hasattr(result, "compute"):
+                return result
+
+            return result.compute()
 
         lower, upper = self.param_bounds
         # result = scipy.optimize.fminbound(f, lower, upper, **self.optimizer_kwargs)
