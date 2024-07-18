@@ -14,10 +14,11 @@ from pangeo_fish.hmm.filter import _backward_zarr, _forward_zarr
 
 
 @dataclass
-class EagerEstimator:
+class CachedEstimator:
     """Estimator to train and predict gaussian random walk hidden markov models
 
-    This estimator performs all calculations eagerly and assumes all data can fit into memory.
+    This estimator caches intermediate data to a zarr store, allowing it to compute tracks
+    that wouldn't fit into memory otherwise, even on very big machines.
 
     Parameters
     ----------
