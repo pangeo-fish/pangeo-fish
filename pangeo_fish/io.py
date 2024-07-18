@@ -361,13 +361,13 @@ def open_copernicus_zarr(
 
     # Open necessary datasets
     thetao = xr.open_dataset(
-        uris_by_key[name + "-3D_P1D-m"][0], engine="zarr", chunks={}
+        uris_by_key[f"{name}-3D_P1D-m"][0], engine="zarr", chunks={}
     )[["thetao"]]
     zos = xr.open_dataset(
-        uris_by_key[name + "-3D_P1D-m"][0], engine="zarr", chunks={}
+        uris_by_key[f"{name}-3D_P1D-m"][0], engine="zarr", chunks={}
     ).zos
     deptho = xr.open_dataset(
-        uris_by_key[name + "-3D_static"][0], engine="zarr", chunks={}
+        uris_by_key[f"{name}-3D_static"][0], engine="zarr", chunks={}
     ).deptho
 
     # Assign latitude from thetao to deptho
