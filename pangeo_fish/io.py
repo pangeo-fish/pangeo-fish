@@ -2,7 +2,6 @@ import io
 import json
 import os
 
-import copernicusmarine as copernicusmarine
 import datatree
 import fsspec
 import geopandas as gpd
@@ -323,6 +322,8 @@ def get_copernicus_zarr(name="cmems_mod_ibi_phy_my_0.083deg", format="arco-geo-s
         This function is not fully finalized and may require further adjustments.
 
     """
+    import copernicusmarine as copernicusmarine
+
     # Dictionary to store URIs by key
     uris_by_key = {}
 
