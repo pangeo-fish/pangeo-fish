@@ -1,5 +1,6 @@
 import json
 from contextlib import nullcontext
+from functools import partial
 
 import pint_xarray
 import rich_click as click
@@ -8,6 +9,7 @@ from rich.console import Console
 
 from pangeo_fish.cli.cluster import create_cluster
 from pangeo_fish.cli.path import construct_target_root
+from pangeo_fish.hmm.estimator import CachedEstimator, EagerEstimator
 from pangeo_fish.pdf import combine_emission_pdf
 
 ureg = pint_xarray.unit_registry
@@ -29,6 +31,14 @@ def maybe_compute(ds, compute):
         return ds
 
     return ds.compute()
+
+
+def create_cached_estimator(cache_path, **kwargs):
+    import zarr
+
+    cache_store = zarr.storage.DirectoryStore(cache_path)
+
+    return CachedEstimator(cache=cache_store, **kwargs)
 
 
 @click.group()
@@ -171,7 +181,6 @@ def prepare(parameters, runtime_config, cluster_definition):
 @click.argument("parameters", type=click.File(mode="r"))
 @click.argument("runtime_config", type=click.File(mode="r"))
 def estimate(parameters, runtime_config, cluster_definition, estimator, compute):
-    from pangeo_fish.hmm.estimator import CachedEstimator, EagerEstimator
     from pangeo_fish.hmm.optimize import EagerBoundsSearch
 
     runtime_config = json.load(runtime_config)
@@ -179,6 +188,7 @@ def estimate(parameters, runtime_config, cluster_definition, estimator, compute)
     cluster_definition = json.load(cluster_definition)
 
     target_root = construct_target_root(runtime_config, parameters)
+    cache_path = target_root / "cache.zarr"
 
     if compute:
         chunks = None
@@ -188,16 +198,8 @@ def estimate(parameters, runtime_config, cluster_definition, estimator, compute)
         client = create_cluster(**cluster_definition)
         console.print(f"dashboard link: {client.dashboard_link}")
 
-    def create_cached_estimator():
-        import zarr
-
-        cache_path = target_root / "cache.zarr"
-        cache_store = zarr.storage.DirectoryStore(cache_path)
-
-        return CachedEstimator(cache=cache_store)
-
     estimators = {
-        "cached": create_cached_estimator,
+        "cached": partial(create_cached_estimator, cache_path),
         "eager": EagerEstimator,
     }
 
@@ -255,11 +257,16 @@ def estimate(parameters, runtime_config, cluster_definition, estimator, compute)
 
 @main.command("decode", short_help="produce the model output")
 @click.option("--cluster-definition", type=click.File(mode="r"))
+@click.option(
+    "--estimator",
+    type=click.Choice(["cached", "eager"]),
+    default="cached",
+    help="choose the estimator",
+)
 @click.argument("parameters", type=click.File(mode="r"))
 @click.argument("runtime_config", type=click.File(mode="r"))
-def decode(parameters, runtime_config, cluster_definition):
+def decode(parameters, runtime_config, cluster_definition, estimator):
     # read input data: emission, sigma
-    from pangeo_fish.hmm.estimator import EagerEstimator
     from pangeo_fish.io import save_trajectories
 
     runtime_config = json.load(runtime_config)
@@ -267,8 +274,14 @@ def decode(parameters, runtime_config, cluster_definition):
     cluster_definition = json.load(cluster_definition)
 
     target_root = construct_target_root(runtime_config, parameters)
+    cache_path = target_root / "cache.zarr"
     tracks_root = target_root / "tracks"
     tracks_root.mkdir(exist_ok=True, parents=True)
+
+    estimators = {
+        "cached": partial(create_cached_estimator, cache_path),
+        "eager": EagerEstimator,
+    }
 
     with (
         create_cluster(**cluster_definition) as client,
@@ -291,7 +304,7 @@ def decode(parameters, runtime_config, cluster_definition):
             params = json.load(f)
         console.log("read model parameter")
 
-        optimized = EagerEstimator(**params)
+        optimized = estimators.get(estimator)(**params)
         console.log("created the estimator")
 
         status.update("[bold blue]predicting the state probabilities...[/]")
