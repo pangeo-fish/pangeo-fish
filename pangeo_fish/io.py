@@ -341,7 +341,15 @@ def open_copernicus_zarr(
        {'H':'cmems_mod_glo_phy_anfc_0.083deg_PT1H-m_202406' ,
       'D':'cmems_mod_glo_phy_anfc_0.083deg_P1D-m_202406'},
        'deptho': 'cmems_mod_glo_phy_anfc_0.083deg_static_202211--ext--bathy'},
-      'IBI_MULTIYEAR_PHY_005_002':
+    'GLOBAL_MULTIYEAR_PHY_001_030':
+      {'thetao':
+      {'NEW':'cmems_mod_glo_phy_myint_0.083deg_P1D-m_202311',
+      'OLD':'cmems_mod_glo_phy_my_0.083deg_P1D-m_202311' },
+      'zos':
+       {'NEW':'cmems_mod_glo_phy_myint_0.083deg_P1D-m_202311' ,
+      'OLD':'cmems_mod_glo_phy_anfc_0.083deg_P1D-m_202406'},
+       'deptho': 'cmems_mod_glo_phy_anfc_0.083deg_static_202211--ext--bathy'},
+          'IBI_MULTIYEAR_PHY_005_002':
       {'thetao':
       {'H':'cmems_mod_ibi_phy_anfc_0.027deg-3D_PT1H-m_202211',
       'D':'cmems_mod_ibi_phy_anfc_0.027deg-3D_P1D-m_202211' },
