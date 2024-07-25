@@ -308,9 +308,10 @@ def save_html_hvplot(plot, filepath, storage_options=None):
 
 
 def open_copernicus_zarr(
-    model='GLOBAL_ANALYSISFORECAST_PHY_001_024', format="geoChunked", 
+    model="GLOBAL_ANALYSISFORECAST_PHY_001_024",
+    format="geoChunked",
     freq="D",
-    interp_thetao=False
+    interp_thetao=False,
 ):
     """
     Retrieve Copernicus Marine data in zarr format.
@@ -331,78 +332,91 @@ def open_copernicus_zarr(
     xarray.Dataset
         Dataset containing retrieved data.
     """
-    # Add here datas which are valid. 
-    
-    name={'GLOBAL_ANALYSISFORECAST_PHY_001_024':
-      {'thetao':
-      {'H':'cmems_mod_glo_phy-thetao_anfc_0.083deg_PT6H-i_202406',
-      'D':'cmems_mod_glo_phy-thetao_anfc_0.083deg_P1D-m_202406' },
-      'zos':
-       {'H':'cmems_mod_glo_phy_anfc_0.083deg_PT1H-m_202406' ,
-      'D':'cmems_mod_glo_phy_anfc_0.083deg_P1D-m_202406'},
-       'deptho': 'cmems_mod_glo_phy_anfc_0.083deg_static_202211--ext--bathy'},
-    'GLOBAL_MULTIYEAR_PHY_001_030':
-      {'thetao':
-      {'NEW':'cmems_mod_glo_phy_myint_0.083deg_P1D-m_202311',
-      'OLD':'cmems_mod_glo_phy_my_0.083deg_P1D-m_202311' },
-      'zos':
-       {'NEW':'cmems_mod_glo_phy_myint_0.083deg_P1D-m_202311' ,
-      'OLD':'cmems_mod_glo_phy_anfc_0.083deg_P1D-m_202406'},
-       'deptho': 'cmems_mod_glo_phy_anfc_0.083deg_static_202211--ext--bathy'},
-          'IBI_MULTIYEAR_PHY_005_002':
-      {'thetao':
-      {'H':'cmems_mod_ibi_phy_anfc_0.027deg-3D_PT1H-m_202211',
-      'D':'cmems_mod_ibi_phy_anfc_0.027deg-3D_P1D-m_202211' },
-      'zos':
-       {'H':'cmems_mod_ibi_phy_anfc_0.027deg-2D_PT1H-m_202211' ,
-      'D':'cmems_mod_ibi_phy_anfc_0.027deg-3D_P1D-m_202211'},
-       'deptho': 'cmems_mod_ibi_phy_anfc_0.027deg-3D_static_202211--ext--bathy'},
-                'IBI_ANALYSISFORECAST_PHY_005_001':
-      {'thetao':
-      {'H':'',
-      'D':'cmems_mod_ibi_phy_my_0.083deg-3D_P1D-m_202012' },
-      'zos':
-       {'H':'cmems_mod_ibi_phy_my_0.083deg-2D_PT1H-m_202012' ,
-      'D':'cmems_mod_ibi_phy_my_0.083deg-3D_P1D-m_202012'},
-       'deptho': 'cmems_mod_ibi_phy_my_0.083deg-3D_static_202012--ext--bathy'},
-                'NWSHELF_ANALYSISFORECAST_PHY_004_013':
-      {'thetao':
-      {'H':'cmems_mod_nws_phy_anfc_0.027deg-3D_PT1H-m_202309',
-      'D':'cmems_mod_nws_phy_anfc_0.027deg-3D_P1D-m_202309' },
-      'zos':
-       {'H':'cmems_mod_nws_phy_anfc_0.027deg-2D_PT1H-m_202309' ,
-      'D':'cmems_mod_nws_phy_anfc_0.027deg-3D_P1D-m_202309'},
-       'deptho': 'cmems_mod_nws_phy_anfc_0.027deg-3D_static_202309--ext--bathy'},
-          'NWSHELF_MULTIYEAR_PHY_004_009':
-      {'thetao':
-      {'H':'',
-      'D':'cmems_mod_nws_phy-t_my_7km-3D_P1D-m_202012' },
-      'zos':
-       {'H':'' ,
-      'D':'cmems_mod_nws_phy-ssh_my_7km-2D_P1D-m_202012'},
-       'deptho': 'cmems_mod_nws_phy-bottomt_my_7km-2D_P1D-m_202012'},
-         }
+    # Add here datas which are valid.
+
+    name = {
+        "GLOBAL_ANALYSISFORECAST_PHY_001_024": {
+            "thetao": {
+                "H": "cmems_mod_glo_phy-thetao_anfc_0.083deg_PT6H-i_202406",
+                "D": "cmems_mod_glo_phy-thetao_anfc_0.083deg_P1D-m_202406",
+            },
+            "zos": {
+                "H": "cmems_mod_glo_phy_anfc_0.083deg_PT1H-m_202406",
+                "D": "cmems_mod_glo_phy_anfc_0.083deg_P1D-m_202406",
+            },
+            "deptho": "cmems_mod_glo_phy_anfc_0.083deg_static_202211--ext--bathy",
+        },
+        "GLOBAL_MULTIYEAR_PHY_001_030": {
+            "thetao": {
+                "NEW": "cmems_mod_glo_phy_myint_0.083deg_P1D-m_202311",
+                "OLD": "cmems_mod_glo_phy_my_0.083deg_P1D-m_202311",
+            },
+            "zos": {
+                "NEW": "cmems_mod_glo_phy_myint_0.083deg_P1D-m_202311",
+                "OLD": "cmems_mod_glo_phy_anfc_0.083deg_P1D-m_202406",
+            },
+            "deptho": "cmems_mod_glo_phy_anfc_0.083deg_static_202211--ext--bathy",
+        },
+        "IBI_MULTIYEAR_PHY_005_002": {
+            "thetao": {
+                "H": "cmems_mod_ibi_phy_anfc_0.027deg-3D_PT1H-m_202211",
+                "D": "cmems_mod_ibi_phy_anfc_0.027deg-3D_P1D-m_202211",
+            },
+            "zos": {
+                "H": "cmems_mod_ibi_phy_anfc_0.027deg-2D_PT1H-m_202211",
+                "D": "cmems_mod_ibi_phy_anfc_0.027deg-3D_P1D-m_202211",
+            },
+            "deptho": "cmems_mod_ibi_phy_anfc_0.027deg-3D_static_202211--ext--bathy",
+        },
+        "IBI_ANALYSISFORECAST_PHY_005_001": {
+            "thetao": {"H": "", "D": "cmems_mod_ibi_phy_my_0.083deg-3D_P1D-m_202012"},
+            "zos": {
+                "H": "cmems_mod_ibi_phy_my_0.083deg-2D_PT1H-m_202012",
+                "D": "cmems_mod_ibi_phy_my_0.083deg-3D_P1D-m_202012",
+            },
+            "deptho": "cmems_mod_ibi_phy_my_0.083deg-3D_static_202012--ext--bathy",
+        },
+        "NWSHELF_ANALYSISFORECAST_PHY_004_013": {
+            "thetao": {
+                "H": "cmems_mod_nws_phy_anfc_0.027deg-3D_PT1H-m_202309",
+                "D": "cmems_mod_nws_phy_anfc_0.027deg-3D_P1D-m_202309",
+            },
+            "zos": {
+                "H": "cmems_mod_nws_phy_anfc_0.027deg-2D_PT1H-m_202309",
+                "D": "cmems_mod_nws_phy_anfc_0.027deg-3D_P1D-m_202309",
+            },
+            "deptho": "cmems_mod_nws_phy_anfc_0.027deg-3D_static_202309--ext--bathy",
+        },
+        "NWSHELF_MULTIYEAR_PHY_004_009": {
+            "thetao": {"H": "", "D": "cmems_mod_nws_phy-t_my_7km-3D_P1D-m_202012"},
+            "zos": {"H": "", "D": "cmems_mod_nws_phy-ssh_my_7km-2D_P1D-m_202012"},
+            "deptho": "cmems_mod_nws_phy-bottomt_my_7km-2D_P1D-m_202012",
+        },
+    }
     ##TODO, Here in the stac catalogue, we will need to add the data copied in GFTS
     #    import copernicusmarine as copernicusmarine
 
     import pystac_client
-    client=pystac_client.Client.open('https://keewis-copernicus-marine.hf.space')
-    result=client.search(collections=[model],).item_collection()
-    var={item.id: item for item in result.items} 
+
+    client = pystac_client.Client.open("https://keewis-copernicus-marine.hf.space")
+    result = client.search(
+        collections=[model],
+    ).item_collection()
+    var = {item.id: item for item in result.items}
 
     # Open necessary datasets
-    
-    asset=var[name[model]['thetao'][freq]].assets["geoChunked"]
-    thetao=xr.open_dataset(asset.href,engine='zarr',chunks={}).thetao.to_dataset()
- 
 
-    asset=var[name[model]['zos'][freq]].assets["geoChunked"]
-    zos=xr.open_dataset(asset.href,engine='zarr',chunks={}).zos 
-    
-    asset=var[name[model]['deptho']].assets["static"]
-    deptho=xr.open_dataset(asset.href,engine='zarr',chunks={}).deptho
+    asset = var[name[model]["thetao"][freq]].assets["geoChunked"]
+    thetao = xr.open_dataset(asset.href, engine="zarr", chunks={}).thetao.to_dataset()
 
-    if (interp_thetao): thetao=thetao.interp(time=zos.time,method='quadratic')
+    asset = var[name[model]["zos"][freq]].assets["geoChunked"]
+    zos = xr.open_dataset(asset.href, engine="zarr", chunks={}).zos
+
+    asset = var[name[model]["deptho"]].assets["static"]
+    deptho = xr.open_dataset(asset.href, engine="zarr", chunks={}).deptho
+
+    if interp_thetao:
+        thetao = thetao.interp(time=zos.time, method="quadratic")
 
     ds = (
         # assemble dataset
