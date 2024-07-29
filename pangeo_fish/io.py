@@ -2,7 +2,6 @@ import io
 import json
 import os
 
-import copernicusmarine as copernicusmarine
 import datatree
 import fsspec
 import geopandas as gpd
@@ -312,17 +311,25 @@ def open_copernicus_zarr(name="cmems_mod_ibi_phy_my_0.083deg", format="arco-geo-
     """
     Retrieve Copernicus Marine data in zarr format.
 
-    Args:
-        name (str): Name of the dataset to retrieve. Defaults to 'cmems_mod_ibi_phy_my_0.083deg'.
-        format (str): Format of the dataset. Can be 'arco-geo-series' or 'arco-time-series'. Defaults to 'arco-geo-series'.
+    Parameters
+    ----------
+    name : str, optional
+        Name of the dataset to retrieve. Defaults to 'cmems_mod_ibi_phy_my_0.083deg'.
+    format : str, optional
+        Format of the dataset. Can be 'arco-geo-series' or 'arco-time-series'. Defaults to 'arco-geo-series'.
 
-    Returns:
-        xarray.Dataset: Dataset containing retrieved data.
+    Returns
+    -------
+    xarray.Dataset
+        Dataset containing retrieved data.
 
-    Note:
-        This function is not fully finalized and may require further adjustments.
-
+    Notes
+    -----
+    This function is not fully finalized and may require further adjustments.
     """
+
+    import copernicusmarine as copernicusmarine
+    
     # Dictionary to store URIs by key
     uris_by_key = {}
 
