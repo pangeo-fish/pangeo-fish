@@ -36,7 +36,9 @@ class Predictor:
 class Gaussian2DCartesian(Predictor):
     sigma: float
     truncate: float = 4.0
-    filter_kwargs: dict[str, Any] = {"mode": "constant", "cval": 0}
+    filter_kwargs: dict[str, Any] = field(
+        default_factory=lambda: {"mode": "constant", "cval": 0}
+    )
 
     def predict(self, X, *, mask=None):
         filtered = gaussian_filter(X, sigma=self.sigma, **self.filter_kwargs)
