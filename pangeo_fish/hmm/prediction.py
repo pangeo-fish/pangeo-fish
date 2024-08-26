@@ -45,7 +45,7 @@ class Gaussian2DCartesian(Predictor):
         if mask is None:
             return filtered
 
-        return np.where(mask, filtered)
+        return np.where(mask, filtered, 0)
 
 
 @dataclass
