@@ -25,15 +25,15 @@ class CachedEstimator:
     sigma : float, default: None
         The primary model parameter: the standard deviation of the distance
         per time unit traveled by the fish, in the same unit as the grid coordinates.
-    truncate : float, default: 4.0
-        The cut-off limit of the filter. This can be used, together with `sigma`, to
-        calculate the maximum distance per time unit traveled by the fish.
+    predictor_factory : callable
+        Factory for the predictor class. It expects the parameter ("sigma") as a keyword
+        argument and returns the predictor instance.
     cache : str or zarr.Store
         Zarr store to write intermediate results to.
     """
 
-    sigma: float = None
-    truncate: float = 4.0
+    sigma: float
+    predictor_factory: callable
 
     cache: str | os.PathLike | zarr.storage.Store = None
 
@@ -82,8 +82,7 @@ class CachedEstimator:
         forward = _forward_zarr(
             group["emission"],
             group.create_group("forward"),
-            sigma=self.sigma,
-            truncate=self.truncate,
+            predictor=self.predictor_factory(sigma=self.sigma),
             progress=progress,
         )
 
@@ -122,15 +121,13 @@ class CachedEstimator:
         _forward_zarr(
             group["emission"],
             group.create_group("forward", overwrite=True),
-            sigma=self.sigma,
-            truncate=self.truncate,
+            predictor=self.predictor_factory(sigma=self.sigma),
             progress=progress,
         )
         _backward_zarr(
             group["forward"],
             group.create_group("backward", overwrite=True),
-            sigma=self.sigma,
-            truncate=self.truncate,
+            predictor=self.predictor_factory(sigma=self.sigma),
             progress=progress,
         )
 
