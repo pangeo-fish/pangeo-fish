@@ -95,4 +95,9 @@ class Gaussian1DHealpix(Predictor):
 
     def predict(self, X, *, mask=None):
         padded = self.padder.apply(X)
-        return self.convolve(padded)
+        filtered = self.convolve(padded)
+
+        if mask is None:
+            return filtered
+
+        return np.where(mask, filtered, 0)
