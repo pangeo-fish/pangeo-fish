@@ -60,7 +60,7 @@ class Gaussian1DHealpix(Predictor):
     weights_threshold: float | None = None
 
     pad_kwargs: dict[str, Any] = field(
-        default_factory=lambda: {"mode": "constant", "constant_values": 0}
+        default_factory=lambda: {"mode": "constant", "constant_value": 0}
     )
 
     def __post_init__(self):
