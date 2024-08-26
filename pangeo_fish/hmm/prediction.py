@@ -26,7 +26,7 @@ def gaussian_filter(X, sigma, **kwargs):
         return scipy.ndimage.gaussian_filter(X, sigma=sigma, **kwargs)
 
 
-@dataclass(frozen=True)
+@dataclass
 class Predictor:
     def predict(self, X, *, mask=None):
         pass
@@ -49,6 +49,7 @@ class Gaussian2DCartesian(Predictor):
         return np.where(mask, filtered)
 
 
+@dataclass
 class Gaussian1DHealpix(Predictor):
     cell_ids: _ArrayLike
     grid_info: DGGSInfo
