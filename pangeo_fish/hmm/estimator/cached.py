@@ -36,6 +36,7 @@ class CachedEstimator:
     predictor_factory: callable
 
     cache: str | os.PathLike | zarr.storage.Store = None
+    progress: bool = False
 
     def to_dict(self):
         exclude = {"cache"}
@@ -52,9 +53,7 @@ class CachedEstimator:
         """
         return replace(self, **params)
 
-    def _score(
-        self, X, *, cache, spatial_dims=None, temporal_dims=None, progress=False
-    ):
+    def _score(self, X, *, cache, spatial_dims=None, temporal_dims=None, progress=None):
         if self.sigma is None:
             raise ValueError("unset sigma, cannot run the filter")
 
@@ -62,6 +61,9 @@ class CachedEstimator:
             raise ValueError("requires a zarr store for now")
         else:
             cache_store = cache
+
+        if progress is None:
+            progress = self.progress
 
         if spatial_dims is None:
             spatial_dims = utils._detect_spatial_dims(X)
@@ -92,7 +94,7 @@ class CachedEstimator:
             return value if not np.isnan(value) else np.inf
 
     def _forward_backward_algorithm(
-        self, X, cache, *, spatial_dims=None, temporal_dims=None, progress=False
+        self, X, cache, *, spatial_dims=None, temporal_dims=None, progress=None
     ):
         if self.sigma is None:
             raise ValueError("unset sigma, cannot run the filter")
@@ -101,6 +103,9 @@ class CachedEstimator:
             raise ValueError("requires a zarr store for now")
         else:
             cache_store = cache
+
+        if progress is None:
+            progress = self.progress
 
         if spatial_dims is None:
             spatial_dims = utils._detect_spatial_dims(X)
@@ -135,7 +140,7 @@ class CachedEstimator:
         return xr.open_dataset(cache_store, engine="zarr", chunks={}, group="backward")
 
     def predict_proba(
-        self, X, *, cache=None, spatial_dims=None, temporal_dims=None, progress=False
+        self, X, *, cache=None, spatial_dims=None, temporal_dims=None, progress=None
     ):
         """predict the state probabilities
 
@@ -181,7 +186,7 @@ class CachedEstimator:
         return state.where(X["mask"])
 
     def score(
-        self, X, *, cache=None, spatial_dims=None, temporal_dims=None, progress=False
+        self, X, *, cache=None, spatial_dims=None, temporal_dims=None, progress=None
     ):
         """score the fit of the selected model to the data
 
