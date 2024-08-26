@@ -4,6 +4,7 @@ from typing import Any
 import dask.array as da
 import numpy as np
 import scipy.ndimage
+from tlz.functoolz import curry
 from xarray.namedarray._typing import _arrayfunction_or_api as _ArrayLike
 from xdggs.grid import DGGSInfo
 
@@ -60,10 +61,12 @@ class Gaussian1DHealpix(Predictor):
     pad_kwargs: dict[str, Any] = field(
         default_factory=lambda: {"mode": "constant", "constant_value": 0}
     )
+    optimize_convolution: bool = True
 
     def __post_init__(self):
         import healpix_convolution as hc
         import healpix_convolution.padding
+        import opt_einsum
 
         ring = hc.kernels.gaussian.compute_ring(
             self.grid_info.resolution, self.sigma, self.truncate, self.kernel_size
@@ -81,8 +84,15 @@ class Gaussian1DHealpix(Predictor):
             weights_threshold=self.weights_threshold,
         )
 
-    def predict(self, X, *, mask=None):
-        from healpix_convolution.convolution import convolve
+        if self.optimize_convolution:
+            self.convolve = opt_einsum.contract_expression(
+                "...a,ba->...b", self.padder.cell_ids.shape, self.kernel, constants=[1]
+            )
+        else:
+            from healpix_convolution.convolution import convolve
 
+            self.convolve = curry(convolve, kernel=self.kernel)
+
+    def predict(self, X, *, mask=None):
         padded = self.padder.apply(X)
-        return convolve(padded, self.kernel)
+        return self.convolve(padded)
