@@ -2,9 +2,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import dask.array as da
-import healpix_convolution as hc
-import healpix_convolution.convolution
-import healpix_convolution.padding
 import numpy as np
 import scipy.ndimage
 from xarray.namedarray._typing import _arrayfunction_or_api as _ArrayLike
@@ -65,6 +62,9 @@ class Gaussian1DHealpix(Predictor):
     )
 
     def __post_init__(self):
+        import healpix_convolution as hc
+        import healpix_convolution.padding
+
         ring = hc.kernels.gaussian.compute_ring(
             self.grid_info.resolution, self.sigma, self.truncate, self.kernel_size
         )
@@ -82,5 +82,7 @@ class Gaussian1DHealpix(Predictor):
         )
 
     def predict(self, X, *, mask=None):
+        from healpix_convolution.convolution import convolve
+
         padded = self.padder.apply(X)
-        return hc.convolution.convolve(padded, self.kernel)
+        return convolve(padded, self.kernel)
