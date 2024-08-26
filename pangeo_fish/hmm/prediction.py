@@ -4,6 +4,7 @@ from typing import Any
 import dask.array as da
 import healpix_convolution as hc
 import healpix_convolution.convolution
+import healpix_convolution.padding
 import numpy as np
 import scipy.ndimage
 from xarray.namedarray._typing import _arrayfunction_or_api as _ArrayLike
