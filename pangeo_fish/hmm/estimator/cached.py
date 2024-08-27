@@ -39,7 +39,7 @@ class CachedEstimator:
     progress: bool = False
 
     def to_dict(self):
-        exclude = {"cache"}
+        exclude = {"cache", "progress", "predictor_factory"}
 
         return {k: v for k, v in asdict(self).items() if k not in exclude}
 

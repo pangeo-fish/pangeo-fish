@@ -31,7 +31,9 @@ class EagerEstimator:
     sigma: float | None = None
 
     def to_dict(self):
-        return asdict(self)
+        exclude = {"predictor_factory"}
+
+        return {k: v for k, v in asdict(self).items() if k not in exclude}
 
     def set_params(self, **params):
         """set the parameters on a new instance
