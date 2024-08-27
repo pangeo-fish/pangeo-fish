@@ -22,18 +22,18 @@ class CachedEstimator:
 
     Parameters
     ----------
-    sigma : float, default: None
-        The primary model parameter: the standard deviation of the distance
-        per time unit traveled by the fish, in the same unit as the grid coordinates.
     predictor_factory : callable
         Factory for the predictor class. It expects the parameter ("sigma") as a keyword
         argument and returns the predictor instance.
+    sigma : float, optional
+        The primary model parameter: the standard deviation of the distance
+        per time unit traveled by the fish, in the same unit as the grid coordinates.
     cache : str or zarr.Store
         Zarr store to write intermediate results to.
     """
 
-    sigma: float
     predictor_factory: callable
+    sigma: float | None = None
 
     cache: str | os.PathLike | zarr.storage.Store = None
     progress: bool = False
