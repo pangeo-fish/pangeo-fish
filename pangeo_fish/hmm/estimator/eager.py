@@ -183,7 +183,7 @@ class EagerEstimator:
         spatial_dims=None,
         temporal_dims=None,
         progress=False,
-        additional_quantities=["distance", "velocity"],
+        additional_quantities=["distance", "speed"],
     ):
         """decode the state sequence from the selected model and the data
 
@@ -205,7 +205,7 @@ class EagerEstimator:
             - ``"viterbi"``: use the viterbi algorithm to determine the most probable states
 
             If a list of methods is given, decode using all methods in sequence.
-        additional_quantities : None or list of str, default: ["distance", "velocity"]
+        additional_quantities : None or list of str, default: ["distance", "speed"]
             Additional quantities to compute from the decoded tracks. Use ``None`` or an
             empty list to not compute anything.
 
