@@ -2,6 +2,7 @@ import io
 import json
 import os
 
+import copernicusmarine as copernicusmarine
 import datatree
 import fsspec
 import geopandas as gpd
@@ -305,3 +306,96 @@ def save_html_hvplot(plot, filepath, storage_options=None):
 
     except Exception as e:
         return False, f"Error occurred: {str(e)}"
+
+
+def get_copernicus_zarr(name="cmems_mod_ibi_phy_my_0.083deg", format="arco-geo-series"):
+    """
+    Retrieve Copernicus Marine data in zarr format.
+
+    Args:
+        name (str): Name of the dataset to retrieve. Defaults to 'cmems_mod_ibi_phy_my_0.083deg'.
+        format (str): Format of the dataset. Can be 'arco-geo-series' or 'arco-time-series'. Defaults to 'arco-geo-series'.
+
+    Returns:
+        xarray.Dataset: Dataset containing retrieved data.
+
+    Note:
+        This function is not fully finalized and may require further adjustments.
+
+    """
+    # Dictionary to store URIs by key
+    uris_by_key = {}
+
+    # Retrieve dataset information from Copernicus Marine
+    catalogue = copernicusmarine.describe(
+        include_datasets=True,
+        contains=[name],
+    )
+
+    # Iterate through datasets in the catalogue
+    for value in catalogue["products"][0]["datasets"]:
+        dataset_id = value["dataset_id"]
+
+        # Check if the dataset contains relevant data
+        if any(
+            substring in dataset_id
+            for substring in ["static", "2D_PT1H-m", "3D_PT1H-m", "-3D_P1D-m"]
+        ):
+            uris = []
+
+            # Extract URIs for relevant services
+            for service in value["versions"][0]["parts"][0]["services"]:
+                service_name = service["service_type"]["service_name"]
+                if service_name in [format, "arco-time-series", "static-arco"]:
+                    uris.append(service["uri"])
+
+            uris_by_key[dataset_id] = uris
+
+    # Open necessary datasets
+    thetao = xr.open_dataset(
+        uris_by_key[name + "-3D_P1D-m"][0], engine="zarr", chunks={}
+    )[["thetao"]]
+    zos = xr.open_dataset(
+        uris_by_key[name + "-3D_P1D-m"][0], engine="zarr", chunks={}
+    ).zos
+    deptho = xr.open_dataset(
+        uris_by_key[name + "-3D_static"][0], engine="zarr", chunks={}
+    ).deptho
+
+    # Assign latitude from thetao to deptho
+    deptho["latitude"] = thetao["latitude"]
+
+    # Create mask for deptho
+    mask = deptho.isnull()
+
+    # Merge datasets and assign relevant variables
+    ds = (
+        thetao.rename({"thetao": "TEMP"}).assign(
+            {
+                "XE": zos,
+                "H0": deptho,
+                "mask": mask,
+            }
+        )
+    ).rename({"latitude": "lat", "longitude": "lon", "elevation": "depth"})
+
+    # Ensure depth is positive
+    ds["depth"] = abs(ds["depth"])
+
+    # Rearrange depth coordinates and assign dynamic depth and bathymetry
+    ds = (
+        ds.isel(depth=slice(None, None, -1))
+        .assign(
+            {
+                "dynamic_depth": lambda ds: (ds["depth"] + ds["XE"]).assign_attrs(
+                    {"units": "m", "positive": "down"}
+                ),
+                "dynamic_bathymetry": lambda ds: (ds["H0"] + ds["XE"]).assign_attrs(
+                    {"units": "m", "positive": "down"}
+                ),
+            }
+        )
+        .pipe(broadcast_variables, {"lat": "latitude", "lon": "longitude"})
+    )
+
+    return ds
