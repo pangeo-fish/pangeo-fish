@@ -105,6 +105,10 @@ class EagerBoundsSearch:
         """
 
         def f(sigma, X):
+            if isinstance(sigma, xr.DataArray):
+                print("sigma is an xarray.DataArray: patch here to fix it to float")
+                sigma=sigma.to_numpy().item()
+                print("sigma fixed to ",sigma)               
             # computing is important to avoid recomputing as many times as the result is used
             result = self.estimator.set_params(sigma=sigma).score(X)
             if not hasattr(result, "compute"):
