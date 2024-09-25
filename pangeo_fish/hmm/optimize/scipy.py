@@ -87,7 +87,7 @@ class EagerBoundsSearch:
 
     def __init__(self, estimator, param_bounds, *, optimizer_kwargs={}):
         self.estimator = estimator
-        self.param_bounds = param_bounds
+        self.param_bounds = tuple(float(v) for v in param_bounds)
         self.optimizer_kwargs = optimizer_kwargs
 
     def fit(self, X):
@@ -105,10 +105,6 @@ class EagerBoundsSearch:
         """
 
         def f(sigma, X):
-            if isinstance(sigma, xr.DataArray):
-                print("sigma is an xarray.DataArray: patch here to fix it to float")
-                sigma=sigma.to_numpy().item()
-                print("sigma fixed to ",sigma)               
             # computing is important to avoid recomputing as many times as the result is used
             result = self.estimator.set_params(sigma=sigma).score(X)
             if not hasattr(result, "compute"):
