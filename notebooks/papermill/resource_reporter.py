@@ -7,6 +7,18 @@ from threading import Event
 import psutil
 
 
+def _fmt_memory(memory: int) -> str:
+    mb = memory / 2**20
+    gb = memory / 2**30
+    if gb > 2:
+        memory_fmt = f"{gb:.0f}GiB"
+    elif gb > 1:
+        memory_fmt = f"{gb:.1f}GiB"
+    else:
+        memory_fmt = f"{mb:.0f}MiB"
+    return memory_fmt
+
+
 class ResourceCollector:
     """Report peak resources over time
 
@@ -40,8 +52,16 @@ class ResourceCollector:
         psutil.cpu_percent()  # start cpu percent counter
         while not event.is_set():
             time.sleep(self.sample_rate)
-            mem = self.collect_one()
+            try:
+                mem = self.collect_one()
+            except Exception as e:
+                # suppress errors collecting memory
+                print("Error collecting memory: {e}")
+                continue
             if mem > peak_mem:
+                # track large allocations as they happen
+                if mem > peak_mem + (1 * 2**30):
+                    print(f"Memory increased {_fmt_memory(peak_mem)} -> {_fmt_memory(mem)}")
                 peak_mem = mem
         avg_cpu = 0.01 * psutil.cpu_percent() * self._cpu_count
         return avg_cpu, peak_mem
@@ -58,29 +78,24 @@ class ResourceCollector:
         """Finish collecting and return result"""
         self._duration = time.perf_counter() - self._start_time
         self._event.set()
-        result = self._future.result()
+        f = self._future
         self._start = None
         self._event = None
         self._future = None
-        return result
+        return f.result()
 
     def finish_and_report(self, result=None):
         """Finish collecting and report results"""
         if self._event is None:
             # first hook run
             return
-        cpu, memory = self.finish()
-        mb = memory / 2**20
-        gb = memory / 2**30
-        if gb > 2:
-            memory_fmt = f"{gb:.0f}GiB"
-        elif gb > 1:
-            memory_fmt = f"{gb:.1f}GiB"
-        else:
-            memory_fmt = f"{mb:.0f}MiB"
-        print(
-            f"Usage: cpu={cpu:.1f}, peak mem={memory_fmt}, duration={self._duration:.0f}s"
-        )
+        try:
+            cpu, memory = self.finish()
+        except Exception as e:
+            print(f"Error collecting resources: {e}")
+            return
+        memory_fmt = _fmt_memory(memory)
+        print(f"Usage: cpu={cpu:.1f}, peak mem={memory_fmt}, duration={self._duration:.0f}s")
 
     # let it be used as a context manager
     def __enter__(self):
