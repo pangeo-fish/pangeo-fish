@@ -87,7 +87,7 @@ class EagerBoundsSearch:
 
     def __init__(self, estimator, param_bounds, *, optimizer_kwargs={}):
         self.estimator = estimator
-        self.param_bounds = param_bounds
+        self.param_bounds = tuple(float(v) for v in param_bounds)
         self.optimizer_kwargs = optimizer_kwargs
 
     def fit(self, X):
