@@ -31,7 +31,7 @@ class ResourceCollector:
     def __init__(self, sample_rate=0.1):
         self.sample_rate = 0.1
 
-        self._pool = ThreadPoolExecutor(1)
+        self._pool = None
         self._event = self._future = None
         self._cpu_count = psutil.cpu_count()
 
@@ -49,6 +49,7 @@ class ResourceCollector:
         """Constantly collect memory and cpu usage (in the background)"""
         self.collect_one()
         peak_mem = self.collect_one()
+        checkpoint_mem = peak_mem
         psutil.cpu_percent()  # start cpu percent counter
         while not event.is_set():
             time.sleep(self.sample_rate)
@@ -56,12 +57,15 @@ class ResourceCollector:
                 mem = self.collect_one()
             except Exception as e:
                 # suppress errors collecting memory
-                print("Error collecting memory: {e}")
+                print(f"Resources: Error collecting memory: {e}")
                 continue
             if mem > peak_mem:
                 # track large allocations as they happen
-                if mem > peak_mem + (1 * 2**30):
-                    print(f"Memory increased {_fmt_memory(peak_mem)} -> {_fmt_memory(mem)}")
+                # currently 2GB chunks
+                if mem > checkpoint_mem + (2 * 2**30):
+                    dt = time.perf_counter() - self._start_time
+                    print(f"Resources: Memory increased {_fmt_memory(checkpoint_mem)} -> {_fmt_memory(mem)} ({dt:.0f}s)")
+                    checkpoint_mem = mem
                 peak_mem = mem
         avg_cpu = 0.01 * psutil.cpu_percent() * self._cpu_count
         return avg_cpu, peak_mem
@@ -71,6 +75,10 @@ class ResourceCollector:
         self._start_time = time.perf_counter()
         assert self._event is None
         self._event = Event()
+        if self._pool:
+            self._pool.close()
+        # create new pool each time so debug output is connected to the right cell
+        self._pool = ThreadPoolExecutor(1)
         self._future = self._pool.submit(self.collect, self._event)
         self._start = time.perf_counter()
 
@@ -82,7 +90,11 @@ class ResourceCollector:
         self._start = None
         self._event = None
         self._future = None
-        return f.result()
+        pool = self._pool
+        self._pool = None
+        # cleanup
+        with pool:
+            return f.result()
 
     def finish_and_report(self, result=None):
         """Finish collecting and report results"""
@@ -92,10 +104,10 @@ class ResourceCollector:
         try:
             cpu, memory = self.finish()
         except Exception as e:
-            print(f"Error collecting resources: {e}")
+            print(f"Resources: Error collecting: {e}")
             return
         memory_fmt = _fmt_memory(memory)
-        print(f"Usage: cpu={cpu:.1f}, peak mem={memory_fmt}, duration={self._duration:.0f}s")
+        print(f"Resources: cpu={cpu:.1f}, mem={memory_fmt}, duration={self._duration:.0f}s")
 
     # let it be used as a context manager
     def __enter__(self):
