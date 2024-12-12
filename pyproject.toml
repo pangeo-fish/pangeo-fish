@@ -8,10 +8,10 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-    "xarray",
-    "xarray-datatree",  # remove once datatree has been merged into xarray
+    "xarray>=2024.10.0",
     "pandas",
     "numpy",
     "scipy",
