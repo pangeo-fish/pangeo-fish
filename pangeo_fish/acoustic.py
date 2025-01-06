@@ -284,12 +284,13 @@ def emission_probability(
         grid[["cell_ids", "longitude", "latitude"]],
         buffer_size,
         method=cell_ids,
-    )
+    ).chunk() # chunks the map (to prevent autochunk which caused division by zero error)
 
     ids = maps.deployment_id.to_numpy()
-    assert all(
-        [w in ids for w in weights.deployment_id.to_numpy()]
-    ), "Some receiver ids `tag.acoustic` are not included in `tag.stations`."
+    if any(
+        [w not in ids for w in weights.deployment_id.to_numpy()]
+    ):
+        print("WARNING: Some receiver ids `tag.acoustic` are not included in `tag.stations`.")
         
     if nondetections == "ignore":
         fill_map = xr.ones_like(grid["cell_ids"], dtype=float).pipe(
