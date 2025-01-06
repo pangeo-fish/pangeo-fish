@@ -250,12 +250,12 @@ def emission_probability(
     buffer_size : pint.Quantity
         The size of the buffer around each station. Must be given in
         a length unit.
-    nondetections : {"mask", "ignore"}, default: "mask"
+    nondetections : {"mask", "ignore"}, default: "ignore"
         How to deal with non-detections in time slices without detections:
 
         - "mask": set the buffer around stations without detections to `0`.
         - "ignore": all valid pixels are equally probable.
-    cell_ids : {"recompute", "keep"}, default: "recompute"
+    cell_ids : {"recompute", "keep"}, default: "keep"
         How to deal with model cell ids for the computation of reception masks.
 
         - "keep": use the cell ids given by the model. This is the more correct method.
@@ -286,6 +286,11 @@ def emission_probability(
         method=cell_ids,
     )
 
+    ids = maps.deployment_id.to_numpy()
+    assert all(
+        [w in ids for w in weights.deployment_id.to_numpy()]
+    ), "Some receiver ids `tag.acoustic` are not included in `tag.stations`."
+        
     if nondetections == "ignore":
         fill_map = xr.ones_like(grid["cell_ids"], dtype=float).pipe(
             utils.normalize, dim=["x", "y"]
