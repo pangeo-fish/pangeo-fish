@@ -204,6 +204,76 @@ def open_copernicus_catalog(cat, chunks=None):
     return ds
 
 
+def prepare_dataset(dataset, chunks=None, bbox=None):
+    """Prepares a dataset of a reference model.
+    It renames some variables, adds dynamic bathymetry and depth and broadcast lat(itude)/lon(gitude) coordinates.
+    
+    Parameters
+    ----------
+    dataset : xarray.Dataset
+        The pre-opened dataset of the fields data
+    chunks : mapping, optional
+        The initial chunk size. Should be multiples of the on-disk chunk sizes. By
+        default, the chunksizes are ``{"lat": -1, "lon": -1, "depth": 11, "time": 8}``
+    bbox : dict[str, tuple[float, float]], optional
+        The spatial boundaries of the area of interest. If provided, it checks whether there is data available.
+
+    Returns
+    -------
+    ds : xarray.Dataset
+        The post-processed dataset.
+    """
+    # checks that the studied area is included in the dataset
+    if bbox is not None:
+        assert all([k in ["latitude", "longitude"] for k in bbox.keys()]), "bbox must contain keys the \"latitude\" and \"longitude\"."
+        box = {
+            "latitude": [
+                dataset.lat.min().to_numpy().item(),
+                dataset.lat.max().to_numpy().item()
+            ],
+            "longitude": [
+                dataset.lon.min().to_numpy().item(),
+                dataset.lon.max().to_numpy().item()
+            ]
+        }
+        valid_bbox = True
+        
+        for inter in ["latitude", "longitude"]:
+            tmp1 = box[inter] # field model
+            tmp2 = bbox[inter]
+            if (tmp2[0] < tmp1[0]) or (tmp2[1] > tmp1[1]):
+                valid_bbox = False
+        
+        if not valid_bbox:
+            print("WARNING: The studied area is not entirely included in the field model!") 
+    
+        
+    if chunks is None:
+        chunks = {"lat": -1, "lon": -1, "depth": 11, "time": 8}
+
+    d = {"thetao": "TEMP", "zos": "XE", "deptho": "H0"}
+    coords_and_vars  = [v for v in dataset.variables]
+    assert all([n in coords_and_vars for n in d.keys()]), f"The dataset must have variables \"{list(d.keys())}\"."
+    
+    ds = (
+        dataset.chunk(chunks=chunks)
+        .rename(d)
+        # .assign_coords({"time": lambda ds: ds["time"].astype("datetime64[ns]")}) # useless?
+        .assign(
+            {
+                "dynamic_depth": lambda ds: (ds["depth"] + ds["XE"]).assign_attrs(
+                    {"units": "m", "positive": "down"}
+                ),
+                "dynamic_bathymetry": lambda ds: (ds["H0"] + ds["XE"]).assign_attrs(
+                    {"units": "m", "positive": "down"}
+                ),
+            }
+        )
+        .pipe(broadcast_variables, {"lat": "latitude", "lon": "longitude"}) # useless?
+    )
+    return ds
+
+
 def save_trajectories(traj, root, storage_options=None, format="geoparquet"):
     from pangeo_fish.tracks import to_dataframe
 
