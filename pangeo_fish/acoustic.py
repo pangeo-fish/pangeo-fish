@@ -286,10 +286,9 @@ def emission_probability(
         method=cell_ids,
     ).chunk() # chunks the map (to prevent autochunk which caused division by zero error)
 
-    ids = maps.deployment_id.to_numpy()
-    if any(
-        [w not in ids for w in weights.deployment_id.to_numpy()]
-    ):
+    maps_index = maps.indexes["deployment_id"]
+    weights_index = weights.indexes["deployment_id"]
+    if weights_index.difference(maps_index, sort=False).size > 0:
         print("WARNING: Some receiver ids `tag.acoustic` are not included in `tag.stations`.")
         
     if nondetections == "ignore":
