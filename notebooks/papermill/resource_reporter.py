@@ -64,7 +64,9 @@ class ResourceCollector:
                 # currently 2GB chunks
                 if mem > checkpoint_mem + (2 * 2**30):
                     dt = time.perf_counter() - self._start_time
-                    print(f"Resources: Memory increased {_fmt_memory(checkpoint_mem)} -> {_fmt_memory(mem)} ({dt:.0f}s)")
+                    print(
+                        f"Resources: Memory increased {_fmt_memory(checkpoint_mem)} -> {_fmt_memory(mem)} ({dt:.0f}s)"
+                    )
                     checkpoint_mem = mem
                 peak_mem = mem
         avg_cpu = 0.01 * psutil.cpu_percent() * self._cpu_count
@@ -107,7 +109,9 @@ class ResourceCollector:
             print(f"Resources: Error collecting: {e}")
             return
         memory_fmt = _fmt_memory(memory)
-        print(f"Resources: cpu={cpu:.1f}, mem={memory_fmt}, duration={self._duration:.0f}s")
+        print(
+            f"Resources: cpu={cpu:.1f}, mem={memory_fmt}, duration={self._duration:.0f}s"
+        )
 
     # let it be used as a context manager
     def __enter__(self):
