@@ -32,8 +32,10 @@ dynamic = ["version"]
 [project.scripts]
 pangeo-fish = "pangeo_fish.cli:main"
 
-[tool.setuptools]
-packages = ["pangeo_fish"]
+[tool.setuptools.packages.find]
+where = [""]
+include = ["pangeo_fish*"]
+namespaces = false
 
 [build-system]
 requires = [

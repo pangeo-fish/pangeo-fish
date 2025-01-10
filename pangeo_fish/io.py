@@ -324,14 +324,14 @@ def open_copernicus_zarr(
     -----------
     name : str
         Name of the dataset to retrieve. Supported models and corresponding frequencies are:
-        
-        - "GLOBAL_ANALYSISFORECAST_PHY_001_024" with freq = "D" (daily) 
+
+        - "GLOBAL_ANALYSISFORECAST_PHY_001_024" with freq = "D" (daily)
             working.
-        - "NWSHELF_ANALYSISFORECAST_PHY_004_013" with freq = "D" (daily) 
+        - "NWSHELF_ANALYSISFORECAST_PHY_004_013" with freq = "D" (daily)
             working.
         Future supported models and corresponding frequencies are:
         - "GLOBAL_ANALYSISFORECAST_PHY_001_024" with freq =  "H" (hourly)
-            not working. (ValueError: conflicting sizes for dimension 'time': length 20184 on 'XE' and length 3365 on {'elevation': 'elevation', 'latitude': 'latitude', 'longitude': 'longitude', 'time': 'time'}) 
+            not working. (ValueError: conflicting sizes for dimension 'time': length 20184 on 'XE' and length 3365 on {'elevation': 'elevation', 'latitude': 'latitude', 'longitude': 'longitude', 'time': 'time'})
         - "GLOBAL_MULTIYEAR_PHY_001_030" with freq = "NEW" or "OLD",
             not working. (KeyError: 'cmems_mod_glo_phy_anfc_0.083deg_static_202211--ext--bathy')
         - "IBI_MULTIYEAR_PHY_005_002" with freq = "D" (daily),
@@ -339,7 +339,7 @@ def open_copernicus_zarr(
         - "IBI_MULTIYEAR_PHY_005_002" with freq =  "H" (hourly),
             not working (KeyError: 'cmems_mod_ibi_phy_anfc_0.027deg-3D_PT1H-m_202211')
 
-        - "IBI_ANALYSISFORECAST_PHY_005_001" with freq = "D" (daily) 
+        - "IBI_ANALYSISFORECAST_PHY_005_001" with freq = "D" (daily)
             (KeyError: 'cmems_mod_ibi_phy_my_0.083deg-3D_P1D-m_202012')
         - "IBI_ANALYSISFORECAST_PHY_005_001" with freq = "H" (hourly),
             (KeyError: '')
@@ -350,7 +350,7 @@ def open_copernicus_zarr(
             (KeyError: '')
         - "NWSHELF_MULTIYEAR_PHY_004_009" with freq = "D" (daily).
             (KeyError: 'static')
-        
+
 
     format : {"arco-geo-series", "arco-time-series"}, default: "arco-geo-series"
         Format of the dataset.
