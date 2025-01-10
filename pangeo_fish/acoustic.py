@@ -3,8 +3,8 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from tlz.itertoolz import first
-from xarray_regridding.conversions import geographic_to_cartesian
-from xarray_regridding.operations import buffer_points
+from xarray_healpy.conversions import geographic_to_cartesian
+from xarray_healpy.operations import buffer_points
 
 from pangeo_fish import utils
 from pangeo_fish.cf import bounds_to_bins

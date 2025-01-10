@@ -1,6 +1,6 @@
 import numpy as np
 import xarray as xr
-from xarray_regridding import HealpyGridInfo, HealpyRegridder
+from xarray_healpy import HealpyGridInfo, HealpyRegridder
 
 from pangeo_fish.cf import bounds_to_bins
 from pangeo_fish.diff import diff_z
