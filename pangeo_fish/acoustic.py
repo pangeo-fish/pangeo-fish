@@ -1,3 +1,4 @@
+import warnings
 import flox.xarray
 import numpy as np
 import pandas as pd
@@ -284,7 +285,16 @@ def emission_probability(
         grid[["cell_ids", "longitude", "latitude"]],
         buffer_size,
         method=cell_ids,
-    )
+    ).chunk() # chunks the map (to prevent autochunk which caused division by zero error)
+
+    maps_index = maps.indexes["deployment_id"]
+    weights_index = weights.indexes["deployment_id"]
+    if weights_index.difference(maps_index, sort=False).size > 0:
+        # print("WARNING: Some receiver ids `tag.acoustic` are not included in `tag.stations`.")
+        warnings.warn(
+            "Some receiver ids in `tag.acoustic` are not included in `tag.stations`.", 
+            UserWarning
+        )
 
     if nondetections == "ignore":
         fill_map = xr.ones_like(grid["cell_ids"], dtype=float).pipe(
