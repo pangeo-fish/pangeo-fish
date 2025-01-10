@@ -21,7 +21,8 @@ dependencies = [
     "sparse",
     "healpy",
     "movingpandas",
-    "xarray-healpy"
+    "xarray-healpy",
+    "cf_xarray"
 ]
 dynamic = ["version"]
 
