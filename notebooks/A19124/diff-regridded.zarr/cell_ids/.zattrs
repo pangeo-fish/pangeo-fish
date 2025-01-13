@@ -1,0 +1,13 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "y",
+        "x"
+    ],
+    "grid_type": "healpix",
+    "lat": 0,
+    "level": 12,
+    "lon": 0,
+    "nside": 4096,
+    "rot_lat": 0,
+    "rot_lon": 0
+}

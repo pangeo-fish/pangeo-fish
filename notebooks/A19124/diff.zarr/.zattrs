@@ -1,0 +1,10 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "lat",
+        "lon"
+    ],
+    "coordinates": "latitude longitude",
+    "long_name": "Bathymetry",
+    "standard_name": "sea_floor_depth_below_geoid",
+    "units": "m"
+}

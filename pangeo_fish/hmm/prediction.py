@@ -69,14 +69,14 @@ class Gaussian1DHealpix(Predictor):
         import opt_einsum
 
         ring = hc.kernels.gaussian.compute_ring(
-            self.grid_info.resolution, self.sigma, self.truncate, self.kernel_size
+            self.grid_info.level, self.sigma, self.truncate, self.kernel_size
         )
         self.padder = hc.padding.pad(
             self.cell_ids, grid_info=self.grid_info, ring=ring, **self.pad_kwargs
         )
         self.new_cell_ids, self.kernel = hc.kernels.gaussian_kernel(
             self.cell_ids,
-            resolution=self.grid_info.resolution,
+            resolution=self.grid_info.level,
             indexing_scheme=self.grid_info.indexing_scheme,
             sigma=self.sigma,
             truncate=self.truncate,

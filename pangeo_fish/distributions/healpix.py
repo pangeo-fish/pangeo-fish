@@ -3,6 +3,7 @@ import xarray as xr
 import xdggs  # noqa: F401
 from healpix_convolution.distances import _distances
 from healpix_convolution.kernels.gaussian import gaussian_function
+from numba import int64
 
 
 def normal_at(grid, pos, sigma):
@@ -20,8 +21,8 @@ def normal_at(grid, pos, sigma):
     cell_ids = coord.data
     center = np.reshape(grid_info.geographic2cell_ids(lon=lon, lat=lat), (1, 1))
     distances = _distances(
-        center,
-        np.reshape(cell_ids, (1, -1)),
+        np.astype(center, np.int64),
+        np.reshape(np.astype(cell_ids, np.int64), (1, -1)),
         axis=-1,
         nside=grid_info.nside,
         nest=grid_info.nest,
