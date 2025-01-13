@@ -1,9 +1,0 @@
-{
-    "_ARRAY_DIMENSIONS": [
-        "time",
-        "y",
-        "x"
-    ],
-    "buffer_size": 1000,
-    "coordinates": "cell_ids latitude longitude resolution"
-}

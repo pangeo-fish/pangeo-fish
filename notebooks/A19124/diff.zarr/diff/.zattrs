@@ -1,9 +1,0 @@
-{
-    "_ARRAY_DIMENSIONS": [
-        "time",
-        "lat",
-        "lon"
-    ],
-    "coordinates": "latitude longitude",
-    "units": "degrees_C"
-}

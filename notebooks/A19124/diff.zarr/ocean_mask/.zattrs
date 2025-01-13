@@ -1,8 +1,0 @@
-{
-    "_ARRAY_DIMENSIONS": [
-        "lat",
-        "lon"
-    ],
-    "coordinates": "latitude longitude",
-    "dtype": "bool"
-}
