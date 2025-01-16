@@ -5,7 +5,7 @@ import xarray as xr
 from tlz.itertoolz import first
 from xarray_healpy.conversions import geographic_to_cartesian
 from xarray_healpy.operations import buffer_points
-
+import healpy as hp
 from pangeo_fish import utils
 from pangeo_fish.cf import bounds_to_bins
 from pangeo_fish.healpy import (
@@ -145,7 +145,7 @@ def select_detections_by_tag_id(database, tag_id):
     )
 
 
-def deployment_reception_masks(stations, grid, buffer_size, method="recompute"):
+def deployment_reception_masks(stations, grid, buffer_size, method="recompute", dims=["x","y"]):
     rot = {"lat": grid["cell_ids"].attrs["lat"], "lon": grid["cell_ids"].attrs["lon"]}
     if method == "recompute":
         phi, theta = geographic_to_astronomic(
@@ -169,20 +169,66 @@ def deployment_reception_masks(stations, grid, buffer_size, method="recompute"):
             rot=rot,
             dim="deployment_id",
         )
-
-    masks = buffer_points(
-        cell_ids,
-        positions,
-        buffer_size=buffer_size.m_as("m"),
-        nside=2 ** cell_ids.attrs["level"],
-        factor=2**16,
-        intersect=True,
-    )
+    if dims==["cells"]:
+        masks = buffer_points_cells(
+            cell_ids,
+            positions,
+            buffer_size=buffer_size.m_as("m"),
+            nside=2 ** cell_ids.attrs["level"],
+            factor=2**16,
+            intersect=True,
+            )
+    elif dims==["x","y"]:
+        masks = buffer_points(
+            cell_ids,
+            positions,
+            buffer_size=buffer_size.m_as("m"),
+            nside=2 ** cell_ids.attrs["level"],
+            factor=2 ** 16,
+            intersect=True,
+        )
 
     return masks.drop_vars(["cell_ids"])
+def buffer_points_cells(
+    cell_ids,
+    positions,
+    *,
+    buffer_size,
+    nside,
+    sphere_radius=6371e3,
+    factor=4,
+    intersect=False,
+):
+    """
+    """
+
+    def _buffer_masks(cell_ids, vector, nside, radius, factor=4, intersect=False):
+        selected_cells = hp.query_disc(
+            nside, vector, radius, nest=True, fact=factor, inclusive=intersect
+        )
+        return np.isin(cell_ids, selected_cells, assume_unique=True)
+
+    radius_ = buffer_size / sphere_radius
+
+    masks = xr.apply_ufunc(
+        _buffer_masks,
+        cell_ids,
+        positions,
+        input_core_dims=[["cells"], ["cartesian"]],
+        kwargs={
+            "radius": radius_,
+            "nside": nside,
+            "factor": factor,
+            "intersect": intersect,
+        },
+        output_core_dims=[["cells"]],
+        vectorize=True,
+    )
+
+    return masks.assign_coords(cell_ids=cell_ids)
 
 
-def create_masked_fill_map(tag, grid, maps, chunk_time=24):
+def create_masked_fill_map(tag, grid, maps, chunk_time=24, dims=["x", "y"]):
     """
     Create a masked fill map indicating the detection zones.
 
@@ -230,14 +276,15 @@ def create_masked_fill_map(tag, grid, maps, chunk_time=24):
     ds = (a * b).sum(dim="deployment_id")
 
     all_detecting_stations = xr.where(ds == 0, 1, np.nan)
-    fill_map = all_detecting_stations.detecting.pipe(utils.normalize, dim=["x", "y"])
+    #fill_map = all_detecting_stations.detecting.pipe(utils.normalize, dim=["x", "y"])
+
+    fill_map = all_detecting_stations.detecting.pipe(utils.normalize, dim=dims)
 
     return fill_map
 
 
 def emission_probability(
-    tag, grid, buffer_size, nondetections="ignore", cell_ids="keep", chunk_time=24
-):
+    tag, grid, buffer_size, nondetections="ignore", cell_ids="keep", chunk_time=24 , dims=None):
     """construct emission probability maps from acoustic detections
 
     Parameters
@@ -260,12 +307,16 @@ def emission_probability(
 
         - "keep": use the cell ids given by the model. This is the more correct method.
         - "recompute": recompute the cell ids based on the rotated lat / lon coords.
+    dims :
 
     Returns
     -------
     emission : xarray.Dataset
         The resulting emission probability maps.
     """
+    if dims is None:
+        dims = ["x", "y"]
+
     if "acoustic" not in tag or "stations" not in tag:
         return xr.Dataset()
 
@@ -284,6 +335,7 @@ def emission_probability(
         grid[["cell_ids", "longitude", "latitude"]],
         buffer_size,
         method=cell_ids,
+        dims=dims,
     )
 
     if nondetections == "ignore":
@@ -292,16 +344,16 @@ def emission_probability(
         )
     elif nondetections == "mask":
         # fill_map = maps.any(dim="deployment_id").pipe(np.logical_not).astype(float)
-        fill_map = create_masked_fill_map(tag, grid, maps, chunk_time)
+        fill_map = create_masked_fill_map(tag, grid, maps, chunk_time,dims)
     else:
         raise ValueError("invalid nondetections treatment argument")
 
     return (
         maps.weighted(weights)
         .sum(dim="deployment_id")
-        .transpose("time", "y", "x")
+        .transpose("time", *dims)
         .where((weights != 0).any(dim="deployment_id"), fill_map)
-        .pipe(utils.normalize, dim=["x", "y"])
+        .pipe(utils.normalize, dim=dims)
         .assign_attrs({"buffer_size": buffer_size.m_as("m")})
         .where(grid["mask"])
         .to_dataset(name="acoustic")
