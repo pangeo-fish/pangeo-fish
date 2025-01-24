@@ -38,7 +38,6 @@ def create_frame(ds, figure, index, *args, **kwargs):
         ds_["latitude"].max(),
     )
     x0, x1, y0, y1 = kwargs.get("bbox", default_bbox)
-    # print("bbox:", x0, x1, y0, y1)
 
     formatter = mticker.ScalarFormatter(useMathText=True)
     formatter.set_scientific(True)
