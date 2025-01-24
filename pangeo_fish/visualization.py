@@ -31,13 +31,18 @@ def create_frame(ds, figure, index, *args, **kwargs):
 
     projection = ccrs.Mercator()
     crs = ccrs.PlateCarree()
-    default_bbox = (
+    
+    default_xlim = [
         ds_["longitude"].min(),
-        ds_["longitude"].max(),
+        ds_["longitude"].max()
+    ]
+    default_ylim = [
         ds_["latitude"].min(),
-        ds_["latitude"].max(),
-    )
-    x0, x1, y0, y1 = kwargs.get("bbox", default_bbox)
+        ds_["latitude"].max()
+    ]
+    
+    x0, x1 = kwargs.get("xlim", default_xlim)
+    y0, y1 = kwargs.get("ylim", default_ylim)
 
     formatter = mticker.ScalarFormatter(useMathText=True)
     formatter.set_scientific(True)
