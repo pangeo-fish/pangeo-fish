@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import warnings
 
 import datatree
 import fsspec
@@ -205,9 +206,9 @@ def open_copernicus_catalog(cat, chunks=None):
     return ds
 
 
-def prepare_dataset(dataset, chunks=None, bbox=None):
+def prepare_dataset(dataset, chunks=None, bbox=None, names=None):
     """Prepares a dataset of a reference model.
-    It renames some variables, adds dynamic bathymetry and depth and broadcast lat(itude)/lon(gitude) coordinates.
+    It renames some variables (see ``names``), adds dynamic bathymetry and depth and broadcast lat(itude)/lon(gitude) coordinates.
     
     Parameters
     ----------
@@ -217,8 +218,11 @@ def prepare_dataset(dataset, chunks=None, bbox=None):
         The initial chunk size. Should be multiples of the on-disk chunk sizes. By
         default, the chunksizes are ``{"lat": -1, "lon": -1, "depth": 11, "time": 8}``
     bbox : dict[str, tuple[float, float]], optional
-        The spatial boundaries of the area of interest. If provided, it checks whether there is data available.
-
+        The spatial boundaries of the area of interest. Shoud have the keys "longitude" and "latitude".
+        If provided, it checks whether there is data available within the dataset for the area.
+    names : dict[str, str], optional
+        A dictionary that maps the three variables that correspond to the "TEMP", "XE" and "H0" data. By
+        default, the names align data from the Copernicus Marine Service with ``{"thetao": "TEMP", "zos": "XE", "deptho": "H0"}``. 
     Returns
     -------
     ds : xarray.Dataset
@@ -226,7 +230,9 @@ def prepare_dataset(dataset, chunks=None, bbox=None):
     """
     # checks that the studied area is included in the dataset
     if bbox is not None:
-        assert all([k in ["latitude", "longitude"] for k in bbox.keys()]), "bbox must contain keys the \"latitude\" and \"longitude\"."
+        if not all([k in ["latitude", "longitude"] for k in bbox.keys()]):
+            raise ValueError("The \"bbox\" argument must have the keys \"latitude\" and \"longitude\".")
+        
         box = {
             "latitude": [
                 dataset.lat.min().to_numpy().item(),
@@ -246,19 +252,28 @@ def prepare_dataset(dataset, chunks=None, bbox=None):
                 valid_bbox = False
         
         if not valid_bbox:
-            print("WARNING: The studied area is not entirely included in the field model!") 
+            warnings.warn(
+                "The studied area is not entirely included in the dataset!",
+                UserWarning
+            ) 
     
         
     if chunks is None:
         chunks = {"lat": -1, "lon": -1, "depth": 11, "time": 8}
 
-    d = {"thetao": "TEMP", "zos": "XE", "deptho": "H0"}
+    if names is None:
+        names = {"thetao": "TEMP", "zos": "XE", "deptho": "H0"}
+        
     coords_and_vars  = [v for v in dataset.variables]
-    assert all([n in coords_and_vars for n in d.keys()]), f"The dataset must have variables \"{list(d.keys())}\"."
+    if not all([n in coords_and_vars for n in names.keys()]):
+        raise ValueError(f"The dataset does not include all the variables indexed in ``names``: {list(names.keys())}.")
     
+    if not all([k in names.values() for k in ["TEMP", "XE", "H0"]]):
+        raise ValueError("The mapping ``names`` must have values \"TEMP\", \"XE\" and \"H0\".")
+        
     ds = (
         dataset.chunk(chunks=chunks)
-        .rename(d)
+        .rename(names)
         # .assign_coords({"time": lambda ds: ds["time"].astype("datetime64[ns]")}) # useless?
         .assign(
             {
