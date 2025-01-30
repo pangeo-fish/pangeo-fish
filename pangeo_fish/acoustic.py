@@ -215,9 +215,7 @@ def create_masked_fill_map(tag, grid, maps, chunk_time=24):
     # Add a new dimension 'time' to the dataset with the boolean mask
     stations["detecting"] = time_mask
     stations = stations.drop_vars(["time_bounds"])
-    stations = stations.where(
-        stations.sum(dim="time") != 0, True, False
-    )  # , drop=True)
+    stations = stations.where(stations.sum(dim="time") != 0, other=True, drop=True)
 
     # Expand the maps dataset to match the dimensions of the active stations dataset
     all_detecting_stations = (
@@ -227,9 +225,11 @@ def create_masked_fill_map(tag, grid, maps, chunk_time=24):
     )
     a = stations.sel(time=all_detecting_stations.time).chunk({"time": chunk_time})
     b = all_detecting_stations
-    ds = (a * b).sum(dim="deployment_id")
+    # keeps working with bool...
+    ds = xr.ufuncs.logical_and(a, b).any(dim="deployment_id")
 
     all_detecting_stations = xr.where(ds == 0, 1, np.nan)
+    # ...even though we still normalize (and thus turn the type to np.float64)
     fill_map = all_detecting_stations.detecting.pipe(utils.normalize, dim=["x", "y"])
 
     return fill_map
