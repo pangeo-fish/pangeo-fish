@@ -3,7 +3,6 @@ import xarray as xr
 import xdggs  # noqa: F401
 from healpix_convolution.distances import _distances
 from healpix_convolution.kernels.gaussian import gaussian_function
-from numba import int64
 
 
 def normal_at(grid, pos, sigma):
