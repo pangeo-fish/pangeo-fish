@@ -26,3 +26,4 @@ non-comitted*/*
 bin/*.o*
 log/*
 results/*
+.idea/*
