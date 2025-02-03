@@ -3,7 +3,7 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Welcome to pangeo-fish's documentation !
+Welcome to pangeo-fish's documentation!
 ==================================================
 
 .. toctree::
@@ -11,7 +11,7 @@ Welcome to pangeo-fish's documentation !
 
     installation
     usage
-
+    format
 
 
 
@@ -20,4 +20,3 @@ Indices and tables
 
 * :ref:`genindex`
 * :ref:`modindex`
-* :ref:`search`
