@@ -2,6 +2,11 @@
 *.py[cdo]
 __pycache__/
 
+# cache files
+.ruff_cache/*
+.prettier_cache/
+.pytest_cache/
+
 # jupyter files
 .ipynb_checkpoints/
 
