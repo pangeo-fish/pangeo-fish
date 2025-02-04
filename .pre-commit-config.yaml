@@ -27,13 +27,15 @@ repos:
     rev: v0.5.2
     hooks:
       - id: ruff
-        args: [--fix]
+        args: ["--fix", "--show-fixes"]
 
   - repo: https://github.com/kynan/nbstripout
     rev: 0.7.1
     hooks:
       - id: nbstripout
-        args: [--extra-keys=metadata.kernelspec metadata.language_info.version]
+        args:
+          - "--extra-keys=metadata.kernelspec"
+          - "metadata.language_info.version"
 
   - repo: https://github.com/rbubley/mirrors-prettier
     rev: v3.3.3
