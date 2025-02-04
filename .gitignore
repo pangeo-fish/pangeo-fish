@@ -9,6 +9,7 @@ __pycache__/
 
 # jupyter files
 .ipynb_checkpoints/
+.virtual_documents/
 
 # dask files
 dask-worker-space/
@@ -17,6 +18,7 @@ dask-worker-space/
 # build artifacts
 /dist/*
 /docs/_build/*
+/docs/generated/
 
 # editor swap files
 \.*.swp
