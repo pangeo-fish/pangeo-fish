@@ -2,8 +2,14 @@
 *.py[cdo]
 __pycache__/
 
+# cache files
+.ruff_cache/*
+.prettier_cache/
+.pytest_cache/
+
 # jupyter files
 .ipynb_checkpoints/
+.virtual_documents/
 
 # dask files
 dask-worker-space/
@@ -12,6 +18,7 @@ dask-worker-space/
 # build artifacts
 /dist/*
 /docs/_build/*
+/docs/generated/
 
 # editor swap files
 \.*.swp
