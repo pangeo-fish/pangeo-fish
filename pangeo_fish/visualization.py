@@ -26,21 +26,15 @@ def create_frame(ds, figure, index, *args, **kwargs):
 
     ds_ = ds.drop_vars(["resolution"], errors="ignore").isel(time=index, drop=True)
     title = (
-        f"time = {np.datetime_as_string(ds["time"].isel(time=index).data, unit="s")}"
+        f"time = {np.datetime_as_string(ds['time'].isel(time=index).data, unit='s')}"
     )
 
     projection = ccrs.Mercator()
     crs = ccrs.PlateCarree()
-    
-    default_xlim = [
-        ds_["longitude"].min(),
-        ds_["longitude"].max()
-    ]
-    default_ylim = [
-        ds_["latitude"].min(),
-        ds_["latitude"].max()
-    ]
-    
+
+    default_xlim = [ds_["longitude"].min(), ds_["longitude"].max()]
+    default_ylim = [ds_["latitude"].min(), ds_["latitude"].max()]
+
     x0, x1 = kwargs.get("xlim", default_xlim)
     y0, y1 = kwargs.get("ylim", default_ylim)
 
@@ -71,7 +65,7 @@ def create_frame(ds, figure, index, *args, **kwargs):
         transform=ccrs.PlateCarree(),
         cmap="cool",
         xlim=[x0, x1],
-        ylim=[y0, y1]
+        ylim=[y0, y1],
     )
 
     ax1.add_feature(cf.COASTLINE.with_scale("10m"), lw=0.5)
@@ -96,7 +90,7 @@ def create_frame(ds, figure, index, *args, **kwargs):
         transform=ccrs.PlateCarree(),
         cmap="cool",
         xlim=[x0, x1],
-        ylim=[y0, y1]
+        ylim=[y0, y1],
     )
     ax2.add_feature(cf.COASTLINE.with_scale("10m"), lw=0.5)
     ax2.add_feature(cf.BORDERS.with_scale("10m"), lw=0.3)

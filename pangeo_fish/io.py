@@ -209,7 +209,7 @@ def open_copernicus_catalog(cat, chunks=None):
 def prepare_dataset(dataset, chunks=None, bbox=None, names=None):
     """Prepares a dataset of a reference model.
     It renames some variables (see ``names``), adds dynamic bathymetry and depth and broadcast lat(itude)/lon(gitude) coordinates.
-    
+
     Parameters
     ----------
     dataset : xarray.Dataset
@@ -222,7 +222,7 @@ def prepare_dataset(dataset, chunks=None, bbox=None, names=None):
         If provided, it checks whether there is data available within the dataset for the area.
     names : dict[str, str], optional
         A dictionary that maps the three variables that correspond to the "TEMP", "XE" and "H0" data. By
-        default, the names align data from the Copernicus Marine Service with ``{"thetao": "TEMP", "zos": "XE", "deptho": "H0"}``. 
+        default, the names align data from the Copernicus Marine Service with ``{"thetao": "TEMP", "zos": "XE", "deptho": "H0"}``.
     Returns
     -------
     ds : xarray.Dataset
@@ -231,46 +231,50 @@ def prepare_dataset(dataset, chunks=None, bbox=None, names=None):
     # checks that the studied area is included in the dataset
     if bbox is not None:
         if not all([k in ["latitude", "longitude"] for k in bbox.keys()]):
-            raise ValueError("The \"bbox\" argument must have the keys \"latitude\" and \"longitude\".")
-        
+            raise ValueError(
+                'The "bbox" argument must have the keys "latitude" and "longitude".'
+            )
+
         box = {
             "latitude": [
                 dataset.lat.min().to_numpy().item(),
-                dataset.lat.max().to_numpy().item()
+                dataset.lat.max().to_numpy().item(),
             ],
             "longitude": [
                 dataset.lon.min().to_numpy().item(),
-                dataset.lon.max().to_numpy().item()
-            ]
+                dataset.lon.max().to_numpy().item(),
+            ],
         }
         valid_bbox = True
-        
+
         for inter in ["latitude", "longitude"]:
-            tmp1 = box[inter] # field model
+            tmp1 = box[inter]  # field model
             tmp2 = bbox[inter]
             if (tmp2[0] < tmp1[0]) or (tmp2[1] > tmp1[1]):
                 valid_bbox = False
-        
+
         if not valid_bbox:
             warnings.warn(
-                "The studied area is not entirely included in the dataset!",
-                UserWarning
-            ) 
-    
-        
+                "The studied area is not entirely included in the dataset!", UserWarning
+            )
+
     if chunks is None:
         chunks = {"lat": -1, "lon": -1, "depth": 11, "time": 8}
 
     if names is None:
         names = {"thetao": "TEMP", "zos": "XE", "deptho": "H0"}
-        
-    coords_and_vars  = [v for v in dataset.variables]
+
+    coords_and_vars = [v for v in dataset.variables]
     if not all([n in coords_and_vars for n in names.keys()]):
-        raise ValueError(f"The dataset does not include all the variables indexed in ``names``: {list(names.keys())}.")
-    
+        raise ValueError(
+            f"The dataset does not include all the variables indexed in ``names``: {list(names.keys())}."
+        )
+
     if not all([k in names.values() for k in ["TEMP", "XE", "H0"]]):
-        raise ValueError("The mapping ``names`` must have values \"TEMP\", \"XE\" and \"H0\".")
-        
+        raise ValueError(
+            'The mapping ``names`` must have values "TEMP", "XE" and "H0".'
+        )
+
     ds = (
         dataset.chunk(chunks=chunks)
         .rename(names)
@@ -285,7 +289,7 @@ def prepare_dataset(dataset, chunks=None, bbox=None, names=None):
                 ),
             }
         )
-        .pipe(broadcast_variables, {"lat": "latitude", "lon": "longitude"}) # useless?
+        .pipe(broadcast_variables, {"lat": "latitude", "lon": "longitude"})  # useless?
     )
     return ds
 
