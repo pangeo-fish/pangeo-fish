@@ -242,7 +242,7 @@ def emission_probability(
 
     Parameters
     ----------
-    tag : datatree.DataTree
+    tag : xarray.DataTree
         The tag data.
     grid : xarray.Dataset
         The target grid. Must have the ``cell_ids`` and ``time``
@@ -284,12 +284,14 @@ def emission_probability(
         grid[["cell_ids", "longitude", "latitude"]],
         buffer_size,
         method=cell_ids,
-    ).chunk() # chunks the map (to prevent autochunk which caused division by zero error)
+    ).chunk()  # chunks the map (to prevent autochunk which caused division by zero error)
 
     maps_index = maps.indexes["deployment_id"]
     weights_index = weights.indexes["deployment_id"]
     if weights_index.difference(maps_index, sort=False).size > 0:
-        raise ValueError("Some receiver ids in `tag.acoustic` are not included in `tag.stations`.")
+        raise ValueError(
+            "Some receiver ids in `tag.acoustic` are not included in `tag.stations`."
+        )
 
     if nondetections == "ignore":
         fill_map = xr.ones_like(grid["cell_ids"], dtype=float).pipe(
