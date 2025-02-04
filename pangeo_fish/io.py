@@ -3,7 +3,6 @@ import json
 import os
 import warnings
 
-import datatree
 import fsspec
 import geopandas as gpd
 import movingpandas as mpd
@@ -96,7 +95,7 @@ def open_tag(root, name, storage_options=None):
 
     Returns
     -------
-    tag : datatree.DataTree
+    tag : xarray.DataTree
         The opened tag with involved stations, acoustic tags, tag log and metadata
     """
     if isinstance(root, str):
@@ -141,7 +140,7 @@ def open_tag(root, name, storage_options=None):
         if len(acoustic) > 0:
             mapping["acoustic"] = acoustic.to_xarray()
 
-    return datatree.DataTree.from_dict(mapping)
+    return xr.DataTree.from_dict(mapping)
 
 
 def open_copernicus_catalog(cat, chunks=None):

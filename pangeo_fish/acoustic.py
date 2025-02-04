@@ -242,7 +242,7 @@ def emission_probability(
 
     Parameters
     ----------
-    tag : datatree.DataTree
+    tag : xarray.DataTree
         The tag data.
     grid : xarray.Dataset
         The target grid. Must have the ``cell_ids`` and ``time``
