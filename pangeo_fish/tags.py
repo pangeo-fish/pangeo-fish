@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import xarray as xr
 
 
@@ -12,8 +13,21 @@ def to_time_slice(times):
 
 
 def adapt_model_time(slice_):
-    model_start = slice_.start - np.timedelta64(30, "m")
-    model_stop = slice_.stop + np.timedelta64(30, "m")
+
+    start = np.datetime64(slice_.start)
+    stop = np.datetime64(slice_.stop)
+
+    # only if [minute, sec] part of `slice_.start` < 30:00
+    if pd.Timestamp(start).minute < 30:
+        model_start = start - np.timedelta64(30, "m")
+    else:
+        model_start = start
+
+    # only if [minute, sec] part of `slice_.stop` > 30:00
+    if pd.Timestamp(stop).minute > 30:
+        model_stop = stop + np.timedelta64(30, "m")
+    else:
+        model_stop = stop
 
     return slice(model_start, model_stop)
 

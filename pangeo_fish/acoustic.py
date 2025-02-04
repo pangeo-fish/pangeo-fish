@@ -1,11 +1,12 @@
 import flox.xarray
+import healpy as hp
 import numpy as np
 import pandas as pd
 import xarray as xr
 from tlz.itertoolz import first
 from xarray_healpy.conversions import geographic_to_cartesian
 from xarray_healpy.operations import buffer_points
-import healpy as hp
+
 from pangeo_fish import utils
 from pangeo_fish.cf import bounds_to_bins
 from pangeo_fish.healpy import (
@@ -145,7 +146,9 @@ def select_detections_by_tag_id(database, tag_id):
     )
 
 
-def deployment_reception_masks(stations, grid, buffer_size, method="recompute", dims=["x","y"]):
+def deployment_reception_masks(
+    stations, grid, buffer_size, method="recompute", dims=["x", "y"]
+):
     rot = {"lat": grid["cell_ids"].attrs["lat"], "lon": grid["cell_ids"].attrs["lon"]}
     if method == "recompute":
         phi, theta = geographic_to_astronomic(
@@ -169,7 +172,7 @@ def deployment_reception_masks(stations, grid, buffer_size, method="recompute", 
             rot=rot,
             dim="deployment_id",
         )
-    if dims==["cells"]:
+    if dims == ["cells"]:
         masks = buffer_points_cells(
             cell_ids,
             positions,
@@ -177,18 +180,20 @@ def deployment_reception_masks(stations, grid, buffer_size, method="recompute", 
             nside=2 ** cell_ids.attrs["level"],
             factor=2**16,
             intersect=True,
-            )
-    elif dims==["x","y"]:
+        )
+    elif dims == ["x", "y"]:
         masks = buffer_points(
             cell_ids,
             positions,
             buffer_size=buffer_size.m_as("m"),
             nside=2 ** cell_ids.attrs["level"],
-            factor=2 ** 16,
+            factor=2**16,
             intersect=True,
         )
 
     return masks.drop_vars(["cell_ids"])
+
+
 def buffer_points_cells(
     cell_ids,
     positions,
@@ -199,8 +204,7 @@ def buffer_points_cells(
     factor=4,
     intersect=False,
 ):
-    """
-    """
+    """ """
 
     def _buffer_masks(cell_ids, vector, nside, radius, factor=4, intersect=False):
         selected_cells = hp.query_disc(
@@ -261,9 +265,7 @@ def create_masked_fill_map(tag, grid, maps, chunk_time=24, dims=["x", "y"]):
     # Add a new dimension 'time' to the dataset with the boolean mask
     stations["detecting"] = time_mask
     stations = stations.drop_vars(["time_bounds"])
-    stations = stations.where(
-        stations.sum(dim="time") != 0, True, False
-    )  # , drop=True)
+    stations = stations.where(stations.sum(dim="time") != 0, other=True, drop=True)
 
     # Expand the maps dataset to match the dimensions of the active stations dataset
     all_detecting_stations = (
@@ -273,18 +275,25 @@ def create_masked_fill_map(tag, grid, maps, chunk_time=24, dims=["x", "y"]):
     )
     a = stations.sel(time=all_detecting_stations.time).chunk({"time": chunk_time})
     b = all_detecting_stations
-    ds = (a * b).sum(dim="deployment_id")
+    # keeps working with bool...
+    ds = xr.ufuncs.logical_and(a, b).any(dim="deployment_id")
 
     all_detecting_stations = xr.where(ds == 0, 1, np.nan)
-    #fill_map = all_detecting_stations.detecting.pipe(utils.normalize, dim=["x", "y"])
-
+    # ...even though we still normalize (and thus turn the type to np.float64)
     fill_map = all_detecting_stations.detecting.pipe(utils.normalize, dim=dims)
 
     return fill_map
 
 
 def emission_probability(
-    tag, grid, buffer_size, nondetections="ignore", cell_ids="keep", chunk_time=24 , dims=None):
+    tag,
+    grid,
+    buffer_size,
+    nondetections="ignore",
+    cell_ids="keep",
+    chunk_time=24,
+    dims=None,
+):
     """construct emission probability maps from acoustic detections
 
     Parameters
@@ -336,7 +345,14 @@ def emission_probability(
         buffer_size,
         method=cell_ids,
         dims=dims,
-    )
+    ).chunk()  # chunks the map (to prevent autochunk which caused division by zero error)
+
+    maps_index = maps.indexes["deployment_id"]
+    weights_index = weights.indexes["deployment_id"]
+    if weights_index.difference(maps_index, sort=False).size > 0:
+        raise ValueError(
+            "Some receiver ids in `tag.acoustic` are not included in `tag.stations`."
+        )
 
     if nondetections == "ignore":
         fill_map = xr.ones_like(grid["cell_ids"], dtype=float).pipe(
@@ -344,7 +360,7 @@ def emission_probability(
         )
     elif nondetections == "mask":
         # fill_map = maps.any(dim="deployment_id").pipe(np.logical_not).astype(float)
-        fill_map = create_masked_fill_map(tag, grid, maps, chunk_time,dims)
+        fill_map = create_masked_fill_map(tag, grid, maps, chunk_time, dims)
     else:
         raise ValueError("invalid nondetections treatment argument")
 
