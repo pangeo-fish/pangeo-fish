@@ -11,7 +11,7 @@ from pangeo_fish.cf import bounds_to_bins
 from pangeo_fish.acoustic import emission_probability
 from pangeo_fish.diff import diff_z
 from pangeo_fish.grid import center_longitude
-from pangeo_fish.healpy import HealpyGridInfo, HealpyRegridder
+from xarray_healpy import HealpyGridInfo, HealpyRegridder
 from pangeo_fish.io import open_copernicus_catalog, open_tag, prepare_dataset, read_trajectories, save_html_hvplot, save_trajectories
 from pangeo_fish.tags import adapt_model_time, reshape_by_bins, to_time_slice
 
@@ -44,6 +44,10 @@ __all__ = [
     "compute_acoustic_pdf",
     "combine_pdfs",
     "optimize_pdf",
+    "predict_positions",
+    "plot_trajectories",
+    "open_distributions",
+    "plot_distributions"
 ]
 
 
@@ -203,7 +207,7 @@ def open_diff_dataset(target_root: str, storage_options: dict):
     return ds
 
 
-def regrid_dataset(ds: xr.Dataset, nside, min_vertices=1, rot=0):
+def regrid_dataset(ds: xr.Dataset, nside, min_vertices=1, rot={"lat": 0, "lon": 0}):
     """regrids a dataset as a HEALPix grid, whose primary advantage is that all its cells/pixels cover the same surface area.
     It currently only supports 2d regridding, i.e., ["x", "y"] indexing.
 
@@ -215,7 +219,7 @@ def regrid_dataset(ds: xr.Dataset, nside, min_vertices=1, rot=0):
         Tesolution of the HEALPix grid
     min_vertices : int, default to 1
         Minimum number of vertices for a valid transcription
-    rot : Dict[str, Tuple[float, float]], default to 0
+    rot : Dict[str, Tuple[float, float]], default to {"lat": 0, "lon": 0}
         Mapping of angles to rotate the HEALPix grid. It must contain the keys "lon" and "lat"
 
     Returns
@@ -223,8 +227,8 @@ def regrid_dataset(ds: xr.Dataset, nside, min_vertices=1, rot=0):
     reshaped : xr.Dataset
         HEALPix version of `ds`
     """
-    grid = HealpyGridInfo(level=int(np.log2(nside)))
-    target_grid = grid.target_grid(ds).pipe(center_longitude, rot)
+    grid = HealpyGridInfo(level=int(np.log2(nside)), rot=rot)
+    target_grid = grid.target_grid(ds).pipe(center_longitude, 0)
     regridder = HealpyRegridder(
         ds[["longitude", "latitude", "ocean_mask"]],
         target_grid,
