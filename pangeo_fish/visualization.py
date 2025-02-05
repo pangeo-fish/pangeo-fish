@@ -236,7 +236,7 @@ def render_frame(ds, *args, **kwargs):
     figure = plt.figure(figsize=(14, 8)) # figsize=(12, 6)
 
     try:
-        _render_frame(ds, figure, kwargs)
+        _render_frame(ds, figure, **kwargs)
         time_index = ds["time_index"].values[0]
         frame_dir = kwargs.get("output", ".")
         figure.savefig(f"{frame_dir}/frame_{time_index:05d}.png")#, bbox_inches="tight", pad_inches=0.2)
