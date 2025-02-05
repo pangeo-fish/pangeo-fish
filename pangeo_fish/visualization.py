@@ -285,6 +285,3 @@ def plot_trajectories(trajectories, *, subplots=False, **kwargs):
     else:
         plots = [traj.hvplot(title=traj.id, **kwargs) for traj in trajectories]
         return hv.Layout(plots).cols(2)
-
-
-# def create_frames()
