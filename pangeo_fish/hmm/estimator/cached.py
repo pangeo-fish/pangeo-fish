@@ -22,23 +22,24 @@ class CachedEstimator:
 
     Parameters
     ----------
-    sigma : float, default: None
+    predictor_factory : callable
+        Factory for the predictor class. It expects the parameter ("sigma") as a keyword
+        argument and returns the predictor instance.
+    sigma : float, optional
         The primary model parameter: the standard deviation of the distance
         per time unit traveled by the fish, in the same unit as the grid coordinates.
-    truncate : float, default: 4.0
-        The cut-off limit of the filter. This can be used, together with `sigma`, to
-        calculate the maximum distance per time unit traveled by the fish.
     cache : str or zarr.Store
         Zarr store to write intermediate results to.
     """
 
-    sigma: float = None
-    truncate: float = 4.0
+    predictor_factory: callable
+    sigma: float | None = None
 
     cache: str | os.PathLike | zarr.storage.Store = None
+    progress: bool = False
 
     def to_dict(self):
-        exclude = {"cache"}
+        exclude = {"cache", "progress", "predictor_factory"}
 
         return {k: v for k, v in asdict(self).items() if k not in exclude}
 
@@ -52,9 +53,7 @@ class CachedEstimator:
         """
         return replace(self, **params)
 
-    def _score(
-        self, X, *, cache, spatial_dims=None, temporal_dims=None, progress=False
-    ):
+    def _score(self, X, *, cache, spatial_dims=None, temporal_dims=None, progress=None):
         if self.sigma is None:
             raise ValueError("unset sigma, cannot run the filter")
 
@@ -62,6 +61,9 @@ class CachedEstimator:
             raise ValueError("requires a zarr store for now")
         else:
             cache_store = cache
+
+        if progress is None:
+            progress = self.progress
 
         if spatial_dims is None:
             spatial_dims = utils._detect_spatial_dims(X)
@@ -82,8 +84,7 @@ class CachedEstimator:
         forward = _forward_zarr(
             group["emission"],
             group.create_group("forward"),
-            sigma=self.sigma,
-            truncate=self.truncate,
+            predictor=self.predictor_factory(sigma=self.sigma),
             progress=progress,
         )
 
@@ -93,7 +94,7 @@ class CachedEstimator:
             return value if not np.isnan(value) else np.inf
 
     def _forward_backward_algorithm(
-        self, X, cache, *, spatial_dims=None, temporal_dims=None, progress=False
+        self, X, cache, *, spatial_dims=None, temporal_dims=None, progress=None
     ):
         if self.sigma is None:
             raise ValueError("unset sigma, cannot run the filter")
@@ -102,6 +103,9 @@ class CachedEstimator:
             raise ValueError("requires a zarr store for now")
         else:
             cache_store = cache
+
+        if progress is None:
+            progress = self.progress
 
         if spatial_dims is None:
             spatial_dims = utils._detect_spatial_dims(X)
@@ -122,15 +126,13 @@ class CachedEstimator:
         _forward_zarr(
             group["emission"],
             group.create_group("forward", overwrite=True),
-            sigma=self.sigma,
-            truncate=self.truncate,
+            predictor=self.predictor_factory(sigma=self.sigma),
             progress=progress,
         )
         _backward_zarr(
             group["forward"],
             group.create_group("backward", overwrite=True),
-            sigma=self.sigma,
-            truncate=self.truncate,
+            predictor=self.predictor_factory(sigma=self.sigma),
             progress=progress,
         )
 
@@ -138,7 +140,7 @@ class CachedEstimator:
         return xr.open_dataset(cache_store, engine="zarr", chunks={}, group="backward")
 
     def predict_proba(
-        self, X, *, cache=None, spatial_dims=None, temporal_dims=None, progress=False
+        self, X, *, cache=None, spatial_dims=None, temporal_dims=None, progress=None
     ):
         """predict the state probabilities
 
@@ -184,7 +186,7 @@ class CachedEstimator:
         return state.where(X["mask"])
 
     def score(
-        self, X, *, cache=None, spatial_dims=None, temporal_dims=None, progress=False
+        self, X, *, cache=None, spatial_dims=None, temporal_dims=None, progress=None
     ):
         """score the fit of the selected model to the data
 
@@ -230,7 +232,7 @@ class CachedEstimator:
         spatial_dims=None,
         temporal_dims=None,
         progress=False,
-        additional_quantities=["distance", "velocity"],
+        additional_quantities=["distance", "speed"],
     ):
         """decode the state sequence from the selected model and the data
 
@@ -252,7 +254,7 @@ class CachedEstimator:
             - ``"viterbi"``: use the viterbi algorithm to determine the most probable states
 
             If a list of methods is given, decode using all methods in sequence.
-        additional_quantities : None or list of str, default: ["distance", "velocity"]
+        additional_quantities : None or list of str, default: ["distance", "speed"]
             Additional quantities to compute from the decoded tracks. Use ``None`` or an
             empty list to not compute anything.
 
