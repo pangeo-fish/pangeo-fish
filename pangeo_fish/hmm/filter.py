@@ -1,51 +1,17 @@
 import dask
 import dask.array as da
 import numpy as np
-import scipy.ndimage
 
 
-def gaussian_filter(X, sigma, **kwargs):
-    if isinstance(X, da.Array) and X.npartitions > 1:
-        import dask_image.ndfilters
-
-        return dask_image.ndfilters.gaussian_filter(X, sigma=sigma, **kwargs)
-    elif isinstance(X, da.Array):
-        return X.map_blocks(
-            scipy.ndimage.gaussian_filter,
-            sigma=sigma,
-            meta=np.array((), dtype=X.dtype),
-            **kwargs,
-        )
-    else:
-        return scipy.ndimage.gaussian_filter(X, sigma=sigma, **kwargs)
-
-
-def predict(X, sigma, *, mask=None, **kwargs):
-    filter_kwargs = {"mode": "constant", "cval": 0} | kwargs
-    filtered = gaussian_filter(X, sigma=sigma, **filter_kwargs)
-
-    if mask is None:
-        return filtered
-
-    return np.where(mask, filtered, 0)
-
-
-def score(
-    emission,
-    sigma,
-    initial_probability,
-    mask=None,
-    *,
-    truncate=4.0,
-):
+def score(emission, predictor, initial_probability, mask=None):
     """score of a single pass (forwards) of the spatial HMM filter
 
     Parameters
     ----------
     emission : array-like
         probability density function of the observations (emission probabilities)
-    sigma : float
-        standard deviation of the gaussian kernel, in units of pixels
+    predictor: Predictor
+        Algorithm for predicting the next time step.
     initial_probability : array-like
         The probability of the first hidden state
     final_probability : array-like, optional
@@ -64,7 +30,7 @@ def score(
 
     initial, mask = dask.compute(initial_probability, mask)
     if isinstance(initial_probability, da.Array):
-        initial = dask.compute(initial_probability)
+        [initial] = dask.compute(initial_probability)
     else:
         initial = initial_probability
     if isinstance(mask, da.Array):
@@ -74,12 +40,7 @@ def score(
     previous = initial
 
     for index in range(1, n_max):
-        prediction = predict(
-            previous,
-            sigma=sigma,
-            mask=mask,
-            truncate=truncate,
-        )
+        prediction = predictor.predict(previous, mask=mask)
         updated = prediction * dask.compute(emission[index, ...])[0]
 
         normalizations.append(np.sum(updated))
@@ -92,22 +53,15 @@ def score(
     return -np.sum(np.log(normalizations_))
 
 
-def forward(
-    emission,
-    sigma,
-    initial_probability,
-    mask=None,
-    *,
-    truncate=4.0,
-):
+def forward(emission, predictor, initial_probability, mask=None):
     """single pass (forwards) of the spatial HMM filter
 
     Parameters
     ----------
     emission : array-like
         probability density function of the observations (emission probabilities)
-    sigma : float
-        standard deviation of the gaussian kernel, in units of pixels
+    predictor: Predictor
+        Algorithm for predicting the next time step.
     initial_probability : array-like
         The probability of the first hidden state
     mask : array-like, optional
@@ -127,12 +81,7 @@ def forward(
     states.append(initial_probability)
 
     for index in range(1, n_max):
-        prediction = predict(
-            states[index - 1],
-            sigma=sigma,
-            mask=mask,
-            truncate=truncate,
-        )
+        prediction = predictor.predict(states[index - 1], mask=mask)
         predictions.append(prediction)
 
         updated = prediction * emission[index, ...]
@@ -143,14 +92,7 @@ def forward(
     return np.stack(predictions, axis=0), np.stack(states, axis=0)
 
 
-def backward(
-    states,
-    predictions,
-    sigma,
-    mask=None,
-    *,
-    truncate=4.0,
-):
+def backward(states, predictions, predictor, mask=None):
     n_max = states.shape[0]
     eps = 2.204e-16**20
 
@@ -158,7 +100,7 @@ def backward(
     backward_predictions = [states[-1, ...]]
     for index in range(1, n_max):
         ratio = smoothed[index - 1] / (predictions[-index, ...] + eps)
-        backward_prediction = predict(ratio, sigma=sigma, mask=None, truncate=truncate)
+        backward_prediction = predictor.predict(ratio, mask=None)
         normalized = backward_prediction / np.sum(backward_prediction)
         backward_predictions.append(normalized)
 
@@ -172,22 +114,15 @@ def backward(
     )
 
 
-def forward_backward(
-    emission,
-    sigma,
-    initial_probability,
-    mask=None,
-    *,
-    truncate=4.0,
-):
+def forward_backward(emission, predictor, initial_probability, mask=None):
     """double pass (forwards and backwards) of the spatial HMM filter
 
     Parameters
     ----------
     emission : array-like
         probability density function of the observations (emission probabilities)
-    sigma : float
-        standard deviation of the gaussian kernel, in units of pixels
+    predictor: Predictor
+        Algorithm for predicting the next time step.
     initial_probability : array-like
         The probability of the first hidden state
     final_probability : array-like, optional
@@ -203,17 +138,15 @@ def forward_backward(
 
     forward_predictions, forward_states = forward(
         emission=emission,
-        sigma=sigma,
+        predictor=predictor,
         initial_probability=initial_probability,
         mask=mask,
-        truncate=truncate,
     )
     backwards_predictions, backwards_states = backward(
         states=forward_states,
         predictions=forward_predictions,
-        sigma=sigma,
+        predictor=predictor,
         mask=mask,
-        truncate=truncate,
     )
     return backwards_states
 
@@ -244,7 +177,7 @@ def track(sequence, *, display=False, **kwargs):
     return rich_track(sequence, **kwargs)
 
 
-def _forward_zarr(ingroup, outgroup, sigma, truncate=4.0, progress=False):
+def _forward_zarr(ingroup, outgroup, predictor, progress=False):
     """single pass (forwards) of the spatial HMM filter while writing to zarr
 
     Parameters
@@ -256,10 +189,8 @@ def _forward_zarr(ingroup, outgroup, sigma, truncate=4.0, progress=False):
         - (optionally) a mask to apply after each step. No shadowing yet.
     outgroup : zarr.Group
         Zarr object to write the result to.
-    sigma : float
-        standard deviation of the gaussian kernel, in units of pixels
-    truncate : float, default: 4.0
-        Truncate the kernel after this many multiples of sigma.
+    predictor : Predictor
+        Algorithm for predicting the next time step.
     progress : bool, default: False
         Whether to display a progress bar.
     """
@@ -285,9 +216,7 @@ def _forward_zarr(ingroup, outgroup, sigma, truncate=4.0, progress=False):
     for index in track(
         range(1, n_max), description="forwards filter", display=progress
     ):
-        prediction = predict(
-            states[index - 1, ...], sigma=sigma, mask=mask, truncate=truncate
-        )
+        prediction = predictor.predict(states[index - 1, ...], mask=mask)
         predictions[index, ...] = prediction
 
         updated = prediction * emission[index, ...]
@@ -298,8 +227,8 @@ def _forward_zarr(ingroup, outgroup, sigma, truncate=4.0, progress=False):
     return outgroup
 
 
-def _backward_zarr(ingroup, outgroup, sigma, truncate=4.0, progress=False):
-    """single pass (forwards) of the spatial HMM filter while writing to zarr
+def _backward_zarr(ingroup, outgroup, predictor, progress=False):
+    """single pass (backwards) of the spatial HMM filter while writing to zarr
 
     Parameters
     ----------
@@ -310,10 +239,8 @@ def _backward_zarr(ingroup, outgroup, sigma, truncate=4.0, progress=False):
         - (optionally) a mask to apply after each step. No shadowing yet.
     outgroup : zarr.Group
         Zarr object to write the result to.
-    sigma : float
-        standard deviation of the gaussian kernel, in units of pixels
-    truncate : float, default: 4.0
-        Truncate the kernel after this many multiples of sigma.
+    predictor: Predictor
+        Algorithm for predicting the next time step.
     progress : bool, default: False
         Whether to display a progress bar.
     """
@@ -335,7 +262,7 @@ def _backward_zarr(ingroup, outgroup, sigma, truncate=4.0, progress=False):
         range(1, n_max), description="backwards filter", display=progress
     ):
         ratio = smoothed[-index, ...] / (predictions[-index, ...] + eps)
-        backward_prediction = predict(ratio, sigma=sigma, mask=None, truncate=truncate)
+        backward_prediction = predictor.predict(ratio, mask=None)
         normalized = backward_prediction / np.sum(backward_prediction)
         backward_pred[-index - 1, ...] = normalized
 
