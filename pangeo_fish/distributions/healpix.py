@@ -17,11 +17,11 @@ def normal_at(grid, pos, sigma):
     lon = pos["longitude"].data
     lat = pos["latitude"].data
     coord = grid.dggs.coord.variable
-    cell_ids = coord.data
+    cell_ids = coord.data  # type: np.ndarray
     center = np.reshape(grid_info.geographic2cell_ids(lon=lon, lat=lat), (1, 1))
     distances = _distances(
-        np.astype(center, np.int64),
-        np.reshape(np.astype(cell_ids, np.int64), (1, -1)),
+        center.astype(np.int64),
+        np.reshape(cell_ids.astype(np.int64), (1, -1)),
         axis=-1,
         nside=grid_info.nside,
         nest=grid_info.nest,
