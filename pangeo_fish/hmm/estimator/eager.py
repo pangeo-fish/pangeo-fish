@@ -1,14 +1,14 @@
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 
 import movingpandas as mpd
 import numpy as np
-import xarray as xr
 from tlz.functoolz import compose_left, curry, pipe
 from tlz.itertoolz import first
 
 from pangeo_fish import tracks, utils
 from pangeo_fish.hmm.decode import mean_track, modal_track, viterbi, viterbi2
 from pangeo_fish.hmm.filter import forward, forward_backward, score
+from pangeo_fish.hmm.prediction import Predictor
 
 
 @dataclass
@@ -19,19 +19,23 @@ class EagerEstimator:
 
     Parameters
     ----------
-    sigma : float, default: None
+    predictor_factory : callable
+        Factory for the predictor class. It expects the parameter ("sigma") as a keyword
+        argument and returns the predictor instance.
+    sigma : float, optional
         The primary model parameter: the standard deviation of the distance
         per time unit traveled by the fish, in the same unit as the grid coordinates.
-    truncate : float, default: 4.0
-        The cut-off limit of the filter. This can be used, together with `sigma`, to
-        calculate the maximum distance per time unit traveled by the fish.
     """
 
-    sigma: float = None
-    truncate: float = 4.0
+    predictor_factory: callable
+    sigma: float | None = None
+
+    predictor: Predictor | None = field(default=None, init=False)
 
     def to_dict(self):
-        return asdict(self)
+        exclude = {"predictor_factory"}
+
+        return {k: v for k, v in asdict(self).items() if k not in exclude}
 
     def set_params(self, **params):
         """set the parameters on a new instance
@@ -44,122 +48,73 @@ class EagerEstimator:
         return replace(self, **params)
 
     def _score(self, X, *, spatial_dims=None, temporal_dims=None):
-        import gc
-
         if self.sigma is None:
             raise ValueError("unset sigma, cannot run the filter")
-
-        def _algorithm(emission, mask, initial, *, sigma, truncate):
-            return score(
-                emission,
-                mask=mask,
-                initial_probability=initial,
-                sigma=sigma,
-                truncate=truncate,
-            )
 
         if spatial_dims is None:
             spatial_dims = utils._detect_spatial_dims(X)
         if temporal_dims is None:
             temporal_dims = utils._detect_temporal_dims(X)
 
-        input_core_dims = [
-            temporal_dims + spatial_dims,
-            spatial_dims,
-            spatial_dims,
-        ]
+        dims = temporal_dims + spatial_dims
 
-        value = xr.apply_ufunc(
-            _algorithm,
-            X.pdf.fillna(0),
-            X.mask,
-            X.initial,
-            kwargs={"sigma": self.sigma, "truncate": self.truncate},
-            input_core_dims=input_core_dims,
-            output_core_dims=[()],
-            dask="allowed",
+        X_ = X.transpose(*dims)
+
+        predictor: Predictor
+        if self.predictor is None:
+            predictor = self.predictor_factory(sigma=self.sigma)
+            self.predictor = predictor
+        else:
+            predictor = self.predictor
+
+        value = score(
+            emission=X_["pdf"].data,
+            mask=X_["mask"].data,
+            initial_probability=X_["initial"].data,
+            predictor=predictor,
         )
-        gc.collect()
-        return value.fillna(np.inf)
+
+        return value if not np.isnan(value) else np.inf
 
     def _forward_algorithm(self, X, *, spatial_dims=None, temporal_dims=None):
         if self.sigma is None:
             raise ValueError("unset sigma, cannot run the filter")
 
-        def _algorithm(emission, mask, initial, *, sigma, truncate):
-            return forward(
-                emission=emission,
-                mask=mask,
-                initial_probability=initial,
-                sigma=sigma,
-                truncate=truncate,
-            )
-
         if spatial_dims is None:
             spatial_dims = utils._detect_spatial_dims(X)
         if temporal_dims is None:
             temporal_dims = utils._detect_temporal_dims(X)
 
-        input_core_dims = [
-            temporal_dims + spatial_dims,
-            spatial_dims,
-            spatial_dims,
-        ]
-
-        return xr.apply_ufunc(
-            _algorithm,
-            X.pdf,
-            X.mask,
-            X.initial,
-            kwargs={"sigma": self.sigma, "truncate": self.truncate},
-            input_core_dims=input_core_dims,
-            output_core_dims=[temporal_dims + spatial_dims],
-            dask="allowed",
+        predictor = self.predictor_factory(sigma=self.sigma)
+        filtered = forward(
+            emission=X["pdf"].data,
+            mask=X["mask"].data,
+            initial_probability=X["initial"].data,
+            predictor=predictor,
         )
-
-    def _backward_algorithm(self, X, *, spatial_dims=None, temporal_dims=None):
-        if self.sigma is None:
-            raise ValueError("unset sigma, cannot run the filter")
-
-        def _algorithm(emission, mask, initial, *, sigma, truncate):
-            pass
+        return X["pdf"].copy(data=filtered)
 
     def _forward_backward_algorithm(self, X, *, spatial_dims=None, temporal_dims=None):
         if self.sigma is None:
             raise ValueError("unset sigma, cannot run the filter")
 
-        def _algorithm(emission, mask, initial, *, sigma, truncate):
-            backward_state = forward_backward(
-                emission=emission,
-                sigma=sigma,
-                mask=mask,
-                initial_probability=initial,
-                truncate=truncate,
-            )
-
-            return backward_state
-
         if spatial_dims is None:
             spatial_dims = utils._detect_spatial_dims(X)
         if temporal_dims is None:
             temporal_dims = utils._detect_temporal_dims(X)
 
-        input_core_dims = [
-            temporal_dims + spatial_dims,
-            spatial_dims,
-            spatial_dims,
-        ]
+        dims = temporal_dims + spatial_dims
+        X_ = X.transpose(*dims)
 
-        return xr.apply_ufunc(
-            _algorithm,
-            X.pdf,
-            X.mask,
-            X.initial,
-            kwargs={"sigma": self.sigma, "truncate": self.truncate},
-            input_core_dims=input_core_dims,
-            output_core_dims=[temporal_dims + spatial_dims],
-            dask="allowed",
+        predictor = self.predictor_factory(sigma=self.sigma)
+        filtered = forward_backward(
+            emission=X_["pdf"].data,
+            mask=X_["mask"].data,
+            initial_probability=X_["initial"].data,
+            predictor=predictor,
         )
+
+        return X["pdf"].copy(data=filtered)
 
     def predict_proba(self, X, *, spatial_dims=None, temporal_dims=None):
         """predict the state probabilities
@@ -228,7 +183,7 @@ class EagerEstimator:
         spatial_dims=None,
         temporal_dims=None,
         progress=False,
-        additional_quantities=["distance", "velocity"],
+        additional_quantities=["distance", "speed"],
     ):
         """decode the state sequence from the selected model and the data
 
@@ -250,7 +205,7 @@ class EagerEstimator:
             - ``"viterbi"``: use the viterbi algorithm to determine the most probable states
 
             If a list of methods is given, decode using all methods in sequence.
-        additional_quantities : None or list of str, default: ["distance", "velocity"]
+        additional_quantities : None or list of str, default: ["distance", "speed"]
             Additional quantities to compute from the decoded tracks. Use ``None`` or an
             empty list to not compute anything.
 
