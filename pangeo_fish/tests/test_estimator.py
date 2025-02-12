@@ -20,9 +20,8 @@ def sample_emission():
         inline_array=True,
         storage_options=None,
     )
-    # Set required attributes cleanly
+
     sample_emission["cell_ids"].attrs["grid_name"] = "healpix"
-    # Set required attributes cleanly
     sample_emission["cell_ids"].attrs["level"] = 12
     sample_emission = sample_emission.pipe(xdggs.decode)
 
