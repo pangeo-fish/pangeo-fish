@@ -1,11 +1,18 @@
-from typing import Dict, Tuple
+import inspect
 import fsspec
 import numpy as np
 import pint
 import s3fs
 import intake
+import xdggs
 
 from movingpandas import TrajectoryCollection
+from typing import Dict, List, Tuple, Union
+
+import holoviews as hv
+# import hvplot.xarray
+import xarray as xr
+import pandas as pd
 
 from pangeo_fish.cf import bounds_to_bins
 from pangeo_fish.acoustic import emission_probability
@@ -14,23 +21,17 @@ from pangeo_fish.grid import center_longitude
 from xarray_healpy import HealpyGridInfo, HealpyRegridder
 from pangeo_fish.io import open_copernicus_catalog, open_tag, prepare_dataset, read_trajectories, save_html_hvplot, save_trajectories
 from pangeo_fish.tags import adapt_model_time, reshape_by_bins, to_time_slice
-
-import holoviews as hv
-import hvplot.xarray
-import xarray as xr
-
-import xarray as xr
-import pandas as pd
-
-
+from pangeo_fish.hmm.prediction import Gaussian1DHealpix, Gaussian2DCartesian
 from pangeo_fish.hmm.estimator import EagerEstimator
 from pangeo_fish.hmm.optimize import EagerBoundsSearch
 from pangeo_fish.utils import temporal_resolution
 from pangeo_fish.visualization import plot_map
-
-from toolz.dicttoolz import valfilter
-from pangeo_fish.distributions import create_covariances, normal_at
 from pangeo_fish.pdf import combine_emission_pdf, normal
+
+import pangeo_fish.distributions as distrib
+
+from toolz.functoolz import curry # to change
+from toolz.dicttoolz import valfilter
 
 
 __all__ = [
@@ -49,6 +50,70 @@ __all__ = [
     "open_distributions",
     "plot_distributions"
 ]
+
+
+def _inspect_curry_obj(curried_obj):
+    """Inspect a curried object and retrieves its args and kwargs."""
+    sig = inspect.signature(curried_obj.func)
+    # default parameters
+    params = {
+        k: v.default if v.default is not inspect.Parameter.empty else None
+            for k, v in sig.parameters.items()
+
+    }
+
+    # sig.parameters is ordered, so we can add the args of `curried_obj`
+    for arg_name, arg_value in zip(sig.parameters.keys(), curried_obj.args):
+        params[arg_name] = arg_value
+
+    # finally, updates with the keywords (if any)
+    params.update(curried_obj.keywords)
+    return params
+
+
+def _update_params_dict(factory, params: Dict):
+    """Inspect `factory` (assumed to be a curried object) to get its kw/args and update `params`.
+
+    Note that `params` is updated with string representations of the arguments retrieved **except `cell_ids`**.
+
+    Parameters
+    -----------
+    factory : Curried object
+        It must have the attributes `func`, `args`, and `keywords`
+    params : Dict
+        The dictionary to update
+
+    Returns
+    --------
+    params : Dict
+        The updated dictionary
+    """
+
+    kwargs = {k: str(v) for k, v in _inspect_curry_obj(factory).items() if k != "cell_ids"}
+
+    params["predictor_factory"] = {
+        "class": str(factory),
+        "kwargs": kwargs
+    }
+
+    return params
+
+
+def to_healpix(ds: xr.Dataset) -> xr.Dataset:
+    """Helper that loads a Dataset as a HEALPix grid (indexed by "cell_ids")."""
+    ds["cell_ids"].attrs["grid_name"] = "healpix"
+    attrs_to_keep = ["level", "grid_name"]
+    ds["cell_ids"].attrs = {
+        key: value
+        for (key, value) in ds["cell_ids"].attrs.items()
+        if key in attrs_to_keep
+    }
+    return ds.pipe(xdggs.decode)
+
+
+def regrid_to_2d(ds: xr.Dataset):
+    grid = HealpyGridInfo(level=ds.dggs.grid_info.level)
+    return grid.to_2d(ds)
 
 
 def load_tag(tag_root, tag_name):
@@ -207,7 +272,7 @@ def open_diff_dataset(target_root: str, storage_options: dict):
     return ds
 
 
-def regrid_dataset(ds: xr.Dataset, nside, min_vertices=1, rot={"lat": 0, "lon": 0}):
+def regrid_dataset(ds: xr.Dataset, nside, min_vertices=1, rot={"lat": 0, "lon": 0}, dims: List[str] = ["x", "y"]):
     """regrids a dataset as a HEALPix grid, whose primary advantage is that all its cells/pixels cover the same surface area.
     It currently only supports 2d regridding, i.e., ["x", "y"] indexing.
 
@@ -221,6 +286,8 @@ def regrid_dataset(ds: xr.Dataset, nside, min_vertices=1, rot={"lat": 0, "lon": 
         Minimum number of vertices for a valid transcription
     rot : Dict[str, Tuple[float, float]], default to {"lat": 0, "lon": 0}
         Mapping of angles to rotate the HEALPix grid. It must contain the keys "lon" and "lat"
+    dims : List[str], default to ["x", "y"]
+        The list of the dimensions for the regridding. Either ["x", "y"] or ["cells"]
 
     Returns
     -------
@@ -236,7 +303,15 @@ def regrid_dataset(ds: xr.Dataset, nside, min_vertices=1, rot={"lat": 0, "lon": 
         interpolation_kwargs={"mask": "ocean_mask", "min_vertices": min_vertices},
     )
     regridded = regridder.regrid_ds(ds)
-    reshaped = grid.to_2d(regridded).pipe(center_longitude, 0)
+    if dims == ["x", "y"]:
+        reshaped = regridded.pipe(center_longitude, 0)
+    elif dims == ["cells"]:
+        reshaped = regridded.assign_coords(
+            cell_ids=lambda ds: ds.cell_ids.astype("int64")
+        )
+    else:
+        raise ValueError(f"Unknown dims \"{dims}\".")
+
     # adds the attributes found in `ds` as well as `min_vertices`
     attrs = ds.attrs.copy()
     attrs.update({"min_vertices": min_vertices})
@@ -244,7 +319,7 @@ def regrid_dataset(ds: xr.Dataset, nside, min_vertices=1, rot={"lat": 0, "lon": 
     return reshaped
 
 
-def compute_emission_pdf(diff_ds: xr.Dataset, events_ds: xr.Dataset, differences_std: float, recapture_std: float):
+def compute_emission_pdf(diff_ds: xr.Dataset, events_ds: xr.Dataset, differences_std: float, recapture_std: float, dims: List[str] = ["x", "y"]):
     """compute the temporal emission matrices given a dataset and tagging events.
 
     Parameters
@@ -257,35 +332,57 @@ def compute_emission_pdf(diff_ds: xr.Dataset, events_ds: xr.Dataset, differences
         Standard deviation that is applied to the data (passed to `scipy.stats.norm.pdf`). It'd express the estimated certainty of the field of difference
     recapture_std : float
         Covariance for the recapture event. It should reflect the certainty of the final recapture area
+    dims : List[str], default to ["x", "y"]
+        The list of the dimensions. Either ["x", "y"] or ["cells"]
 
     Returns
     -------
     emission_pdf : xr.Dataset
         The emission pdf
     """
+    if dims == ["x", "y"]:
+        is_2d = True
+    elif dims == ["cells"]:
+        is_2d = False
+    else:
+        raise ValueError(f"Unknown dims \"{dims}\".")
+
+
+    if not is_2d:
+        diff_ds = to_healpix(diff_ds)
+
+
     grid = diff_ds[["latitude", "longitude"]].compute()
-
     initial_position = events_ds.sel(event_name="release")
-    cov = create_covariances(1e-6, coord_names=["latitude", "longitude"])
-    initial_probability = normal_at(
-        grid, pos=initial_position, cov=cov, normalize=True, axes=["latitude", "longitude"]
-    )
-
     final_position = events_ds.sel(event_name="fish_death")
+
+    if dims == ["x", "y"]:
+        cov = distrib.create_covariances(1e-6, coord_names=["latitude", "longitude"])
+        initial_probability = distrib.normal_at(
+            grid, pos=initial_position, cov=cov, normalize=True, axes=["latitude", "longitude"]
+        )
+    else:
+        initial_probability = distrib.healpix.normal_at(grid, pos=initial_position, sigma=1e-3)
+
+
     if final_position[["longitude", "latitude"]].to_dataarray().isnull().all():
         final_probability = None
     else:
-        cov = create_covariances(recapture_std**2, coord_names=["latitude", "longitude"])
-        final_probability = normal_at(
-            grid,
-            pos=final_position,
-            cov=cov,
-            normalize=True,
-            axes=["latitude", "longitude"],
-        )
+        if is_2d:
+            cov = distrib.create_covariances(recapture_std**2, coord_names=["latitude", "longitude"])
+            final_probability = distrib.normal_at(
+                grid,
+                pos=final_position,
+                cov=cov,
+                normalize=True,
+                axes=["latitude", "longitude"],
+            )
+        else:
+            final_probability = distrib.healpix.normal_at(grid, pos=final_position, sigma=recapture_std)
+
 
     emission_pdf = (
-        normal(diff_ds["diff"], mean=0, std=differences_std, dims=["y", "x"])
+        normal(diff_ds["diff"], mean=0, std=differences_std, dims=dims)
         .to_dataset(name="pdf")
         .assign(
             valfilter(
@@ -297,7 +394,7 @@ def compute_emission_pdf(diff_ds: xr.Dataset, events_ds: xr.Dataset, differences
                 },
             )
         )
-    ) # type: xr.Dataset
+    )  # type: xr.Dataset
     attrs = diff_ds.attrs.copy()
     attrs.update(
         {
@@ -306,10 +403,10 @@ def compute_emission_pdf(diff_ds: xr.Dataset, events_ds: xr.Dataset, differences
         }
     )
     emission_pdf = emission_pdf.assign_attrs(attrs)
-    return emission_pdf
+    return emission_pdf # chunk?
 
 
-def compute_acoustic_pdf(emission_ds: xr.Dataset, tag: xr.DataTree, receiver_buffer: pint.Quantity, chunk_time=24):
+def compute_acoustic_pdf(emission_ds: xr.Dataset, tag: xr.DataTree, receiver_buffer: pint.Quantity, chunk_time=24, dims: List[str] = ["x", "y"]):
     """compute emission probability maps from (acoustic) detection data.
 
     Parameters
@@ -322,18 +419,29 @@ def compute_acoustic_pdf(emission_ds: xr.Dataset, tag: xr.DataTree, receiver_buf
         Maximum allowed detection distance for acoustic receivers
     chunk_time : int, default to 24
         Chunk size for the time dimension
+    dims : List[str], default to ["x", "y"]
+        The list of the dimensions. Either ["x", "y"] or ["cells"]
 
     Returns
     -------
     acoustic_pdf : xr.Dataset
         The emission pdf
     """
+    if dims == ["cells"]:
+        lon, lat = emission_ds["cell_ids"].attrs.get("lat", 0), emission_ds["cell_ids"].attrs.get("lon", 0)
+        emission_ds = to_healpix(emission_ds)
+        # adds back "lon" and "lat" keys
+        emission_ds["cell_ids"].attrs["lon"] = lon
+        emission_ds["cell_ids"].attrs["lat"] = lat
+
     acoustic_pdf = emission_probability(
         tag,
         emission_ds[["time", "cell_ids", "mask"]].compute(),
         receiver_buffer,
         nondetections="mask",
+        cell_ids="keep",
         chunk_time=chunk_time,
+        dims=dims
     )
     attrs = emission_ds.attrs.copy()
     attrs.update(
@@ -370,8 +478,46 @@ def combine_pdfs(emission_ds: xr.Dataset, acoustic_ds: xr.Dataset, chunks):
     return combined
 
 
+def _get_predictor_factory(ds: xr.Dataset, truncate: float, dims: List[str]):
+    if dims == ["x", "y"]:
+        predictor = curry(Gaussian2DCartesian, truncate=truncate)
+    elif dims == ["cells"]:
+        predictor = curry(
+            Gaussian1DHealpix,
+            cell_ids=ds["cell_ids"].data,
+            grid_info=ds.dggs.grid_info,
+            truncate=truncate,
+            weights_threshold=1e-8,
+            pad_kwargs={"mode": "constant", "constant_value": 0},
+            optimize_convolution=True,
+        )
+    else:
+        raise ValueError(f"Unknown dims \"{dims}\".")
+    return predictor
 
-def optimize_pdf(ds, earth_radius: pint.Quantity, adjustment_factor: float, truncate: float, maximum_speed: pint.Quantity, tolerance: float):
+
+def _get_max_sigma(ds: xr.Dataset, earth_radius: pint.Quantity, adjustment_factor: float, truncate: float, maximum_speed: pint.Quantity) -> float:
+    earth_radius_ = xr.DataArray(earth_radius, dims=None)
+
+    timedelta = temporal_resolution(ds["time"]).pint.quantify().pint.to("h")
+    grid_resolution = earth_radius_ * ds["resolution"].pint.quantify()
+
+    maximum_speed_ = xr.DataArray(maximum_speed, dims=None).pint.to("km / h")
+    max_grid_displacement = maximum_speed_ * timedelta * adjustment_factor / grid_resolution
+    max_sigma = max_grid_displacement.pint.to("dimensionless").pint.magnitude / truncate
+
+    return max_sigma.item()
+
+
+def optimize_pdf(
+        ds: xr.Dataset,
+        earth_radius: pint.Quantity,
+        adjustment_factor: float,
+        truncate: float,
+        maximum_speed: pint.Quantity,
+        tolerance: float,
+        dims: List[str] = ["x", "y"]
+    ) -> dict:
     """optimize a temporal emission pdf.
 
     Parameters
@@ -388,30 +534,33 @@ def optimize_pdf(ds, earth_radius: pint.Quantity, adjustment_factor: float, trun
         Maximum fish's velocity
     tolerance : float
         Tolerance level for the optimised parameter search computation
+    dims : List[str], default to ["x", "y"]
+        The list of the dimensions. Either ["x", "y"] or ["cells"]
 
     Returns
     -------
     params : dict
         A dictionary containing the optimization results (mainly, the sigma value of the Brownian movement model)
     """
-    earth_radius_ = xr.DataArray(earth_radius, dims=None)
+    if "cells" in ds.dims:
+        ds = to_healpix(ds)
 
-    timedelta = temporal_resolution(ds["time"]).pint.quantify().pint.to("h")
-    grid_resolution = earth_radius_ * ds["resolution"].pint.quantify()
+    max_sigma = _get_max_sigma(ds, earth_radius, adjustment_factor, truncate, maximum_speed)
+    predictor_factory = _get_predictor_factory(ds=ds, truncate=truncate, dims=dims)
 
-    maximum_speed_ = xr.DataArray(maximum_speed, dims=None).pint.to("km / h")
-    max_grid_displacement = maximum_speed_ * timedelta * adjustment_factor / grid_resolution
-    max_sigma = max_grid_displacement.pint.to("dimensionless").pint.magnitude / truncate
-    ds.attrs["max_sigma"] = max_sigma.item() # limitation of the helper
+    estimator = EagerEstimator(sigma=None, predictor_factory=predictor_factory)
+    ds.attrs["max_sigma"] = max_sigma # limitation of the helper
     ds = ds.compute()
-    estimator = EagerEstimator()
+
     optimizer = EagerBoundsSearch(
         estimator,
         (1e-4, ds.attrs["max_sigma"]),
         optimizer_kwargs={"disp": 3, "xtol": tolerance},
     )
     optimized = optimizer.fit(ds)
-    return optimized.to_dict()
+    params = optimized.to_dict()  # type: dict
+    _update_params_dict(factory=predictor_factory, params=params)
+    return params
 
 
 def predict_positions(
@@ -419,7 +568,8 @@ def predict_positions(
         storage_options: dict,
         chunks: dict,
         track_modes=["mean", "mode"],
-        additional_track_quantities=["speed", "distance"]
+        additional_track_quantities=["speed", "distance"],
+        dims: List[str] = ["x", "y"]
         ):
     """high-level helper function for predicting fish's positions and generating the consequent trajectories.
     It futhermore saves the latter under `states.zarr` and `trajectories.parq`.
@@ -438,6 +588,8 @@ def predict_positions(
         Options for decoding trajectories. See `pangeo_fish.hmm.estimator.EagerEstimator.decode`
     additional_track_quantities : list[str], default to ["speed", "distance"]
         Additional quantities to compute from the decoded tracks. See `pangeo_fish.hmm.estimator.EagerEstimator.decode`
+    dims : List[str], default to ["x", "y"]
+        The list of the dimensions. Either ["x", "y"] or ["cells"]
 
     Returns
     -------
@@ -446,22 +598,33 @@ def predict_positions(
     trajectories : TrajectoryCollection
         The tracks decoded from `states`
     """
-
-    params = pd.read_json(
-        f"{target_root}/parameters.json", storage_options=storage_options
-    ).to_dict()[0]
-    optimized = EagerEstimator(**params)
-
+    # loads the normalized .zarr array
     emission = xr.open_dataset(
         f"{target_root}/combined.zarr",
         engine="zarr",
         chunks=chunks,
         inline_array=True,
         storage_options=storage_options,
-    ).compute()
+    )
+    if "cells" in emission.dims:
+        emission = to_healpix(emission)
+
+    emission = emission.compute()
+
+    params = pd.read_json(
+        f"{target_root}/parameters.json", storage_options=storage_options
+    ).to_dict()[0]
+
+    # do not account for the other kwargs...
+    # not very robust yet...
+    truncate = float(params["predictor_factory"]["kwargs"]["truncate"])
+    predictor_factory = _get_predictor_factory(emission, truncate=truncate, dims=dims)
+
+    optimized = EagerEstimator(sigma=params["sigma"],  predictor_factory=predictor_factory)
 
     states = optimized.predict_proba(emission)
-    states = states.to_dataset().chunk(chunks)
+    states = states.to_dataset().chunk(chunks)  # type: xr.Dataset
+    states.attrs.update(emission.attrs)
 
     states.to_zarr(
         f"{target_root}/states.zarr",
@@ -528,7 +691,7 @@ def plot_trajectories(target_root: str, track_modes: list[str], storage_options:
     return plot
 
 
-def open_distributions(target_root: str, storage_options: dict):
+def open_distributions(target_root: str, storage_options: dict, chunk_time=24):
     """load and merge the `emission` and `states` distributions into a single dataset.
 
     Parameters
@@ -539,6 +702,8 @@ def open_distributions(target_root: str, storage_options: dict):
             it must not end with "/".
     storage_options : dict
         Additional information for `xarray` to open the `.zarr` array
+    chunk_time : int, default to 24
+        Chunk size for the time dimension
 
     Returns
     -------
@@ -565,6 +730,16 @@ def open_distributions(target_root: str, storage_options: dict):
     ).where(emission["mask"])
 
     data = xr.merge([states, emission.drop_vars(["mask"])])
+
+    # if the data is 1D indexed, regrids it to 2D
+    # since this function is expected to be used for plotting tasks
+    if "cells" in data.dims:
+        data = to_healpix(data)
+        data = regrid_to_2d(data)
+
+    data = data.assign_coords(longitude=((data.longitude + 180) % 360 - 180))
+    data = data.chunk({"time": chunk_time})
+
     return data
 
 
