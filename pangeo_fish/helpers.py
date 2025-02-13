@@ -196,8 +196,8 @@ def _open_reference_model():
 def load_model(tag_log: xr.Dataset, time_slice: slice, bbox: Dict[str, Tuple[float, float]], chunk_time=24):
     """load and prepare the reference model for a computation."""
     # reference_ds = _open_reference_model()
-    reference_ds = _open_copernicus_model()
-    model = prepare_dataset(reference_ds)
+    # model = prepare_dataset(reference_ds)
+    model = _open_copernicus_model()
     reference_model = (
         model.sel(time=adapt_model_time(time_slice))
         .sel(lat=slice(*bbox["latitude"]), lon=slice(*bbox["longitude"]))
@@ -304,7 +304,7 @@ def regrid_dataset(ds: xr.Dataset, nside, min_vertices=1, rot={"lat": 0, "lon": 
     )
     regridded = regridder.regrid_ds(ds)
     if dims == ["x", "y"]:
-        reshaped = regridded.pipe(center_longitude, 0)
+        reshaped = grid.to_2d(regridded).pipe(center_longitude, 0)
     elif dims == ["cells"]:
         reshaped = regridded.assign_coords(
             cell_ids=lambda ds: ds.cell_ids.astype("int64")
@@ -496,14 +496,17 @@ def _get_predictor_factory(ds: xr.Dataset, truncate: float, dims: List[str]):
     return predictor
 
 
-def _get_max_sigma(ds: xr.Dataset, earth_radius: pint.Quantity, adjustment_factor: float, truncate: float, maximum_speed: pint.Quantity) -> float:
+def _get_max_sigma(ds: xr.Dataset, earth_radius: pint.Quantity, adjustment_factor: float, truncate: float, maximum_speed: pint.Quantity, as_radians: bool) -> float:
     earth_radius_ = xr.DataArray(earth_radius, dims=None)
 
     timedelta = temporal_resolution(ds["time"]).pint.quantify().pint.to("h")
     grid_resolution = earth_radius_ * ds["resolution"].pint.quantify()
 
     maximum_speed_ = xr.DataArray(maximum_speed, dims=None).pint.to("km / h")
-    max_grid_displacement = maximum_speed_ * timedelta * adjustment_factor / grid_resolution
+    if as_radians:
+        max_grid_displacement = maximum_speed_ * timedelta * adjustment_factor / earth_radius_
+    else: # in pixels
+        max_grid_displacement = maximum_speed_ * timedelta * adjustment_factor / grid_resolution
     max_sigma = max_grid_displacement.pint.to("dimensionless").pint.magnitude / truncate
 
     return max_sigma.item()
@@ -542,15 +545,20 @@ def optimize_pdf(
     params : dict
         A dictionary containing the optimization results (mainly, the sigma value of the Brownian movement model)
     """
+    # it is important to compute before re-indexing?
+    ds = ds.compute()
+
     if "cells" in ds.dims:
         ds = to_healpix(ds)
+        as_radians = True
+    else:
+        as_radians = False
 
-    max_sigma = _get_max_sigma(ds, earth_radius, adjustment_factor, truncate, maximum_speed)
+    max_sigma = _get_max_sigma(ds, earth_radius, adjustment_factor, truncate, maximum_speed, as_radians)
     predictor_factory = _get_predictor_factory(ds=ds, truncate=truncate, dims=dims)
 
     estimator = EagerEstimator(sigma=None, predictor_factory=predictor_factory)
     ds.attrs["max_sigma"] = max_sigma # limitation of the helper
-    ds = ds.compute()
 
     optimizer = EagerBoundsSearch(
         estimator,
@@ -606,10 +614,14 @@ def predict_positions(
         inline_array=True,
         storage_options=storage_options,
     )
+    emission = emission.compute()
+
     if "cells" in emission.dims:
         emission = to_healpix(emission)
+    else:
+        assert all([d in emission.dims for d in dims]), f"Not all the dimensions provided (dims=\"{dims}\") were found in the emission distribution."
+        emission["pdf"] = emission["pdf"].transpose("time", "y", "x")
 
-    emission = emission.compute()
 
     params = pd.read_json(
         f"{target_root}/parameters.json", storage_options=storage_options
