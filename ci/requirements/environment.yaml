@@ -37,6 +37,7 @@ dependencies:
   - cartopy
   - healpy
   - cdshealpix
+  - healpix-convolution
   - scikit-learn
   - astropy
   # video processing
