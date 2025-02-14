@@ -1,18 +1,24 @@
 import inspect
+import os
+import sys
 import fsspec
-import numpy as np
 import pint
 import s3fs
 import intake
 import xdggs
+import tqdm
+import warnings
 
+from pathlib import Path
 from movingpandas import TrajectoryCollection
 from typing import Dict, List, Tuple, Union
 
-import holoviews as hv
 # import hvplot.xarray
+import holoviews as hv
+import numpy as np
 import xarray as xr
 import pandas as pd
+import imageio as iio
 
 from pangeo_fish.cf import bounds_to_bins
 from pangeo_fish.acoustic import emission_probability
@@ -25,7 +31,7 @@ from pangeo_fish.hmm.prediction import Gaussian1DHealpix, Gaussian2DCartesian
 from pangeo_fish.hmm.estimator import EagerEstimator
 from pangeo_fish.hmm.optimize import EagerBoundsSearch
 from pangeo_fish.utils import temporal_resolution
-from pangeo_fish.visualization import plot_map
+from pangeo_fish.visualization import filter_by_states, plot_map, render_frame
 from pangeo_fish.pdf import combine_emission_pdf, normal
 
 import pangeo_fish.distributions as distrib
@@ -54,6 +60,7 @@ __all__ = [
 
 def _inspect_curry_obj(curried_obj):
     """Inspect a curried object and retrieves its args and kwargs."""
+
     sig = inspect.signature(curried_obj.func)
     # default parameters
     params = {
@@ -101,6 +108,7 @@ def _update_params_dict(factory, params: Dict):
 
 def to_healpix(ds: xr.Dataset) -> xr.Dataset:
     """Helper that loads a Dataset as a HEALPix grid (indexed by "cell_ids")."""
+
     ds["cell_ids"].attrs["grid_name"] = "healpix"
     attrs_to_keep = ["level", "grid_name"]
     ds["cell_ids"].attrs = {
@@ -116,7 +124,7 @@ def regrid_to_2d(ds: xr.Dataset):
     return grid.to_2d(ds)
 
 
-def load_tag(tag_root, tag_name):
+def load_tag(tag_root: str, tag_name: str, *args, **kwargs):
     """load a tag.
 
     Returns
@@ -128,13 +136,22 @@ def load_tag(tag_root, tag_name):
     time_slice : slice or like
         Time interval described by the released and recapture dates
     """
+
     tag = open_tag(tag_root, tag_name)
     time_slice = to_time_slice(tag["tagging_events/time"])
     tag_log = tag["dst"].ds.sel(time=time_slice).assign_attrs({"tag_name": tag_name})
     return tag, tag_log, time_slice
 
 
-def plot_tag(tag: xr.DataTree, tag_log: xr.Dataset):
+def plot_tag(
+        tag: xr.DataTree,
+        tag_log: xr.Dataset,
+        *args,
+        save_html=False,
+        target_root=".",
+        storage_options:dict = None,
+        **kwargs
+    ):
     """plot a tag.
 
     Parameters
@@ -143,15 +160,21 @@ def plot_tag(tag: xr.DataTree, tag_log: xr.Dataset):
         The tag
     tag_log : xr.Dataset
         The DST data
-
-    # target_root : str, optional
-    #     Root of the folder to save `plot` as a HMTL file `tags.html`.
+    save_html : bool, default: False
+        Whether to save the plot as a HTML file
+    target_root : str, default: "."
+        Root of the folder to save `plot` as a HMTL file `tags.html`.
+        Only used if `save_html=True`
+    storage_options : dict, default: None
+        Dictionary containing storage options for connecting to the S3 bucket.
+        Only used if `save_html=True` and that the saving is done on a S3 bucket.
 
     Returns
     -------
     hvplot : hv.Overlay
-        Interactive plot
+        Interactive plot of the pressure and temperature timeseries of the tag
     """
+
     plot = (
         (-tag["dst"].pressure).hvplot(width=1000, height=500, color="blue")
         * (-tag_log).hvplot.scatter(
@@ -163,7 +186,19 @@ def plot_tag(tag: xr.DataTree, tag_log: xr.Dataset):
                 x="time", y="temperature", color="red", size=5, width=1000, height=500
             )
         )
-    )
+    )  # type: hv.Overlay
+    if save_html:
+        try:
+            path_to_html = Path(target_root) / "tags.html"
+            # ensure the path is created (if needed) in case of local saving
+            if storage_options is None:
+                path_to_html.mkdir(parents=True, exist_ok=True)
+            save_html_hvplot(plot, str(path_to_html), storage_options=storage_options)
+        except Exception as e:
+            warnings.warn(
+                "An error occurred when saving the Holoview plot of the tag:\n" + str(e),
+                category=UserWarning
+            )
     return plot
 
 
@@ -193,8 +228,16 @@ def _open_reference_model():
     return reference_ds
 
 
-def load_model(tag_log: xr.Dataset, time_slice: slice, bbox: Dict[str, Tuple[float, float]], chunk_time=24):
+def load_model(
+        tag_log: xr.Dataset,
+        time_slice: slice,
+        *args,
+        bbox: Dict[str, Tuple[float, float]],
+        chunk_time=24,
+        **kwargs
+    ):
     """load and prepare the reference model for a computation."""
+
     # reference_ds = _open_reference_model()
     # model = prepare_dataset(reference_ds)
     model = _open_copernicus_model()
@@ -211,8 +254,16 @@ def load_model(tag_log: xr.Dataset, time_slice: slice, bbox: Dict[str, Tuple[flo
 
 
 
-def compute_diff(reference_model: xr.Dataset, tag_log: xr.Dataset, relative_depth_threshold: float, chunk_time=24):
+def compute_diff(
+        reference_model: xr.Dataset,
+        tag_log: xr.Dataset,
+        relative_depth_threshold: float,
+        *args,
+        chunk_time=24,
+        **kwargs
+    ):
     """compute the difference between the reference model and the DST data of a tag."""
+
     reshaped_tag = reshape_by_bins(
         tag_log,
         dim="time",
@@ -239,11 +290,11 @@ def compute_diff(reference_model: xr.Dataset, tag_log: xr.Dataset, relative_dept
                 "ocean_mask": reference_model["H0"].notnull(),
             }
         )
-    )
+    )  # type: xr.Dataset
     return diff
 
 
-def open_diff_dataset(target_root: str, storage_options: dict):
+def open_diff_dataset(target_root: str, storage_options: dict, *args, **kwargs):
     """open a diff dataset.
 
     Parameters
@@ -258,6 +309,7 @@ def open_diff_dataset(target_root: str, storage_options: dict):
     ds : xr.Dataset
         The dataset
     """
+
     ds = (
         xr.open_dataset(
             f"{target_root}/diff.zarr",
@@ -272,7 +324,15 @@ def open_diff_dataset(target_root: str, storage_options: dict):
     return ds
 
 
-def regrid_dataset(ds: xr.Dataset, nside, min_vertices=1, rot={"lat": 0, "lon": 0}, dims: List[str] = ["x", "y"]):
+def regrid_dataset(
+        ds: xr.Dataset,
+        nside: int,
+        *args,
+        min_vertices=1,
+        rot={"lat": 0, "lon": 0},
+        dims: List[str] = ["x", "y"],
+        **kwargs
+    ):
     """regrids a dataset as a HEALPix grid, whose primary advantage is that all its cells/pixels cover the same surface area.
     It currently only supports 2d regridding, i.e., ["x", "y"] indexing.
 
@@ -294,6 +354,7 @@ def regrid_dataset(ds: xr.Dataset, nside, min_vertices=1, rot={"lat": 0, "lon": 
     reshaped : xr.Dataset
         HEALPix version of `ds`
     """
+
     grid = HealpyGridInfo(level=int(np.log2(nside)), rot=rot)
     target_grid = grid.target_grid(ds).pipe(center_longitude, 0)
     regridder = HealpyRegridder(
@@ -319,7 +380,15 @@ def regrid_dataset(ds: xr.Dataset, nside, min_vertices=1, rot={"lat": 0, "lon": 
     return reshaped
 
 
-def compute_emission_pdf(diff_ds: xr.Dataset, events_ds: xr.Dataset, differences_std: float, recapture_std: float, dims: List[str] = ["x", "y"]):
+def compute_emission_pdf(
+        diff_ds: xr.Dataset,
+        events_ds: xr.Dataset,
+        differences_std: float,
+        recapture_std: float,
+        *args,
+        dims: List[str] = ["x", "y"],
+        **kwargs
+    ):
     """compute the temporal emission matrices given a dataset and tagging events.
 
     Parameters
@@ -340,6 +409,7 @@ def compute_emission_pdf(diff_ds: xr.Dataset, events_ds: xr.Dataset, differences
     emission_pdf : xr.Dataset
         The emission pdf
     """
+
     if dims == ["x", "y"]:
         is_2d = True
     elif dims == ["cells"]:
@@ -362,7 +432,7 @@ def compute_emission_pdf(diff_ds: xr.Dataset, events_ds: xr.Dataset, differences
             grid, pos=initial_position, cov=cov, normalize=True, axes=["latitude", "longitude"]
         )
     else:
-        initial_probability = distrib.healpix.normal_at(grid, pos=initial_position, sigma=1e-3)
+        initial_probability = distrib.healpix.normal_at(grid, pos=initial_position, sigma=1e-5)
 
 
     if final_position[["longitude", "latitude"]].to_dataarray().isnull().all():
@@ -406,7 +476,15 @@ def compute_emission_pdf(diff_ds: xr.Dataset, events_ds: xr.Dataset, differences
     return emission_pdf # chunk?
 
 
-def compute_acoustic_pdf(emission_ds: xr.Dataset, tag: xr.DataTree, receiver_buffer: pint.Quantity, chunk_time=24, dims: List[str] = ["x", "y"]):
+def compute_acoustic_pdf(
+        emission_ds: xr.Dataset,
+        tag: xr.DataTree,
+        receiver_buffer: pint.Quantity,
+        chunk_time=24,
+        *args,
+        dims: List[str] = ["x", "y"],
+        **kwargs
+    ):
     """compute emission probability maps from (acoustic) detection data.
 
     Parameters
@@ -427,6 +505,7 @@ def compute_acoustic_pdf(emission_ds: xr.Dataset, tag: xr.DataTree, receiver_buf
     acoustic_pdf : xr.Dataset
         The emission pdf
     """
+
     if dims == ["cells"]:
         lon, lat = emission_ds["cell_ids"].attrs.get("lat", 0), emission_ds["cell_ids"].attrs.get("lon", 0)
         emission_ds = to_healpix(emission_ds)
@@ -453,7 +532,13 @@ def compute_acoustic_pdf(emission_ds: xr.Dataset, tag: xr.DataTree, receiver_buf
     return acoustic_pdf
 
 
-def combine_pdfs(emission_ds: xr.Dataset, acoustic_ds: xr.Dataset, chunks):
+def combine_pdfs(
+        emission_ds: xr.Dataset,
+        acoustic_ds: xr.Dataset,
+        chunks: dict,
+        *args,
+        **kwargs
+    ):
     """combine and normalize 2 pdfs.
 
     Parameters
@@ -496,7 +581,14 @@ def _get_predictor_factory(ds: xr.Dataset, truncate: float, dims: List[str]):
     return predictor
 
 
-def _get_max_sigma(ds: xr.Dataset, earth_radius: pint.Quantity, adjustment_factor: float, truncate: float, maximum_speed: pint.Quantity, as_radians: bool) -> float:
+def _get_max_sigma(
+        ds: xr.Dataset,
+        earth_radius: pint.Quantity,
+        adjustment_factor: float,
+        truncate: float,
+        maximum_speed: pint.Quantity,
+        as_radians: bool
+    ) -> float:
     earth_radius_ = xr.DataArray(earth_radius, dims=None)
 
     timedelta = temporal_resolution(ds["time"]).pint.quantify().pint.to("h")
@@ -519,7 +611,9 @@ def optimize_pdf(
         truncate: float,
         maximum_speed: pint.Quantity,
         tolerance: float,
-        dims: List[str] = ["x", "y"]
+        *args,
+        dims: List[str] = ["x", "y"],
+        **kwargs
     ) -> dict:
     """optimize a temporal emission pdf.
 
@@ -575,19 +669,22 @@ def predict_positions(
         target_root: str,
         storage_options: dict,
         chunks: dict,
+        *args,
         track_modes=["mean", "mode"],
         additional_track_quantities=["speed", "distance"],
-        dims: List[str] = ["x", "y"]
-        ):
+        dims: List[str] = ["x", "y"],
+        **kwargs
+    ):
     """high-level helper function for predicting fish's positions and generating the consequent trajectories.
     It futhermore saves the latter under `states.zarr` and `trajectories.parq`.
+
+    .. warning::
+        `target_root` must not end with "/".
 
     Parameters
     ----------
     target_root : str
         Path to a folder that must contain the `combined.zarr` and `parameters.json` files.
-        .. warning::
-            it must not end with "/".
     storage_options : dict
         Additional information for `xarray` to open the `.zarr` array
     chunks : dict
@@ -658,16 +755,24 @@ def predict_positions(
     return states, trajectories
 
 
-def plot_trajectories(target_root: str, track_modes: list[str], storage_options: dict, save_html=True):
+def plot_trajectories(
+        target_root: str,
+        track_modes: list[str],
+        storage_options: dict,
+        *args,
+        save_html=True,
+        **kwargs
+    ):
     """read decoded trajectories and plots an interactive visualization.
     Optionally, the plot can be saved as a HTML file.
+
+    .. warning::
+        `target_root` must not end with "/".
 
     Parameters
     ----------
     target_root : str
         Path to a folder that must contain a trajectory collection `trajectories.parq`
-        .. warning::
-            it must not end with "/".
     track_modes : list[str]
         Names of the tracks
     storage_options : dict
@@ -703,15 +808,20 @@ def plot_trajectories(target_root: str, track_modes: list[str], storage_options:
     return plot
 
 
-def open_distributions(target_root: str, storage_options: dict, chunk_time=24):
+def open_distributions(
+    target_root: str,
+    storage_options: dict,
+    *args,
+    chunk_time=24,
+    **kwargs
+    ):
     """load and merge the `emission` and `states` distributions into a single dataset.
 
     Parameters
     ----------
     target_root : str
         Path to a folder that must contain the `combined.zarr` and `states.zarr` files.
-        .. warning::
-            it must not end with "/".
+        **Must not end with "/".**
     storage_options : dict
         Additional information for `xarray` to open the `.zarr` array
     chunk_time : int, default to 24
@@ -721,7 +831,12 @@ def open_distributions(target_root: str, storage_options: dict, chunk_time=24):
     -------
     data : xr.Dataset
         The merged and cleaned dataset
+
+    See Also
+    --------
+    `helpers.plot_distributions()` and `helpers.render_distributions()`.
     """
+
     emission = (
         xr.open_dataset(
             f"{target_root}/combined.zarr",
@@ -743,8 +858,8 @@ def open_distributions(target_root: str, storage_options: dict, chunk_time=24):
 
     data = xr.merge([states, emission.drop_vars(["mask"])])
 
-    # if the data is 1D indexed, regrids it to 2D
-    # since this function is expected to be used for plotting tasks
+    # if the data is 1D indexed, regrid it to 2D
+    # since this function is expected to be used for plotting and rendering tasks
     if "cells" in data.dims:
         data = to_healpix(data)
         data = regrid_to_2d(data)
@@ -755,8 +870,8 @@ def open_distributions(target_root: str, storage_options: dict, chunk_time=24):
     return data
 
 
-def plot_distributions(data: xr.Dataset, bbox=None):
-    """plot an interactive visualization of both a dataset resulting from the merging of `emission` and the `states` distributions.
+def plot_distributions(data: xr.Dataset, *args, bbox=None, **kwargs):
+    """plot an interactive visualization of dataset resulting from the merging of `emission` and the `states` distributions.
     See `pangeo_fish.helpers.open_distributions()`.
 
     Parameters
@@ -771,8 +886,170 @@ def plot_distributions(data: xr.Dataset, bbox=None):
     plot : hv.Layout
         Interactive plot of the `states` and `emission` distributions
     """
+
     plot1 = plot_map(data["states"], bbox)
     plot2 = plot_map(data["emission"], bbox)
     plot = hv.Layout([plot1, plot2]).cols(2)
 
     return plot
+
+
+def render_frames(ds: xr.Dataset, *args, time_slice: slice = None, **kwargs):
+    """helper function for rendering images.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        A dataset which the `emission` and `states` variables
+    time_slice : slice, default: None
+        Timesteps to render. If not provided, all timesteps are rendered
+
+    Returns
+    -------
+    None : None
+        Nothing is returned
+
+    Other Parameters
+    ---------------
+    kwargs : dict
+        Additional arguments passed to `pangeo-fish.visualization.render_frame()`.
+        See its documentation for more information.
+
+    """
+
+    if time_slice is not None:
+        ds = ds.isel(time=time_slice)
+
+    ds.map_blocks(
+        render_frame,
+        kwargs=kwargs,
+        template=ds
+    ).compute() # to trigger the computation
+
+
+def _render_video(
+        frames_fp: list[str],
+        video_fn: str,
+        extension="gif",
+        fps=10
+    ) -> str:
+
+    def _is_format_available(format_name: str):
+        formats = iio.config.known_plugins.keys()
+        return format_name in formats
+
+    if extension == "gif":
+        kwargs = dict(
+            uri=f"{video_fn}.gif",
+            mode="I",
+            fps=fps
+        )
+
+    elif extension == "mp4":
+        if not _is_format_available("FFMPEG"):
+            raise ModuleNotFoundError("FFMPEG not found: have you installed imageio[ffmpeg]?")
+
+        kwargs = dict(
+            uri=f"{video_fn}.mp4",
+            mode="I",
+            fps=fps,
+            codec="libx264",
+            pixelformat="yuv420p",
+            ffmpeg_params=["-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2"]
+        )
+
+    else:
+        raise ValueError(f"Unknown extension \"{extension}\".")
+
+    pbar = tqdm.tqdm(sorted(frames_fp), file=sys.stdout)
+    pbar.set_description("Rendering the video...")
+    with iio.get_writer(**kwargs) as writer:
+        for filename in pbar:
+            image = iio.v3.imread(filename)
+            writer.append_data(image)
+    pbar.close()
+    return kwargs["uri"]
+
+
+def render_distributions(
+        data: xr.Dataset,
+        *args,
+        time_step=3,
+        frames_dir="frames",
+        filename="states",
+        extension="gif",
+        fps=10,
+        remove_frames=True,
+        **kwargs
+    ):
+    """render a video of a dataset resulting from the merging of `emission` and the `states` distributions.
+    See `pangeo_fish.helpers.open_distributions()`.
+
+    Parameters
+    ----------
+    data : xr.Dataset
+        A dataset that contains the `emission` and `states` variables
+    time_step : int, default: 3
+        Time step to sample data from `data`
+    frames_dir : str, default: "frames"
+        Name of the folder to save the images to.
+    filename : str, default: "states"
+        Name of the video file.
+    extension : str, default: "gif"
+        Name of the file extension of the video.
+        Either "gif" or "mp4". In the latter case, make sure to have installed imageio[ffmpeg]
+    fps : int, default: 10
+        Number of frames per second.
+    remove_frames : bool, default: True
+        Whether to delete the frames.
+
+    Returns
+    -------
+    video_fn : str
+        Path to the video
+
+    """
+
+    # quick input checking
+    if not all(var_name in data.variables for var_name in ["emission", "states"]):
+        raise ValueError(f"\"emission\" and/or \"states\" variable(s) not found in the dataset.")
+    if sorted(list(data.dims)) != ["time", "x", "y"]:
+        raise ValueError(f"The dataset must have its dimensions equal to [\"time\", \"x\", \"y\"].")
+
+    time_slice = slice(0, data["time"].size - 1, time_step)
+    sliced_data = (
+        data.isel(time=time_slice)
+        .chunk({"time": 1, "x": -1, "y": -1})
+        .pipe(lambda ds: ds.merge(ds[["longitude", "latitude"]].compute()))
+    ).pipe(filter_by_states)  # type: xr.Dataset
+    # add a time index
+    sliced_data = sliced_data.assign_coords(time_index=("time", np.arange(sliced_data.sizes["time"])))
+    sliced_data = sliced_data.chunk({"time": 1, "x": -1, "y": -1})
+
+    path_to_frames = Path(frames_dir)
+    path_to_frames.mkdir(parents=True, exist_ok=True)
+
+    # see pangeo-fish.visualization.render_frame()
+    render_frames(data, **(kwargs | {"frames_dir": frames_dir}))
+    try:
+        video_fp = _render_video(
+            frames_fp=[file.resolve() for file in path_to_frames.glob("*.png")],
+            video_fn=filename,
+            extension=extension,
+            fps=fps
+        )
+    except Exception as e:
+        warnings.warn(
+            "An error occurred when rendering the video:\n" + str(e),
+            UserWarning
+        )
+        video_fp = ""
+    finally:
+        pbar = tqdm.tqdm(path_to_frames.glob("*.png"), file=sys.stdout)
+        pbar.set_description("Removing .png files")
+        # we only know that the images are stored in `path_to_frames`
+        if remove_frames:
+            for filepath in pbar:
+                os.remove(filepath)
+        pbar.close()
+    return video_fp
