@@ -48,8 +48,9 @@ class CachedEstimator:
 
         Parameters
         ----------
-        **params
+        params : dict
             Mapping of parameter name to new value.
+
         """
         return replace(self, **params)
 

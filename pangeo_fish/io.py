@@ -1,3 +1,5 @@
+"""Module for managing I/O operations."""
+
 import io
 import json
 import os
@@ -222,6 +224,7 @@ def prepare_dataset(dataset, chunks=None, bbox=None, names=None):
     names : dict[str, str], optional
         A dictionary that maps the three variables that correspond to the "TEMP", "XE" and "H0" data. By
         default, the names align data from the Copernicus Marine Service with ``{"thetao": "TEMP", "zos": "XE", "deptho": "H0"}``.
+
     Returns
     -------
     ds : xarray.Dataset

@@ -37,7 +37,7 @@ The file must have three columns: `time`, `temperature`, and `pressure`.
 
 For example:
 
-```csv
+```
 time,temperature,pressure
 2022-07-21T12:12:30Z,10.1,14.3
 2022-08-01T07:08:01Z,1.3,17.3
@@ -55,7 +55,7 @@ The used events are: `release`, `recapture`, `fish_death` (more are possible but
 
 For example:
 
-```csv
+```
 event_name,time,latitude,longitude
 release,2023-07-13T13:21:57Z,48.21842,-4.08578
 recapture,2023-09-17T05:21:07Z,47.37423,-3.87582
@@ -63,7 +63,7 @@ recapture,2023-09-17T05:21:07Z,47.37423,-3.87582
 
 or
 
-```csv
+```
 event_name,time,latitude,longitude
 release,2023-07-13T13:21:57Z,48.21842,-4.08578
 fish_death,2023-09-17T05:21:07Z,NA,NA
@@ -80,14 +80,14 @@ It may contain additional columns, such as the position of detection.
 
 For example:
 
-```csv
+```
 time,deployment_id
 2022-08-10T22:11:00Z,176492
 ```
 
 or
 
-```csv
+```
 time,deployment_id,longitude,latitude
 2022-08-10T22:11:00Z,176492,-3.88402,47.78820
 2022-08-10T23:25:31Z,176492,-3.68471,47.81740
@@ -119,7 +119,7 @@ If the recover position is unknown or the same as the deployment position, it ma
 
 For example:
 
-```csv
+```
 deployment_id,station_name,deploy_time,deploy_longitude,deploy_latitude,recover_time,recover_longitude,recover_latitude
 12345,station_1,2022-06-13T06:14:00Z,-4.12345,49.56789,2022-06-20T14:07:00Z,NA,NA
 12348,station_2,2022-06-13T05:51:00Z,-3.34567,46.23456,2022-06-20T14:00:00Z,NA,NA
