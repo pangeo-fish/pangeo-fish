@@ -25,10 +25,13 @@ extensions = [
     # "autoapi.extension",
     "sphinx_copybutton",
     "myst_parser",
+    "nbsphinx",
+    "nbsphinx_link"
 ]
 
 autosummary_generate = True
 autosummary_imported_members = False
+nbsphinx_execute = "never"
 
 # Document Python Code
 # autoapi_type = "python"

@@ -11,8 +11,9 @@ Welcome to pangeo-fish's documentation!
 
     installation
     usage
-    api
     format
+    tuto
+    api
 
 
 
