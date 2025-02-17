@@ -169,7 +169,6 @@ def test_emission_probability(dummy_tag, dummy_grid):
     )
 
     result = emission.compute()
-    print(result)
 
     assert "acoustic" in emission.data_vars
-    assert result.dims["time"] == dummy_grid.dims["time"]
+    assert result["acoustic"].notnull().any()
