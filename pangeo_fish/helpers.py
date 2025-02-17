@@ -736,12 +736,6 @@ def predict_positions(
 
     if "cells" in emission.dims:
         emission = to_healpix(emission)
-    else:
-        # should not be needed now
-        #TODO: to check
-        assert all([d in emission.dims for d in dims]), f"Not all the dimensions provided (dims=\"{dims}\") were found in the emission distribution."
-        emission = emission.transpose("time", *dims)
-
 
     params = pd.read_json(
         f"{target_root}/parameters.json", storage_options=storage_options
@@ -836,6 +830,7 @@ def open_distributions(
     storage_options: dict,
     chunks: dict,
     *args,
+    chunk_time=24,
     **kwargs
     ):
     """load and merge the `emission` and `states` distributions into a single dataset.
@@ -847,8 +842,10 @@ def open_distributions(
         **Must not end with "/".**
     storage_options : dict
         Additional information for `xarray` to open the `.zarr` array
-    dims : dict
-        Dimensions to chunk the xr.Datasets. It is used both for loading the `.zarr` arrays and chunk the result.
+    chunks : dict
+        Mapping of the chunk sizes for each dimension of the xr.Datasets to load: namely, the `.zarr` arrays `combined` and `states`
+    chunk_time : int, default: 24
+        Chunk size of the dimension "time" to use to chunk the result
 
     Returns
     -------
@@ -888,7 +885,7 @@ def open_distributions(
         data = regrid_to_2d(data)
 
     data = data.assign_coords(longitude=((data["longitude"] + 180) % 360 - 180))
-    data = data.chunk(chunks)
+    data = data.chunk({d: -1 if d != "time" else chunk_time for d in data.dims})
 
     return data
 
@@ -902,14 +899,14 @@ def plot_distributions(data: xr.Dataset, *args, bbox=None, **kwargs):
     data : xr.Dataset
         A dataset that contains the `emission` and `states` variables
     bbox : dict[str, tuple[float, float]], optional
-        The spatial boundaries of the area of interest. Shoud have the keys "longitude" and "latitude".
+        The spatial boundaries of the area of interest. Must have the keys "longitude" and "latitude".
 
     Returns
     -------
     plot : hv.Layout
         Interactive plot of the `states` and `emission` distributions
     """
-
+    #TODO: adding coastlines reverts the xlim / ylim arguments
     plot1 = plot_map(data["states"], bbox)
     plot2 = plot_map(data["emission"], bbox)
     plot = hv.Layout([plot1, plot2]).cols(2)
