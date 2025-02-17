@@ -231,8 +231,8 @@ def _open_reference_model():
 def load_model(
         tag_log: xr.Dataset,
         time_slice: slice,
-        *args,
         bbox: Dict[str, Tuple[float, float]],
+        *args,
         chunk_time=24,
         **kwargs
     ):
@@ -342,11 +342,11 @@ def regrid_dataset(
         The DST data
     nside : int
         Tesolution of the HEALPix grid
-    min_vertices : int, default to 1
+    min_vertices : int, default: 1
         Minimum number of vertices for a valid transcription
-    rot : Dict[str, Tuple[float, float]], default to {"lat": 0, "lon": 0}
+    rot : Dict[str, Tuple[float, float]], default: {"lat": 0, "lon": 0}
         Mapping of angles to rotate the HEALPix grid. It must contain the keys "lon" and "lat"
-    dims : List[str], default to ["x", "y"]
+    dims : List[str], default: ["x", "y"]
         The list of the dimensions for the regridding. Either ["x", "y"] or ["cells"]
 
     Returns
@@ -386,6 +386,7 @@ def compute_emission_pdf(
         differences_std: float,
         recapture_std: float,
         *args,
+        chunk_time: int = 24,
         dims: List[str] = ["x", "y"],
         **kwargs
     ):
@@ -401,8 +402,10 @@ def compute_emission_pdf(
         Standard deviation that is applied to the data (passed to `scipy.stats.norm.pdf`). It'd express the estimated certainty of the field of difference
     recapture_std : float
         Covariance for the recapture event. It should reflect the certainty of the final recapture area
-    dims : List[str], default to ["x", "y"]
-        The list of the dimensions. Either ["x", "y"] or ["cells"]
+    dims : List[str], default: ["x", "y"]
+        Spatial dimensions. Either ["x", "y"] or ["cells"]
+    chunk_time : int, default: 24
+        Chunk size for the time dimension
 
     Returns
     -------
@@ -473,15 +476,15 @@ def compute_emission_pdf(
         }
     )
     emission_pdf = emission_pdf.assign_attrs(attrs)
-    return emission_pdf # chunk?
+    return emission_pdf.chunk({"time": chunk_time} | {d: -1 for d in dims}) # chunk?
 
 
 def compute_acoustic_pdf(
         emission_ds: xr.Dataset,
         tag: xr.DataTree,
         receiver_buffer: pint.Quantity,
-        chunk_time=24,
         *args,
+        chunk_time=24,
         dims: List[str] = ["x", "y"],
         **kwargs
     ):
@@ -495,9 +498,9 @@ def compute_acoustic_pdf(
         The tag data. It must have the datasets `acoustic` and `stations`
     receiver_buffer : pint.Quantity
         Maximum allowed detection distance for acoustic receivers
-    chunk_time : int, default to 24
+    chunk_time : int, default: 24
         Chunk size for the time dimension
-    dims : List[str], default to ["x", "y"]
+    dims : List[str], default: ["x", "y"]
         The list of the dimensions. Either ["x", "y"] or ["cells"]
 
     Returns
@@ -537,6 +540,7 @@ def combine_pdfs(
         acoustic_ds: xr.Dataset,
         chunks: dict,
         *args,
+        dims=None,
         **kwargs
     ):
     """combine and normalize 2 pdfs.
@@ -549,6 +553,8 @@ def combine_pdfs(
         Dataset of acoustic probabilities
     chunks : dict
         How to chunk the data
+    dims : dict, optional
+        Spatial dimensions to transpose the combined dataset. Relevant in case of a 2D, such as ["x", "y"] or ["y", "x"]
 
     Returns
     -------
@@ -560,6 +566,20 @@ def combine_pdfs(
         combined.pipe(combine_emission_pdf)
         .chunk(chunks)
     )
+    if dims is not None:
+        #TODO: still not enough: e.g, dims = []
+        if not all([d in combined.dims for d in dims]):
+            raise ValueError(
+                f"Not all the dimensions provided (dims=\"{dims}\") were found in the emission distribution."
+            )
+        if "time" in dims:
+            warnings.warn(
+                "\"time\" was found in \"dims\". Spatial dimensions are expected.",
+                UserWarning
+            )
+            combined = combined.transpose(*dims)
+        else:
+            combined = combined.transpose("time", *dims)
     return combined
 
 
@@ -631,7 +651,7 @@ def optimize_pdf(
         Maximum fish's velocity
     tolerance : float
         Tolerance level for the optimised parameter search computation
-    dims : List[str], default to ["x", "y"]
+    dims : List[str], default: ["x", "y"]
         The list of the dimensions. Either ["x", "y"] or ["cells"]
 
     Returns
@@ -639,7 +659,8 @@ def optimize_pdf(
     params : dict
         A dictionary containing the optimization results (mainly, the sigma value of the Brownian movement model)
     """
-    # it is important to compute before re-indexing?
+
+    # it is important to compute before re-indexing? Yes.
     ds = ds.compute()
 
     if "cells" in ds.dims:
@@ -688,12 +709,12 @@ def predict_positions(
     storage_options : dict
         Additional information for `xarray` to open the `.zarr` array
     chunks : dict
-        Chunk size upon loading the pdf xr.Dataset
-    track_modes : list[str], default to ["mean", "mode"]
+        Chunk size to load the xr.Dataset `combined.zarr`
+    track_modes : list[str], default: ["mean", "mode"]
         Options for decoding trajectories. See `pangeo_fish.hmm.estimator.EagerEstimator.decode`
-    additional_track_quantities : list[str], default to ["speed", "distance"]
+    additional_track_quantities : list[str], default: ["speed", "distance"]
         Additional quantities to compute from the decoded tracks. See `pangeo_fish.hmm.estimator.EagerEstimator.decode`
-    dims : List[str], default to ["x", "y"]
+    dims : List[str], default: ["x", "y"]
         The list of the dimensions. Either ["x", "y"] or ["cells"]
 
     Returns
@@ -716,8 +737,10 @@ def predict_positions(
     if "cells" in emission.dims:
         emission = to_healpix(emission)
     else:
+        # should not be needed now
+        #TODO: to check
         assert all([d in emission.dims for d in dims]), f"Not all the dimensions provided (dims=\"{dims}\") were found in the emission distribution."
-        emission["pdf"] = emission["pdf"].transpose("time", "y", "x")
+        emission = emission.transpose("time", *dims)
 
 
     params = pd.read_json(
@@ -777,7 +800,7 @@ def plot_trajectories(
         Names of the tracks
     storage_options : dict
         Additional information for `xarray` to open the `.zarr` array
-    save_html : bool, default to True
+    save_html : bool, default: True
         Whether to save the plot (under `{target_root}/trajectories.html`)
 
     Returns
@@ -811,8 +834,8 @@ def plot_trajectories(
 def open_distributions(
     target_root: str,
     storage_options: dict,
+    chunks: dict,
     *args,
-    chunk_time=24,
     **kwargs
     ):
     """load and merge the `emission` and `states` distributions into a single dataset.
@@ -824,8 +847,8 @@ def open_distributions(
         **Must not end with "/".**
     storage_options : dict
         Additional information for `xarray` to open the `.zarr` array
-    chunk_time : int, default to 24
-        Chunk size for the time dimension
+    dims : dict
+        Dimensions to chunk the xr.Datasets. It is used both for loading the `.zarr` arrays and chunk the result.
 
     Returns
     -------
@@ -841,7 +864,7 @@ def open_distributions(
         xr.open_dataset(
             f"{target_root}/combined.zarr",
             engine="zarr",
-            chunks={},
+            chunks=chunks,
             inline_array=True,
             storage_options=storage_options,
         )
@@ -851,7 +874,7 @@ def open_distributions(
     states = xr.open_dataset(
         f"{target_root}/states.zarr",
         engine="zarr",
-        chunks={},
+        chunks=chunks,
         inline_array=True,
         storage_options=storage_options,
     ).where(emission["mask"])
@@ -864,8 +887,8 @@ def open_distributions(
         data = to_healpix(data)
         data = regrid_to_2d(data)
 
-    data = data.assign_coords(longitude=((data.longitude + 180) % 360 - 180))
-    data = data.chunk({"time": chunk_time})
+    data = data.assign_coords(longitude=((data["longitude"] + 180) % 360 - 180))
+    data = data.chunk(chunks)
 
     return data
 
@@ -953,6 +976,7 @@ def _render_video(
             uri=f"{video_fn}.mp4",
             mode="I",
             fps=fps,
+            format="FFMPEG",
             codec="libx264",
             pixelformat="yuv420p",
             ffmpeg_params=["-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2"]
@@ -1030,7 +1054,7 @@ def render_distributions(
     path_to_frames.mkdir(parents=True, exist_ok=True)
 
     # see pangeo-fish.visualization.render_frame()
-    render_frames(data, **(kwargs | {"frames_dir": frames_dir}))
+    render_frames(sliced_data, **(kwargs | {"frames_dir": frames_dir}))
     try:
         video_fp = _render_video(
             frames_fp=[file.resolve() for file in path_to_frames.glob("*.png")],
