@@ -22,9 +22,9 @@ dependencies = [
     "movingpandas",
     "xarray-healpy",
     "cf_xarray",
+    "healpix-convolution",
     "xdggs",
-    "imageio[ffmpeg]",
-    "healpix-convolution @ git+https://github.com/IAOCEA/healpix-convolution.git@d7222a4aa3ad47b640847bd5a0be0235d38aa810"
+    "imageio[ffmpeg]"
 ]
 dynamic = ["version"]
 
