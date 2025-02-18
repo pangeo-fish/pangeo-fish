@@ -127,7 +127,7 @@ def regrid_to_2d(ds: xr.Dataset):
     return grid.to_2d(ds)
 
 
-def load_tag(*, tag_root: str, tag_name: str, storage_options:dict = None, **kwargs):
+def load_tag(*, tag_root: str, tag_name: str, storage_options: dict = None, **kwargs):
     """Load a tag.
 
     Parameters
@@ -204,7 +204,7 @@ def plot_tag(
             path_to_html = Path(target_root) / "tags.html"
             # ensure the path is created (if needed) in case of local saving
             if storage_options is None:
-                path_to_html.mkdir(parents=True, exist_ok=True)
+                path_to_html.parent.mkdir(parents=True, exist_ok=True)
             save_html_hvplot(plot, str(path_to_html), storage_options=storage_options)
         except Exception as e:
             warnings.warn(
@@ -779,7 +779,7 @@ def optimize_pdf(
         try:
             path_to_json = Path(target_root) / "parameters.json"
             if storage_options is None:
-                path_to_json.mkdir(parents=True, exist_ok=True)
+                path_to_json.parent.mkdir(parents=True, exist_ok=True)
             pd.DataFrame.from_dict(params, orient="index").to_json(
                 str(path_to_json), storage_options=storage_options
             )
@@ -931,7 +931,7 @@ def plot_trajectories(
     if save_html:
         path_to_html = Path(target_root) / "trajectories.html"
         if storage_options is None:
-            path_to_html.mkdir(parents=True, exist_ok=True)
+            path_to_html.parent.mkdir(parents=True, exist_ok=True)
         save_html_hvplot(plot, str(path_to_html), storage_options)
 
     return plot
@@ -982,7 +982,7 @@ def open_distributions(
             storage_options=storage_options,
         )
         .rename_vars({"pdf": "emission"})
-        .drop_vars(["final", "initial"])
+        .drop_vars(["final", "initial"], errors="ignore")
     )
     states = xr.open_dataset(
         f"{target_root}/states.zarr",
@@ -1174,7 +1174,7 @@ def render_distributions(
     path_to_frames.mkdir(parents=True, exist_ok=True)
 
     # see pangeo-fish.visualization.render_frame()
-    render_frames(sliced_data, **(kwargs | {"frames_dir": frames_dir}))
+    render_frames(ds=sliced_data, **(kwargs | {"frames_dir": frames_dir}))
     try:
         video_fp = _render_video(
             frames_fp=[file.resolve() for file in path_to_frames.glob("*.png")],
