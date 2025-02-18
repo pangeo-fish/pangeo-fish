@@ -24,7 +24,7 @@ from pangeo_fish.acoustic import emission_probability
 from pangeo_fish.diff import diff_z
 from pangeo_fish.grid import center_longitude
 from xarray_healpy import HealpyGridInfo, HealpyRegridder
-from pangeo_fish.io import open_copernicus_catalog, open_tag, prepare_dataset, read_trajectories, save_html_hvplot, save_trajectories
+from pangeo_fish.io import open_copernicus_catalog, open_tag, prepare_dataset, read_trajectories, save_html_hvplot, save_trajectories, tz_convert
 from pangeo_fish.tags import adapt_model_time, reshape_by_bins, to_time_slice
 from pangeo_fish.hmm.prediction import Gaussian1DHealpix, Gaussian2DCartesian
 from pangeo_fish.hmm.estimator import EagerEstimator
@@ -43,6 +43,7 @@ __all__ = [
     "to_healpix",
     "regrid_to_2d",
     "load_tag",
+    "update_stations",
     "plot_tag",
     "load_model",
     "compute_diff",
@@ -153,6 +154,51 @@ def load_tag(*, tag_root: str, tag_name: str, storage_options: dict = None, **kw
     time_slice = to_time_slice(tag["tagging_events/time"])
     tag_log = tag["dst"].ds.sel(time=time_slice).assign_attrs({"tag_name": tag_name})
     return tag, tag_log, time_slice
+
+
+def update_stations(*, tag: xr.DataTree, station_file_uri: str, method="merge", storage_options={}, **kwargs):
+    """Add or replace the acoustic receiver data of a tag.
+
+    Parameters
+    ----------
+    tag : xr.DataTree
+        The tag to update
+    station_file_uri : str
+        Path to the `.csv` file
+    method : str, default: "merge"
+        Operation to perform between the current and the new databases:
+        - `merge` (default): the databases are merged.
+        - `replace`: the current data is replaced by the new one.
+
+    storage_options : dict, default: {}
+        Dictionary containing storage options for connecting to the S3 bucket
+
+    Returns
+    -------
+    tag : xr.DataTree
+        The updated tag
+    """
+
+    if method not in ["merge", "replace"]:
+        raise ValueError(f"Unknown method \"{method}\".")
+
+    if not station_file_uri.endswith(".csv"):
+        warnings.warn("`uri` should include the extension `.csv`.", UserWarning)
+        station_file_uri += ".csv"
+
+    with fsspec.open(station_file_uri, **storage_options) as file:
+        stations = pd.read_csv(
+            file,
+            parse_dates=["deploy_time", "recover_time"],
+            index_col="deployment_id",
+        ).pipe(tz_convert, {"deploy_time": None, "recover_time": None})
+
+        ds = xr.Dataset.from_dataframe(stations)
+    if method == "merge":
+        tag["stations"] = tag["stations"].ds.merge(ds)
+    else:
+        tag["stations"] = ds
+    return tag
 
 
 def plot_tag(
