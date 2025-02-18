@@ -10,8 +10,7 @@ import tqdm
 import warnings
 
 from pathlib import Path
-from movingpandas import TrajectoryCollection
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Tuple
 
 # import hvplot.xarray
 import holoviews as hv
@@ -41,6 +40,8 @@ from toolz.dicttoolz import valfilter
 
 
 __all__ = [
+    "to_healpix",
+    "regrid_to_2d",
     "load_tag",
     "plot_tag",
     "load_model",
@@ -54,12 +55,14 @@ __all__ = [
     "predict_positions",
     "plot_trajectories",
     "open_distributions",
-    "plot_distributions"
+    "plot_distributions",
+    "render_frames",
+    "render_distributions"
 ]
 
 
 def _inspect_curry_obj(curried_obj):
-    """Inspect a curried object and retrieves its args and kwargs."""
+    """Inspect a curried object and retrieve its args and kwargs."""
 
     sig = inspect.signature(curried_obj.func)
     # default parameters
@@ -124,8 +127,17 @@ def regrid_to_2d(ds: xr.Dataset):
     return grid.to_2d(ds)
 
 
-def load_tag(tag_root: str, tag_name: str, *args, **kwargs):
-    """load a tag.
+def load_tag(*, tag_root: str, tag_name: str, storage_options:dict = None, **kwargs):
+    """Load a tag.
+
+    Parameters
+    ----------
+    tag_root : str
+        Path to the folder that contains the tag data under a folder `tag_name`
+    tag_name : str
+        Name of the tagged fish (e.g, "A19124"). Notably, It is used to fetch the biologging data from `{tag_root}/{tag_name}/`
+    storage_options : dict, optional
+        Dictionary containing storage options for connecting to the S3 bucket
 
     Returns
     -------
@@ -137,22 +149,22 @@ def load_tag(tag_root: str, tag_name: str, *args, **kwargs):
         Time interval described by the released and recapture dates
     """
 
-    tag = open_tag(tag_root, tag_name)
+    tag = open_tag(tag_root, tag_name, storage_options)
     time_slice = to_time_slice(tag["tagging_events/time"])
     tag_log = tag["dst"].ds.sel(time=time_slice).assign_attrs({"tag_name": tag_name})
     return tag, tag_log, time_slice
 
 
 def plot_tag(
+        *,
         tag: xr.DataTree,
         tag_log: xr.Dataset,
-        *args,
         save_html=False,
         target_root=".",
         storage_options:dict = None,
         **kwargs
     ):
-    """plot a tag.
+    """Plot a tag.
 
     Parameters
     ----------
@@ -165,7 +177,7 @@ def plot_tag(
     target_root : str, default: "."
         Root of the folder to save `plot` as a HMTL file `tags.html`.
         Only used if `save_html=True`
-    storage_options : dict, default: None
+    storage_options : dict, optional
         Dictionary containing storage options for connecting to the S3 bucket.
         Only used if `save_html=True` and that the saving is done on a S3 bucket.
 
@@ -202,19 +214,45 @@ def plot_tag(
     return plot
 
 
-def _open_copernicus_model(catalog_url="https://data-taos.ifremer.fr/kerchunk/ref-copernicus.yaml"):
-    cat = intake.open_catalog(catalog_url)
-    model = open_copernicus_catalog(cat)
+def _open_copernicus_model(yaml_url: str, chunks: dict = None):
+    """Open an intake catalog.
+
+    Parameters
+    ----------
+    catalog_url : str
+        Path to the `.yaml` file
+    chunks : dict, optional
+        How to chunk the data
+
+    Returns
+    -------
+    model : xr.Dataset
+        A dataset with the (notable) variables `TEMP`, `XE` and `H0`
+    """
+    cat = intake.open_catalog(yaml_url)
+    model = open_copernicus_catalog(cat, chunks)
     return model
 
 
-def _open_reference_model():
-    parquet_path_url = "s3://gfts-reference-data/NORTHWESTSHELF_ANALYSIS_FORECAST_PHY_004_013/combined_2022_to_2024.parq/"
+def _open_parquet_model(parquet_url: str):
+    """Open a `.parq` dataset assembled with `virtualzarr`.
+
+    Parameters
+    ----------
+    parquet_url : str
+        Path to the `.parq` folders
+
+    Returns
+    -------
+    model : xr.Dataset
+        The dataset found
+    """
+
     target_opts = {"anon": False}
     remote_opts = {"anon": False}
     fs = fsspec.filesystem(
         "reference",
-        fo=parquet_path_url,
+        fo=parquet_url,
         remote_protocol="s3",
         remote_options=remote_opts,
         target_options=target_opts,
@@ -229,18 +267,43 @@ def _open_reference_model():
 
 
 def load_model(
+        *,
+        uri: str,
         tag_log: xr.Dataset,
         time_slice: slice,
         bbox: Dict[str, Tuple[float, float]],
-        *args,
         chunk_time=24,
         **kwargs
-    ):
-    """load and prepare the reference model for a computation."""
+    ) -> xr.Dataset:
+    """Load and prepare a reference model.
 
-    # reference_ds = _open_reference_model()
-    # model = prepare_dataset(reference_ds)
-    model = _open_copernicus_model()
+    Parameters
+    ----------
+    uri : str
+        Path to the data. either an intake catalog (thus ending with `.yaml`) or a parquet array (thus ending with `.parq/`)
+    tag_log : xr.Dataset
+        The DST data
+    time_slice : slice
+        Time slice to sample the model from
+    bbox : dict
+        Spatial boundaries indexed by their coordinates (i.e, `longitude` and `latitude`)
+    chunk_time : int, default: 24
+        Chunk size for the time dimension
+
+    Returns
+    -------
+    model : xr.Dataset
+        The subset data
+    """
+
+    if uri.endswith(".yaml"):
+        model = _open_copernicus_model(uri)
+    elif uri.endswith(".parq") or uri.endswith(".parq/"):
+        reference_ds = _open_parquet_model(uri)
+        model = prepare_dataset(reference_ds)
+    else:
+        raise ValueError("Only intake catalogs and \"parqed\" data can be loaded.")
+
     reference_model = (
         model.sel(time=adapt_model_time(time_slice))
         .sel(lat=slice(*bbox["latitude"]), lon=slice(*bbox["longitude"]))
@@ -255,14 +318,31 @@ def load_model(
 
 
 def compute_diff(
+        *,
         reference_model: xr.Dataset,
         tag_log: xr.Dataset,
         relative_depth_threshold: float,
-        *args,
         chunk_time=24,
         **kwargs
     ):
-    """compute the difference between the reference model and the DST data of a tag."""
+    """Compute the difference between the reference model and the DST data of a tag.
+
+    Parameters
+    ----------
+    reference_model : xr.Dataset
+        The reference model
+    tag_log : xr.Dataset
+        The DST data. *Hint: given a tag model, it corresponds to `tag["dst"].ds`*
+    relative_depth_threshold : float
+        Relative (seabed's) depth threshold to deal with cases where the fish's depths are lower than the seabed's depth
+    chunk_time : int, default: 24
+        Chunk size for the time dimension
+
+    Returns
+    -------
+    diff : xr.Dataset
+        The difference between the biologging and field data
+    """
 
     reshaped_tag = reshape_by_bins(
         tag_log,
@@ -294,8 +374,8 @@ def compute_diff(
     return diff
 
 
-def open_diff_dataset(target_root: str, storage_options: dict, *args, **kwargs):
-    """open a diff dataset.
+def open_diff_dataset(*, target_root: str, storage_options: dict, **kwargs):
+    """Ppen a diff dataset.
 
     Parameters
     ----------
@@ -325,16 +405,15 @@ def open_diff_dataset(target_root: str, storage_options: dict, *args, **kwargs):
 
 
 def regrid_dataset(
+        *,
         ds: xr.Dataset,
         nside: int,
-        *args,
         min_vertices=1,
         rot={"lat": 0, "lon": 0},
-        dims: List[str] = ["x", "y"],
+        dims: List[str] = ["cells"],
         **kwargs
     ):
-    """regrids a dataset as a HEALPix grid, whose primary advantage is that all its cells/pixels cover the same surface area.
-    It currently only supports 2d regridding, i.e., ["x", "y"] indexing.
+    """Regrid a dataset as a HEALPix grid, whose primary advantage is that all its cells/pixels cover the same surface area.
 
     Parameters
     ----------
@@ -346,7 +425,7 @@ def regrid_dataset(
         Minimum number of vertices for a valid transcription
     rot : Dict[str, Tuple[float, float]], default: {"lat": 0, "lon": 0}
         Mapping of angles to rotate the HEALPix grid. It must contain the keys "lon" and "lat"
-    dims : List[str], default: ["x", "y"]
+    dims : List[str], default: ["cells"]
         The list of the dimensions for the regridding. Either ["x", "y"] or ["cells"]
 
     Returns
@@ -381,28 +460,29 @@ def regrid_dataset(
 
 
 def compute_emission_pdf(
+        *,
         diff_ds: xr.Dataset,
         events_ds: xr.Dataset,
         differences_std: float,
         recapture_std: float,
-        *args,
         chunk_time: int = 24,
-        dims: List[str] = ["x", "y"],
+        dims: List[str] = ["cells"],
         **kwargs
     ):
-    """compute the temporal emission matrices given a dataset and tagging events.
+    """Compute the temporal emission matrices given a dataset and tagging events.
 
     Parameters
     ----------
     diff_ds : xr.Dataset
         A dataset that must have the variables `diff` and `ocean_mask`
     events_ds : xr.Dataset
-        The tagging events. It must have the coordinate `event_name` and values `release` and `fish_death`
+        The tagging events. It must have the coordinate `event_name` and values `release` and `fish_death`.
+        *Hint: given a tag model, it corresponds to `tag["tagging_events"].ds`*
     differences_std : float
         Standard deviation that is applied to the data (passed to `scipy.stats.norm.pdf`). It'd express the estimated certainty of the field of difference
     recapture_std : float
         Covariance for the recapture event. It should reflect the certainty of the final recapture area
-    dims : List[str], default: ["x", "y"]
+    dims : List[str], default: ["cells"]
         Spatial dimensions. Either ["x", "y"] or ["cells"]
     chunk_time : int, default: 24
         Chunk size for the time dimension
@@ -476,19 +556,19 @@ def compute_emission_pdf(
         }
     )
     emission_pdf = emission_pdf.assign_attrs(attrs)
-    return emission_pdf.chunk({"time": chunk_time} | {d: -1 for d in dims}) # chunk?
+    return emission_pdf.chunk({"time": chunk_time} | {d: -1 for d in dims})
 
 
 def compute_acoustic_pdf(
+        *,
         emission_ds: xr.Dataset,
         tag: xr.DataTree,
         receiver_buffer: pint.Quantity,
-        *args,
         chunk_time=24,
-        dims: List[str] = ["x", "y"],
+        dims: List[str] = ["cells"],
         **kwargs
     ):
-    """compute emission probability maps from (acoustic) detection data.
+    """Compute a emission probability distribution from (acoustic) detection data.
 
     Parameters
     ----------
@@ -500,7 +580,7 @@ def compute_acoustic_pdf(
         Maximum allowed detection distance for acoustic receivers
     chunk_time : int, default: 24
         Chunk size for the time dimension
-    dims : List[str], default: ["x", "y"]
+    dims : List[str], default: ["cells"]
         The list of the dimensions. Either ["x", "y"] or ["cells"]
 
     Returns
@@ -536,14 +616,14 @@ def compute_acoustic_pdf(
 
 
 def combine_pdfs(
+        *,
         emission_ds: xr.Dataset,
         acoustic_ds: xr.Dataset,
         chunks: dict,
-        *args,
         dims=None,
         **kwargs
     ):
-    """combine and normalize 2 pdfs.
+    """Combine and normalize 2 probability distributions (pdfs).
 
     Parameters
     ----------
@@ -566,8 +646,8 @@ def combine_pdfs(
         combined.pipe(combine_emission_pdf)
         .chunk(chunks)
     )
-    if dims is not None:
-        #TODO: still not enough: e.g, dims = []
+    if (dims is not None) and ("cells" not in dims):
+        #TODO: still not enough...
         if not all([d in combined.dims for d in dims]):
             raise ValueError(
                 f"Not all the dimensions provided (dims=\"{dims}\") were found in the emission distribution."
@@ -625,17 +705,20 @@ def _get_max_sigma(
 
 
 def optimize_pdf(
+        *,
         ds: xr.Dataset,
         earth_radius: pint.Quantity,
         adjustment_factor: float,
         truncate: float,
         maximum_speed: pint.Quantity,
         tolerance: float,
-        *args,
-        dims: List[str] = ["x", "y"],
+        dims: List[str] = ["cells"],
+        save_parameters= False,
+        storage_options: dict = None,
+        target_root=".",
         **kwargs
     ) -> dict:
-    """optimize a temporal emission pdf.
+    """Optimize a temporal probability distribution.
 
     Parameters
     ----------
@@ -651,8 +734,16 @@ def optimize_pdf(
         Maximum fish's velocity
     tolerance : float
         Tolerance level for the optimised parameter search computation
-    dims : List[str], default: ["x", "y"]
+    dims : List[str], default: ["cells"]
         The list of the dimensions. Either ["x", "y"] or ["cells"]
+    save_parameters : bool, default: False
+        Whether to save the results under `{target_root}/parameters.json`
+    target_root : str, default: "."
+        Root of the folder to save the results as a json file `parameters.json`
+        Only used if `save_parameters=True`
+    storage_options : dict, optional
+        Dictionary containing storage options for connecting to the S3 bucket.
+        Only used if `save_parameters=True` and that the saving is done on a S3 bucket.
 
     Returns
     -------
@@ -683,20 +774,33 @@ def optimize_pdf(
     optimized = optimizer.fit(ds)
     params = optimized.to_dict()  # type: dict
     _update_params_dict(factory=predictor_factory, params=params)
+
+    if save_parameters:
+        try:
+            path_to_json = Path(target_root) / "parameters.json"
+            if storage_options is None:
+                path_to_json.mkdir(parents=True, exist_ok=True)
+            pd.DataFrame.from_dict(params, orient="index").to_json(
+                str(path_to_json), storage_options=storage_options
+            )
+        except Exception as e:
+            warnings.warn(
+                f"An error occurred when attempting to export the results under \"{path_to_json}\".",
+                RuntimeWarning
+            )
     return params
 
 
 def predict_positions(
+        *,
         target_root: str,
         storage_options: dict,
         chunks: dict,
-        *args,
         track_modes=["mean", "mode"],
         additional_track_quantities=["speed", "distance"],
-        dims: List[str] = ["x", "y"],
         **kwargs
     ):
-    """high-level helper function for predicting fish's positions and generating the consequent trajectories.
+    """High-level helper function for predicting fish's positions and generating the consequent trajectories.
     It futhermore saves the latter under `states.zarr` and `trajectories.parq`.
 
     .. warning::
@@ -705,7 +809,7 @@ def predict_positions(
     Parameters
     ----------
     target_root : str
-        Path to a folder that must contain the `combined.zarr` and `parameters.json` files.
+        Path to a folder that must contain a folder `combined.zarr` and the file `parameters.json`
     storage_options : dict
         Additional information for `xarray` to open the `.zarr` array
     chunks : dict
@@ -714,8 +818,6 @@ def predict_positions(
         Options for decoding trajectories. See `pangeo_fish.hmm.estimator.EagerEstimator.decode`
     additional_track_quantities : list[str], default: ["speed", "distance"]
         Additional quantities to compute from the decoded tracks. See `pangeo_fish.hmm.estimator.EagerEstimator.decode`
-    dims : List[str], default: ["x", "y"]
-        The list of the dimensions. Either ["x", "y"] or ["cells"]
 
     Returns
     -------
@@ -724,6 +826,7 @@ def predict_positions(
     trajectories : TrajectoryCollection
         The tracks decoded from `states`
     """
+
     # loads the normalized .zarr array
     emission = xr.open_dataset(
         f"{target_root}/combined.zarr",
@@ -744,7 +847,13 @@ def predict_positions(
     # do not account for the other kwargs...
     # not very robust yet...
     truncate = float(params["predictor_factory"]["kwargs"]["truncate"])
-    predictor_factory = _get_predictor_factory(emission, truncate=truncate, dims=dims)
+    cls_name = params["predictor_factory"]["class"]  # type: str
+    if "Gaussian2DCartesian" in cls_name:
+        predictor_factory = _get_predictor_factory(emission, truncate=truncate, dims=["x", "y"])
+    elif "Gaussian1DHealpix" in cls_name:
+        predictor_factory = _get_predictor_factory(emission, truncate=truncate, dims=["cells"])
+    else:
+        raise RuntimeError("Could not infer predictor's class from the `.json` file.")
 
     optimized = EagerEstimator(sigma=params["sigma"],  predictor_factory=predictor_factory)
 
@@ -773,14 +882,14 @@ def predict_positions(
 
 
 def plot_trajectories(
+        *,
         target_root: str,
         track_modes: list[str],
         storage_options: dict,
-        *args,
         save_html=True,
         **kwargs
     ):
-    """read decoded trajectories and plots an interactive visualization.
+    """Read decoded trajectories and plots an interactive visualization.
     Optionally, the plot can be saved as a HTML file.
 
     .. warning::
@@ -802,6 +911,7 @@ def plot_trajectories(
     plot : hv.Layout
         Interactive plot of the trajectories
     """
+
     trajectories = read_trajectories(
         track_modes, target_root, storage_options, format="parquet"
     )
@@ -819,21 +929,27 @@ def plot_trajectories(
     plot = hv.Layout(plots).cols(2)
 
     if save_html:
-        filepath = f"{target_root}/trajectories.html"
-        save_html_hvplot(plot, filepath, storage_options)
+        path_to_html = Path(target_root) / "trajectories.html"
+        if storage_options is None:
+            path_to_html.mkdir(parents=True, exist_ok=True)
+        save_html_hvplot(plot, str(path_to_html), storage_options)
 
     return plot
 
 
 def open_distributions(
+    *,
     target_root: str,
     storage_options: dict,
     chunks: dict,
-    *args,
     chunk_time=24,
     **kwargs
     ):
-    """load and merge the `emission` and `states` distributions into a single dataset.
+    """Load and merge the `emission` and `states` probability distributions into a single dataset.
+
+    .. warning::
+        Since this function is assumed to be used for visualization and rendering tasks,\
+        and that only 2D-indexed data is currently supported by `pangeo-fish`, **the dataset returned is regridded to 2D.**
 
     Parameters
     ----------
@@ -850,7 +966,7 @@ def open_distributions(
     Returns
     -------
     data : xr.Dataset
-        The merged and cleaned dataset
+        The merged and cleaned dataset, 2D-indexed
 
     See Also
     --------
@@ -890,8 +1006,8 @@ def open_distributions(
     return data
 
 
-def plot_distributions(data: xr.Dataset, *args, bbox=None, **kwargs):
-    """plot an interactive visualization of dataset resulting from the merging of `emission` and the `states` distributions.
+def plot_distributions(*, data: xr.Dataset, bbox=None, **kwargs):
+    """Plot an interactive visualization of dataset resulting from the merging of `emission` and the `states` distributions.
     See `pangeo_fish.helpers.open_distributions()`.
 
     Parameters
@@ -906,6 +1022,7 @@ def plot_distributions(data: xr.Dataset, *args, bbox=None, **kwargs):
     plot : hv.Layout
         Interactive plot of the `states` and `emission` distributions
     """
+
     #TODO: adding coastlines reverts the xlim / ylim arguments
     plot1 = plot_map(data["states"], bbox)
     plot2 = plot_map(data["emission"], bbox)
@@ -914,15 +1031,15 @@ def plot_distributions(data: xr.Dataset, *args, bbox=None, **kwargs):
     return plot
 
 
-def render_frames(ds: xr.Dataset, *args, time_slice: slice = None, **kwargs):
-    """helper function for rendering images.
+def render_frames(*, ds: xr.Dataset, time_slice: slice = None, **kwargs):
+    """Helper function for rendering images.
 
     Parameters
     ----------
     ds : xr.Dataset
         A dataset which the `emission` and `states` variables
     time_slice : slice, default: None
-        Timesteps to render. If not provided, all timesteps are rendered
+        Timesteps to render. If not provided, all timesteps are rendered (not recommended)
 
     Returns
     -------
@@ -934,7 +1051,6 @@ def render_frames(ds: xr.Dataset, *args, time_slice: slice = None, **kwargs):
     kwargs : dict
         Additional arguments passed to `pangeo-fish.visualization.render_frame()`.
         See its documentation for more information.
-
     """
 
     if time_slice is not None:
@@ -993,17 +1109,18 @@ def _render_video(
 
 
 def render_distributions(
+        *,
         data: xr.Dataset,
-        *args,
         time_step=3,
         frames_dir="frames",
-        filename="states",
+        output_path="states",
         extension="gif",
         fps=10,
         remove_frames=True,
+        storage_options: dict = None,
         **kwargs
     ):
-    """render a video of a dataset resulting from the merging of `emission` and the `states` distributions.
+    """Render a video of a dataset resulting from the merging of `emission` and the `states` distributions.
     See `pangeo_fish.helpers.open_distributions()`.
 
     Parameters
@@ -1013,23 +1130,29 @@ def render_distributions(
     time_step : int, default: 3
         Time step to sample data from `data`
     frames_dir : str, default: "frames"
-        Name of the folder to save the images to.
-    filename : str, default: "states"
-        Name of the video file.
+        Name of the folder to save the images to
+    output_path : str, default: "states"
+        Path to save the video. In case of an AWS S3 uri, the video is first saved locally, and then send to the bucket
     extension : str, default: "gif"
-        Name of the file extension of the video.
-        Either "gif" or "mp4". In the latter case, make sure to have installed imageio[ffmpeg]
+        Name of the file extension of the video
+        Either "gif" or "mp4". **In the latter case, make sure to have installed imageio[ffmpeg]**
     fps : int, default: 10
         Number of frames per second.
     remove_frames : bool, default: True
-        Whether to delete the frames.
+        Whether to delete the frames
+    storage_options : dict, optional
+        Dictionary containing storage options for connecting to the S3 bucket
+
 
     Returns
     -------
     video_fn : str
-        Path to the video
-
+        Local path to the video
     """
+
+    # os.path.split(.) removes the "/"!
+    path_root, filename = os.path.split(output_path)
+    filename = filename.split(".")[0]
 
     # quick input checking
     if not all(var_name in data.variables for var_name in ["emission", "states"]):
@@ -1059,10 +1182,19 @@ def render_distributions(
             extension=extension,
             fps=fps
         )
+        if path_root.startswith("s3://"):
+            if storage_options is None:
+                warnings.warn(
+                    "Remote video uploading to S3 cancelled: no storage options found.",
+                    RuntimeWarning
+                )
+            else:
+                s3 = s3fs.S3FileSystem(**storage_options)
+                s3.put_file(video_fp, f"{path_root}/{video_fp}")
     except Exception as e:
         warnings.warn(
             "An error occurred when rendering the video:\n" + str(e),
-            UserWarning
+            RuntimeWarning
         )
         video_fp = ""
     finally:
