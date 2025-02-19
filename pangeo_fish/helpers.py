@@ -687,11 +687,31 @@ def combine_pdfs(
     combined : xr.Dataset
         The combined pdf
     """
-    combined = emission_ds.merge(acoustic_ds)
+    spatial_dims = [dim for dim in acoustic_ds.dims if dim != "time"]
+    merged = emission_ds.merge(acoustic_ds)
+    time_mask = xr.ufuncs.logical_or(
+        (merged["acoustic"] == 0),
+        xr.ufuncs.isnan(merged["pdf"])
+    ).all(dim=spatial_dims)  # type: xr.DataArray
+
+    num_times = time_mask.sum().to_numpy().item()  # type: int
+    if num_times != 0:
+        warnings.warn(
+            f"The combined pdf sums to 0 for {num_times} times.",
+            UserWarning
+        )
+        # temparory fix: replaces by the values from acoustic
+        time_mask = time_mask.compute()
+        #TODO: is this actually correct? Even though we normalize, isn't the prod of the distributions half of `acoustic_ds["acoustic"]`?
+        # careful here: we erase "pdf" by "acoustic" with `acoustic`: using acoustic_ds may erase attributes!
+        merged["pdf"][time_mask] = acoustic_ds["acoustic"][time_mask]
+
     combined = (
-        combined.pipe(combine_emission_pdf)
+        merged.pipe(combine_emission_pdf)
         .chunk(chunks)
     )
+
+    # optional spatial transposition
     if (dims is not None) and ("cells" not in dims):
         #TODO: still not enough...
         if not all([d in combined.dims for d in dims]):
@@ -706,6 +726,12 @@ def combine_pdfs(
             combined = combined.transpose(*dims)
         else:
             combined = combined.transpose("time", *dims)
+
+    # last operation: ensure no attributes are lost during the combination
+    for ds in [acoustic_ds, emission_ds]:
+        combined.attrs.update(ds.attrs)
+        if combined.coords.get("cell_ids", None) is not None:
+            combined["cell_ids"].attrs.update(ds["cell_ids"].attrs)
     return combined
 
 
