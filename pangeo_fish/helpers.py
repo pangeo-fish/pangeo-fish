@@ -702,9 +702,10 @@ def combine_pdfs(
         )
         # temparory fix: replaces by the values from acoustic
         time_mask = time_mask.compute()
+        mask = (merged["mask"].notnull()).compute()
         #TODO: is this actually correct? Even though we normalize, isn't the prod of the distributions half of `acoustic_ds["acoustic"]`?
         # careful here: we erase "pdf" by "acoustic" with `acoustic`: using acoustic_ds may erase attributes!
-        merged["pdf"][time_mask] = acoustic_ds["acoustic"][time_mask]
+        merged["pdf"][time_mask] = acoustic_ds["acoustic"][time_mask].where(mask, drop=False)
 
     combined = (
         merged.pipe(combine_emission_pdf)
