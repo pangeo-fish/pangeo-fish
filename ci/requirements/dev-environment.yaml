@@ -1,6 +1,21 @@
 channels:
   - conda-forge
 dependencies:
+  # development
+  - python=3.11
+  - jupyterlab
+  - ipython
+  - ipykernel
+  - graphviz
+  - python-graphviz
+  # plotting
+  - cmocean
+  - holoviews
+  - hvplot
+  - geoviews
+  - selenium
+  - firefox
+  - geckodriver
   # I/O
   - fsspec
   - h5netcdf
@@ -13,8 +28,6 @@ dependencies:
   - flox
   - xarray
   - more-itertools
-  - cytoolz
-  - toolz
   - scipy
   - opt_einsum
   - sparse
@@ -31,10 +44,22 @@ dependencies:
   - ffmpeg
   - xmovie
   # distributed computing
+  - dask-labextension
+  - dask-image
   - dask
+  # parameterizing and executing Jupyter Notebooks
+  - papermill
   # code formatting
+  - jupyterlab_code_formatter
+  - black
+  - isort
   - rich
   - rich-click
+  - pre-commit
+  # other utilities
+  - jupyterlab-git
+  - git
   - pip
   - pip:
+      - dask-hpcconfig
       - git+https://github.com/iaocea/xarray-healpy.git@0ffca6058f4008f4f22f076e2d60787fcf32ac82
