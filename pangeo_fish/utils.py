@@ -2,7 +2,6 @@ import re
 
 import cf_xarray  # noqa: F401
 import more_itertools
-import pandas as pd
 import xarray as xr
 from rich.progress import (
     BarColumn,
@@ -119,34 +118,3 @@ def progress_status(sequence):
             progress.update(task_id, advance=0, label=item)
             yield item
             progress.update(task_id, advance=1, label=item)
-
-
-def encode_positions(df):
-    position_labels = df["name"].to_list()
-
-    indexed = df.reset_index().set_index("name")
-    positions = [
-        indexed.loc[name][["latitude", "longitude"]].to_list()
-        for name in position_labels
-    ]
-    dates = [str(indexed.loc[name]["time"]) for name in position_labels]
-
-    return {
-        "position_labels": position_labels,
-        "position_data": positions,
-        "position_time": dates,
-    }
-
-
-def decode_positions(attrs):
-    column_names = ["time", "name", "latitude", "longitude"]
-
-    names = attrs["position_labels"]
-    dates = attrs["position_time"]
-    data = attrs["position_data"]
-
-    return pd.DataFrame(
-        data,
-        columns=column_names[2:],
-        index=pd.Index(dates, name=column_names[0]),
-    ).assign(**{column_names[1]: names})[column_names[1:]]
