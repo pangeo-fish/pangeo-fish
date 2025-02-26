@@ -39,7 +39,7 @@ def test_normalize():
                 ),
                 dims="time",
             ),
-            xr.DataArray(np.array(30e9), attrs={"units": "ns"}),
+            xr.DataArray(np.array(30), attrs={"units": "s"}),
         ),
         (
             xr.DataArray(
@@ -53,7 +53,21 @@ def test_normalize():
                 ),
                 dims="time",
             ),
-            xr.DataArray(np.array(90e9), attrs={"units": "ns"}),
+            xr.DataArray(np.array(90), attrs={"units": "s"}),
+        ),
+        (
+            xr.DataArray(
+                np.array(
+                    [
+                        "2010-01-04 22:51:03",
+                        "2010-01-04 22:53:03",
+                        "2010-01-04 22:55:03",
+                    ],
+                    dtype="datetime64[ns]",
+                ),
+                dims="time",
+            ),
+            xr.DataArray(np.array(120), attrs={"units": "s"}),
         ),
     ),
 )

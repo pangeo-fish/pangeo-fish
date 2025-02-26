@@ -93,10 +93,11 @@ def timedelta_units(arr):
 
 
 def temporal_resolution(time):
+    import pandas as pd
     from pandas.tseries.frequencies import to_offset
 
     freq = xr.infer_freq(time)
-    timedelta = to_offset(freq).delta.to_numpy()
+    timedelta = pd.Timedelta(to_offset(freq)).to_numpy()
     units = timedelta_units(timedelta)
 
     return xr.DataArray(timedelta.astype("float"), dims=None, attrs={"units": units})
