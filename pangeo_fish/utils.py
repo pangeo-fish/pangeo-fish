@@ -27,29 +27,6 @@ def clear_attrs(obj, variables=None):
     return new_obj
 
 
-def _drop_attr(obj, attr):
-    new_obj = obj.copy()
-    new_obj.attrs.pop(attr, None)
-
-    variables = new_obj.variables if hasattr(new_obj, "variables") else new_obj.coords
-
-    for var in variables.values():
-        var.attrs.pop(attr, None)
-
-    return new_obj
-
-
-def drop_crs(obj, coord="spatial_ref", attr="crs"):
-    """remove crs attributes
-
-    Unfortunately, `rioxarray` and `odc-geo` store the crs information in a format that
-    is not serializable to `netcdf4` / `zarr`. This could be solved using a registry of
-    type → encoder that would be applied to the attrs, but until that is implemented,
-    we'll just drop the crs before writing.
-    """
-    return obj.drop_vars(coord).pipe(_drop_attr, attr)
-
-
 def postprocess_depth(ds):
     new_names = {
         detected: standard
