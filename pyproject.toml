@@ -49,7 +49,7 @@ build-backend = "setuptools.build_meta"
 fallback_version = "999"
 
 [tool.coverage.run]
-source = ["healpix_convolution"]
+source = ["pangeo_fish"]
 branch = true
 
 [tool.coverage.report]
