@@ -1,18 +1,15 @@
 import numpy as np
-import pytest
 import xarray as xr
 
 from pangeo_fish.grid import center_longitude
 
 
-@pytest.fixture
-def sample_dataset():
+def test_center_longitude():
     num_cells = 10  # Small grid size for testing
+    center = 0
 
-    # Generate longitudes
-    lons = np.linspace(-200, 200, num_cells) % 360
-    lons[lons < 0] += 360
-    lats = np.linspace(-90, 90, num_cells)  # Latitudes
+    lons = np.linspace(-20, 380, num_cells)
+    lats = np.linspace(-90, 90, num_cells)
 
     ds = xr.Dataset(
         coords={
@@ -20,14 +17,10 @@ def sample_dataset():
             "latitude": ("cells", lats),
         }
     )
-    return ds
+    actual = center_longitude(ds, center=center)
 
+    lower, upper = -180, 180
 
-def test_center_longitude_center_0(sample_dataset):
-    ds = sample_dataset
-    centered_ds = center_longitude(ds, center=0)
-
-    # Check that longitudes are centered around 0 (-180 to 180)
-    assert np.all(
-        (centered_ds.longitude >= -180) & (centered_ds.longitude <= 180)
-    ), "Longitudes are not properly centered around 0."
+    assert (
+        (actual["longitude"] >= lower) & (actual["longitude"] <= upper)
+    ).all(), "Longitudes are not properly centered."
