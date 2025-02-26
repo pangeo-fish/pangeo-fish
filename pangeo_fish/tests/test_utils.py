@@ -1,85 +1,23 @@
 import numpy as np
-import pytest
 import xarray as xr
 
-from pangeo_fish.utils import _drop_attr, clear_attrs
+from pangeo_fish import utils
 
 
-@pytest.fixture
-def create_xarray_dataset():
-    """
-    Creates a simple xarray dataset for testing
-    """
-    times = np.arange(3)
-    latitudes = np.array([10, 20])
-    longitudes = np.array([100])
-
-    em = xr.DataArray(
-        np.full((3, len(latitudes), len(longitudes)), 2.0),
-        dims=("time", "latitude", "longitude"),
-        coords={"time": times, "latitude": latitudes, "longitude": longitudes},
-        name="em",
+def test_normalize():
+    data = np.array([[3, 1, 7, 5, 4], [4, 5, 9, 0, 2], [3, 4, 3, 5, 5]])
+    expected_data = np.array(
+        [
+            [0.15, 0.05, 0.35, 0.25, 0.2],
+            [0.2, 0.25, 0.45, 0, 0.1],
+            [0.15, 0.2, 0.15, 0.25, 0.25],
+        ]
     )
-    em.attrs = {"some_attr": "value"}
+    arr = xr.DataArray(data, dims=("t", "c"))
+    actual = utils.normalize(arr, dim="c")
+    expected = xr.DataArray(expected_data, dims=("t", "c"))
 
-    final = xr.DataArray(
-        np.full((len(latitudes), len(longitudes)), 3.0),
-        dims=("latitude", "longitude"),
-        coords={"latitude": latitudes, "longitude": longitudes},
-        name="final",
-    )
-    final.attrs = {"some_attr": "value"}
+    expected_sum = xr.ones_like(arr["t"], dtype="float64")
 
-    initial = xr.DataArray(np.array([1]), dims=("dummy",), name="initial")
-    initial.attrs = {"some_attr": "value"}
-
-    mask = xr.DataArray(np.array([0]), dims=("dummy",), name="mask")
-    mask.attrs = {"some_attr": "value"}
-
-    ds = xr.Dataset({"em": em, "final": final, "initial": initial, "mask": mask})
-
-    return ds
-
-
-@pytest.mark.parametrize("variables", [["em", "final"], "all"])
-def test_clear_attrs(create_xarray_dataset, variables):
-    """
-    Tests `clear_attrs` function.
-    """
-    ds = create_xarray_dataset
-    new_ds = clear_attrs(ds, variables=variables)
-
-    assert new_ds.attrs == {}
-
-    if variables is None:
-        expected_vars = list(ds.variables)  # All variables
-    elif variables == "all":
-        expected_vars = list(getattr(ds, "variables", ds.coords))
-    else:
-        expected_vars = variables
-
-    for var in expected_vars:
-        assert new_ds[var].attrs == {}, f"Attributes of {var} were not removed"
-
-
-@pytest.mark.parametrize(
-    "attr, expected_attrs",
-    [
-        ("some_attr", {}),
-        (
-            "another_attr",
-            {"em": {"some_attr": "value"}, "final": {"some_attr": "value"}},
-        ),
-    ],
-)
-def test_drop_attr(create_xarray_dataset, attr, expected_attrs):
-    """
-    Tests `_drop_attr` function.
-    """
-    ds = create_xarray_dataset
-    new_ds = _drop_attr(ds, attr=attr)
-
-    assert new_ds.attrs.get(attr) is None
-
-    for var in new_ds.variables.values():
-        assert var.attrs.get(attr) is None
+    xr.testing.assert_allclose(actual, expected)
+    xr.testing.assert_allclose(actual.sum(dim="c"), expected_sum)
