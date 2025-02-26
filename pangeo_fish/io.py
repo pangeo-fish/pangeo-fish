@@ -11,6 +11,7 @@ import xarray as xr
 
 from pangeo_fish.dataset_utils import broadcast_variables
 
+DEFAULT_STATION_FILENAME = "stations"
 
 def tz_convert(df, timezones):
     """Convert the timezone of columns in a dataframe
@@ -80,7 +81,7 @@ def read_detection_database(url):
     )
 
 
-def open_tag(root, name, storage_options=None):
+def open_tag(root, name, storage_options=None, station_filename=None):
     """open a tag
 
     Parameters
@@ -92,6 +93,8 @@ def open_tag(root, name, storage_options=None):
         The DST name of the tag.
     storage_options : mapping, optional
         The storage options required to open the mapper. Only used if ``root`` is a url.
+    station_filename : str, optional
+        The name of the stations file, **which is assumed to be in the parent directory of `name`.**
 
     Returns
     -------
@@ -104,6 +107,9 @@ def open_tag(root, name, storage_options=None):
         mapper = fsspec.get_mapper(root, **storage_options)
     else:
         mapper = root
+
+    if station_filename is None:
+        station_filename = DEFAULT_STATION_FILENAME
 
     dst = pd.read_csv(
         mapper.dirfs.open(f"{name}/dst.csv"), parse_dates=["time"], index_col="time"
@@ -122,14 +128,17 @@ def open_tag(root, name, storage_options=None):
         "dst": dst.to_xarray(),
         "tagging_events": tagging_events.to_xarray(),
     }
-    if mapper.dirfs.exists("stations.csv"):
+
+    if mapper.dirfs.exists(f"{station_filename}.csv"):
         stations = pd.read_csv(
-            mapper.dirfs.open("stations.csv"),
+            mapper.dirfs.open(f"{station_filename}.csv"),
             parse_dates=["deploy_time", "recover_time"],
             index_col="deployment_id",
         ).pipe(tz_convert, {"deploy_time": None, "recover_time": None})
         if len(stations) > 0:
             mapping["stations"] = stations.to_xarray()
+    else:
+        warnings.warn(f"Station file \"{station_filename}\" not found.", UserWarning)
 
     if mapper.dirfs.exists(f"{name}/acoustic.csv"):
         acoustic = pd.read_csv(
