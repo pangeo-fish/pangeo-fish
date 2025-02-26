@@ -18,7 +18,7 @@ extensions = [
     "myst_parser",
     "nbsphinx",
     "nbsphinx_link",
-    "sphinx_remove_toctrees"
+    "sphinx_remove_toctrees",
 ]
 
 napoleon_google_docstring = False

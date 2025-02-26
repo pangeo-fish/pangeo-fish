@@ -175,5 +175,3 @@ HMM Filtering
    forward
    backward
    forward_backward
-
-

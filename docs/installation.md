@@ -28,10 +28,13 @@ micromamba create -n pangeo-fish -f ci/requirements/environment.yaml
 This will create your environment with all the required libraries to make `pangeo-fish` work.
 
 Finally, install the package itself from either its repository:
+
 ```console
 pip install -e .
 ```
+
 ... or from `pip`:
+
 ```console
 pip install pangeo-fish
 ```

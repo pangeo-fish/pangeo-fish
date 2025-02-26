@@ -8,6 +8,7 @@ We invite the user to follow along so that you can then translate your data to i
 ## Overall Structure
 
 The data repository contains one `.csv` file detailing all the acoustic receivers involved (named `stations.csv`), and each data storage tag (DST) data is stored under a directory whose name corresponds to the tag's identification:
+
 ```
 your_tag_folder
 ├── A19124
@@ -41,6 +42,7 @@ This file aims to encode the deployment information of the acoustic receivers.
 If there are no acoustic detections, it may be removed.
 
 It must contain at least eight columns:
+
 - `deployment_id` and `station_name` describe the receivers' id and name, respectively.
 - Deployment information in `deploy_time`, `deploy_longitude`, `deploy_latitude`.
 - Similarly, recovry information in `recover_time`, `recover_longitude`, and `recover_latitude`.
@@ -139,9 +141,9 @@ For example:
 
 ```json
 {
-    "pit_tag_id": "A19124",
-    "acoustic_tag_id": "OPI-372",
-    "fish_common_name": "sea bass",
-    "tagging_campaign": "my_tagging_project"
+  "pit_tag_id": "A19124",
+  "acoustic_tag_id": "OPI-372",
+  "fish_common_name": "sea bass",
+  "tagging_campaign": "my_tagging_project"
 }
 ```
