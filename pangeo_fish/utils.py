@@ -1,5 +1,3 @@
-import re
-
 import cf_xarray  # noqa: F401
 import more_itertools
 import xarray as xr
@@ -76,31 +74,17 @@ def _detect_temporal_dims(ds, guesses=["T", "time"]):
     return temporal_dims
 
 
-units_re = re.compile(r"timedelta64\[(?P<units>.+?)\]")
-
-
-def timedelta_units(arr):
-    dtype = arr.dtype
-
-    if dtype.kind != "m":
-        raise ValueError("not a timedelta64")
-
-    match = units_re.fullmatch(dtype.name)
-    if match is None:
-        raise ValueError("timedelta64 without units")
-
-    return match.group("units")
-
-
 def temporal_resolution(time):
     import pandas as pd
     from pandas.tseries.frequencies import to_offset
 
     freq = xr.infer_freq(time)
-    timedelta = pd.Timedelta(to_offset(freq)).to_numpy()
-    units = timedelta_units(timedelta)
+    timedelta = pd.Timedelta(to_offset(freq))
+    units = timedelta.unit
 
-    return xr.DataArray(timedelta.astype("float"), dims=None, attrs={"units": units})
+    return xr.DataArray(
+        timedelta.to_numpy().astype("float"), dims=None, attrs={"units": units}
+    )
 
 
 def progress_status(sequence):
