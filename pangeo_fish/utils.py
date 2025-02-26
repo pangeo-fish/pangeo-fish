@@ -13,6 +13,7 @@ from rich.progress import (
 
 
 def clear_attrs(obj, variables=None):
+    # FIXME: remove this after figuring out how to port this to upstream xarray
     new_obj = obj.copy()
     new_obj.attrs.clear()
 
