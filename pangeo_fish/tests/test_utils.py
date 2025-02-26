@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 import xarray as xr
 
 from pangeo_fish import utils
@@ -21,3 +22,42 @@ def test_normalize():
 
     xr.testing.assert_allclose(actual, expected)
     xr.testing.assert_allclose(actual.sum(dim="c"), expected_sum)
+
+
+@pytest.mark.parametrize(
+    ["time", "expected"],
+    (
+        (
+            xr.DataArray(
+                np.array(
+                    [
+                        "2010-01-04 22:51:33",
+                        "2010-01-04 22:52:03",
+                        "2010-01-04 22:52:33",
+                    ],
+                    dtype="datetime64[ns]",
+                ),
+                dims="time",
+            ),
+            xr.DataArray(np.array(30e9), attrs={"units": "ns"}),
+        ),
+        (
+            xr.DataArray(
+                np.array(
+                    [
+                        "2010-01-04 22:51:33",
+                        "2010-01-04 22:53:03",
+                        "2010-01-04 22:54:33",
+                    ],
+                    dtype="datetime64[ns]",
+                ),
+                dims="time",
+            ),
+            xr.DataArray(np.array(90e9), attrs={"units": "ns"}),
+        ),
+    ),
+)
+def test_temporal_resolution(time, expected):
+    actual = utils.temporal_resolution(time)
+
+    xr.testing.assert_identical(actual, expected)
