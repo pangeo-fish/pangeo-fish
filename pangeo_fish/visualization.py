@@ -1,14 +1,13 @@
 import warnings
 
-import matplotlib.pyplot as plt
-import xarray as xr
-
 import cartopy.crs as ccrs
 import cartopy.feature as cf
 import cmocean  # noqa: F401
 import hvplot.xarray  # noqa: F401
+import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import numpy as np
+import xarray as xr
 from shapely.errors import ShapelyDeprecationWarning
 
 
@@ -39,7 +38,9 @@ def create_single_frame(ds: xr.Dataset, figure, **kwargs):
     """
 
     if sorted(list(ds.dims)) != ["x", "y"]:
-        raise ValueError(f"Malformed dataset (dims of {list(ds.dims)} instead of [x, y]).")
+        raise ValueError(
+            f"Malformed dataset (dims of {list(ds.dims)} instead of [x, y])."
+        )
 
     warnings.filterwarnings(
         action="ignore",
@@ -58,7 +59,10 @@ def create_single_frame(ds: xr.Dataset, figure, **kwargs):
 
     default_xlim = [ds_["longitude"].min(), ds_["longitude"].max()]
     default_ylim = [ds_["latitude"].min(), ds_["latitude"].max()]
-    default_vmax = {"states": ds_["states"].max().to_numpy().item(), "emission": ds_["emission"].max().to_numpy().item()}
+    default_vmax = {
+        "states": ds_["states"].max().to_numpy().item(),
+        "emission": ds_["emission"].max().to_numpy().item(),
+    }
 
     x0, x1 = kwargs.get("xlim", default_xlim)
     y0, y1 = kwargs.get("ylim", default_ylim)
@@ -74,7 +78,7 @@ def create_single_frame(ds: xr.Dataset, figure, **kwargs):
         "aspect": 50,
         "format": formatter,
         "use_gridspec": True,
-        "extend": "max"
+        "extend": "max",
     }
     gridlines_kwargs = {
         "crs": crs,
@@ -91,7 +95,7 @@ def create_single_frame(ds: xr.Dataset, figure, **kwargs):
         "cmap": "cool",
         "xlim": [x0, x1],
         "ylim": [y0, y1],
-        "vmin": 0
+        "vmin": 0,
     }
     gs = figure.add_gridspec(nrows=1, ncols=2, hspace=0, wspace=-0.2, top=0.925)
     (ax1, ax2) = gs.subplots(
@@ -102,11 +106,11 @@ def create_single_frame(ds: xr.Dataset, figure, **kwargs):
 
     ds_["states"].plot(
         **(
-            plot_kwargs |
-           {
-               "ax": ax1,
-               "cbar_kwargs": cbar_kwargs | {"label": "State Probability"},
-               "vmax": default_vmax["states"]
+            plot_kwargs
+            | {
+                "ax": ax1,
+                "cbar_kwargs": cbar_kwargs | {"label": "State Probability"},
+                "vmax": default_vmax["states"],
             }
         )
     )
@@ -120,11 +124,11 @@ def create_single_frame(ds: xr.Dataset, figure, **kwargs):
 
     ds_["emission"].plot(
         **(
-            plot_kwargs |
-           {
-               "ax": ax2,
-               "cbar_kwargs": cbar_kwargs | {"label": "Emission Probability"},
-               "vmax": default_vmax["emission"]
+            plot_kwargs
+            | {
+                "ax": ax2,
+                "cbar_kwargs": cbar_kwargs | {"label": "Emission Probability"},
+                "vmax": default_vmax["emission"],
             }
         )
     )
@@ -138,7 +142,6 @@ def create_single_frame(ds: xr.Dataset, figure, **kwargs):
     gl2.top_labels = False
 
     return None
-
 
 
 def render_frame(ds: xr.Dataset, *args, figsize=(14, 8), frames_dir=".", **kwargs):
@@ -165,24 +168,28 @@ def render_frame(ds: xr.Dataset, *args, figsize=(14, 8), frames_dir=".", **kwarg
         The input dataset (see `dask.map_blocks()`)
     """
 
-    figure = plt.figure(figsize=figsize) # figsize=(12, 6)
+    figure = plt.figure(figsize=figsize)  # figsize=(12, 6)
 
     try:
         if ds.sizes["time"] > 1:
             warnings.warn(
                 f"Multiple timesteps detected in `ds` (size: {ds.sizes["time"]}): only the first one will be rendered.",
-                UserWarning
+                UserWarning,
             )
 
-        create_single_frame(ds.isel(time=0), figure, **kwargs) # xr.Dataset.squeeze()?
+        create_single_frame(ds.isel(time=0), figure, **kwargs)  # xr.Dataset.squeeze()?
         time = ds["time"].values[0]
         title = f"Time = {np.datetime_as_string(time, unit="s")}"
         figure.suptitle(title)
 
         time_index = ds["time_index"].values[0]
-        figure.savefig(f"{frames_dir}/frame_{time_index:05d}.png")#, bbox_inches="tight", pad_inches=0.2)
+        figure.savefig(
+            f"{frames_dir}/frame_{time_index:05d}.png"
+        )  # , bbox_inches="tight", pad_inches=0.2)
     except Exception as e:
-        print(f"============ Exception at time {ds["time_index"].values[0]} ==============")
+        print(
+            f"============ Exception at time {ds["time_index"].values[0]} =============="
+        )
         print(e)
         print("=========================================================")
     finally:
