@@ -1,0 +1,8 @@
+sphinx_copybutton
+myst_parser
+nbsphinx
+nbsphinx_link
+sphinx_remove_toctrees
+pandoc
+# see: https://docs.readthedocs.com/platform/stable/faq.html#i-need-to-install-a-package-in-a-environment-with-pinned-versions
+-e .
