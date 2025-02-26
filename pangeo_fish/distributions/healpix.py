@@ -23,8 +23,7 @@ def normal_at(grid, pos, sigma):
         center.astype(np.int64),
         np.reshape(cell_ids.astype(np.int64), (1, -1)),
         axis=-1,
-        nside=grid_info.nside,
-        nest=grid_info.nest,
+        grid_info=grid_info,
     )
 
     pdf = gaussian_function(distances, sigma)
