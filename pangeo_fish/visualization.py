@@ -173,13 +173,13 @@ def render_frame(ds: xr.Dataset, *args, figsize=(14, 8), frames_dir=".", **kwarg
     try:
         if ds.sizes["time"] > 1:
             warnings.warn(
-                f"Multiple timesteps detected in `ds` (size: {ds.sizes["time"]}): only the first one will be rendered.",
+                f"Multiple timesteps detected in `ds` (size: {ds.sizes['time']}): only the first one will be rendered.",
                 UserWarning,
             )
 
         create_single_frame(ds.isel(time=0), figure, **kwargs)  # xr.Dataset.squeeze()?
         time = ds["time"].values[0]
-        title = f"Time = {np.datetime_as_string(time, unit="s")}"
+        title = f"Time = {np.datetime_as_string(time, unit='s')}"
         figure.suptitle(title)
 
         time_index = ds["time_index"].values[0]
@@ -188,7 +188,7 @@ def render_frame(ds: xr.Dataset, *args, figsize=(14, 8), frames_dir=".", **kwarg
         )  # , bbox_inches="tight", pad_inches=0.2)
     except Exception as e:
         print(
-            f"============ Exception at time {ds["time_index"].values[0]} =============="
+            f"============ Exception at time {ds['time_index'].values[0]} =============="
         )
         print(e)
         print("=========================================================")
