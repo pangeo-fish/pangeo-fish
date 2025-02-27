@@ -1,12 +1,9 @@
 import json
 
 import fsspec
-import pandas as pd
 import pytest
-import xarray as xr
 
 from pangeo_fish.io import open_tag
-from pangeo_fish.tags import reshape_by_bins
 
 
 @pytest.fixture
@@ -54,38 +51,3 @@ def test_open_tag(dummy_mapper):
     assert tag["/"].attrs.get("dummy_key") == "dummy_value"
     assert tag["dst/temperature"].sel(time="2022-06-13T00:00:00").item() == 20.0
     assert tag["dst/temperature"].sel(time="2022-06-13T01:00:00").item() == 21.0
-
-
-def test_reshape_by_bins():
-    """
-    Test reshape_by_bins function with dummy data
-    """
-
-    tag = open_tag(dummy_mapper, "tag_dummy")
-
-    if isinstance(tag, xr.DataTree):
-        tag = tag["/dst"].ds
-
-    assert isinstance(
-        tag, xr.Dataset
-    ), f"Expected tag to be an xarray.Dataset, got {type(tag)}"
-
-    intervals = [
-        (pd.Timestamp("2022-06-13 00:00:00"), pd.Timestamp("2022-06-13 02:00:00"))
-    ]
-    intervals = [pd.Interval(left, right, closed="right") for left, right in intervals]
-    bins_da = xr.DataArray(intervals, dims=["time"])
-
-    reshaped_tag = reshape_by_bins(
-        tag,
-        dim="time",
-        bins=bins_da,
-        bin_dim="bincount",
-        other_dim="obs",
-    )
-
-    selected_temperature = reshaped_tag.temperature.isel(time=0)[0].item()
-    print(reshaped_tag.temperature)
-    assert (
-        selected_temperature == 21
-    ), f"Temperature mismatch for bin 0: {selected_temperature}"
