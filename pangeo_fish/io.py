@@ -27,6 +27,14 @@ def tz_convert(df, timezones):
     return df.assign(**new_columns)
 
 
+def read_stations(f):
+    return pd.read_csv(
+        f,
+        parse_dates=["deploy_time", "recover_time"],
+        index_col="deployment_id",
+    ).pipe(tz_convert, {"deploy_time": None, "recover_time": None})
+
+
 def open_tag(root, name, storage_options=None):
     """open a tag
 
@@ -70,11 +78,7 @@ def open_tag(root, name, storage_options=None):
         "tagging_events": tagging_events.to_xarray(),
     }
     if mapper.dirfs.exists("stations.csv"):
-        stations = pd.read_csv(
-            mapper.dirfs.open("stations.csv"),
-            parse_dates=["deploy_time", "recover_time"],
-            index_col="deployment_id",
-        ).pipe(tz_convert, {"deploy_time": None, "recover_time": None})
+        stations = read_stations(mapper.dirfs.open("stations.csv"))
         if len(stations) > 0:
             mapping["stations"] = stations.to_xarray()
 
