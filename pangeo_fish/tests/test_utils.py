@@ -75,3 +75,36 @@ def test_temporal_resolution(time, expected):
     actual = utils.temporal_resolution(time)
 
     xr.testing.assert_identical(actual, expected)
+
+
+@pytest.mark.parametrize(
+    ["ds", "expected"],
+    (
+        (
+            xr.Dataset(coords={"longitude": np.arange(10), "latitude": np.arange(11)}),
+            ["longitude", "latitude"],
+        ),
+        (
+            xr.Dataset(
+                coords={
+                    "longitude": (["y", "x"], np.arange(12).reshape(3, 4)),
+                    "latitude": (["y", "x"], np.linspace(0, 1, 12).reshape(3, 4)),
+                }
+            ),
+            ["y", "x"],
+        ),
+        (
+            xr.Dataset(
+                coords={
+                    "xi": ("xi", np.arange(10), {"axis": "X"}),
+                    "yi": ("yi", np.arange(11), {"axis": "Y"}),
+                }
+            ),
+            ["yi", "xi"],
+        ),
+    ),
+)
+def test_detect_spatial_dims(ds, expected):
+    actual = utils._detect_spatial_dims(ds)
+
+    assert sorted(actual) == sorted(expected)
