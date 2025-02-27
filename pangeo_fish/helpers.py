@@ -3,7 +3,6 @@ import os
 import sys
 import warnings
 from pathlib import Path
-from typing import Dict, List, Tuple
 
 import fsspec
 
@@ -65,6 +64,18 @@ __all__ = [
     "render_frames",
     "render_distributions",
 ]
+
+
+def _save_zarr(ds: xr.Dataset, path: str, storage_options=None):
+    """Helper for saving a .zarr array and warning in case of failure."""
+    try:
+        path_to_zarr = path + ".zarr" if not path.endswith(".zarr") else path
+        ds.to_zarr(path_to_zarr, mode="w", storage_options=storage_options)
+    except Exception:
+        warnings.warn(
+            f'An error occurred when saving a .zarr array to "{path_to_zarr}")',
+            RuntimeWarning,
+        )
 
 
 def _inspect_curry_obj(curried_obj):
@@ -343,7 +354,7 @@ def load_model(
     time_slice : slice
         Time slice to sample the model from
     bbox : dict
-        Spatial boundaries indexed by their coordinates (i.e, `longitude` and `latitude`)
+        Spatial boundaries indexed by their coordinates (i.e, `longitude` and `latitude`) as well as the maximum depth indexed by `max_depth`.
     chunk_time : int, default: 24
         Chunk size for the time dimension
 
@@ -359,16 +370,14 @@ def load_model(
         reference_ds = _open_parquet_model(uri)
         model = prepare_dataset(reference_ds)
     else:
-        raise ValueError('Only intake catalogs and "parqed" data can be loaded.')
+        raise ValueError('Only intake catalogs and "parqued" data can be loaded.')
 
     reference_model = (
         model.sel(time=adapt_model_time(time_slice))
         .sel(lat=slice(*bbox["latitude"]), lon=slice(*bbox["longitude"]))
         .pipe(
             lambda ds: ds.sel(
-                depth=slice(
-                    None, (tag_log["pressure"].max() - ds["XE"].min()).compute()
-                )
+                depth=slice(None, (bbox["max_depth"] - ds["XE"].min()).compute())
             )
         )
     ).chunk({"time": chunk_time, "lat": -1, "lon": -1, "depth": -1})
@@ -381,9 +390,14 @@ def compute_diff(
     tag_log: xr.Dataset,
     relative_depth_threshold: float,
     chunk_time=24,
+    plot=False,
+    save=False,
+    target_root=".",
+    storage_options: dict = None,
     **kwargs,
 ):
     """Compute the difference between the reference model and the DST data of a tag.
+    Optionally, the dataset can be saved and plotted.
 
     Parameters
     ----------
@@ -395,11 +409,23 @@ def compute_diff(
         Relative (seabed's) depth threshold to deal with cases where the fish's depths are lower than the seabed's depth
     chunk_time : int, default: 24
         Chunk size for the time dimension
+    plot : bool, default: False
+        Whether to return a plot of the dataset
+    save : bool, default: False
+        Whether to save the dataset
+    target_root : str, default: "."
+        Root of the folder to save the `.zarr` array (under `{target_root}/diff.zarr`)
+        Only used if `save=True`
+    storage_options : dict, optional
+        Dictionary containing storage options for connecting to the S3 bucket.
+        Only used if `save=True`
 
     Returns
     -------
     diff : xr.Dataset
         The difference between the biologging and field data
+    figure : plt.Figure or None
+        The plot of `diff`, or None if plot=False
     """
 
     reshaped_tag = reshape_by_bins(
@@ -425,7 +451,22 @@ def compute_diff(
             }
         )
     )  # type: xr.Dataset
-    return diff
+
+    if save:
+        _save_zarr(diff, f"{target_root}/diff.zarr", storage_options)
+
+    if plot:
+        try:
+            diff = diff.compute()
+            figure = diff["diff"].count(["lat", "lon"]).plot()
+        except Exception:
+            warnings.warn(
+                "An error occurred when plotting diff.",
+                RuntimeWarning,
+            )
+    else:
+        figure = False
+    return diff, figure
 
 
 def open_diff_dataset(*, target_root: str, storage_options: dict, **kwargs):
@@ -465,6 +506,10 @@ def regrid_dataset(
     min_vertices=1,
     rot={"lat": 0, "lon": 0},
     dims: list[str] = ["cells"],
+    plot=False,
+    save=False,
+    target_root=".",
+    storage_options: dict = None,
     **kwargs,
 ):
     """Regrid a dataset as a HEALPix grid, whose primary advantage is that all its cells/pixels cover the same surface area.
@@ -481,11 +526,23 @@ def regrid_dataset(
         Mapping of angles to rotate the HEALPix grid. It must contain the keys "lon" and "lat"
     dims : List[str], default: ["cells"]
         The list of the dimensions for the regridding. Either ["x", "y"] or ["cells"]
+    plot : bool, default: False
+        Whether to return a plot of the dataset
+    save : bool, default: False
+        Whether to save the dataset
+    target_root : str, default: "."
+        Root of the folder to save the `.zarr` array (under `{target_root}/diff-regridded.zarr`).
+        Only used if `save=True`
+    storage_options : dict, optional
+        Dictionary containing storage options for connecting to the S3 bucket.
+        Only used if `save=True`
 
     Returns
     -------
     reshaped : xr.Dataset
         HEALPix version of `ds`
+    figure : plt.Figure or None
+        The plot of `reshaped`, or None if plot=False
     """
 
     grid = HealpyGridInfo(level=int(np.log2(nside)), rot=rot)
@@ -510,7 +567,20 @@ def regrid_dataset(
     attrs = ds.attrs.copy()
     attrs.update({"min_vertices": min_vertices})
     reshaped = reshaped.assign_attrs(attrs)
-    return reshaped
+
+    if save:
+        _save_zarr(reshaped, f"{target_root}/diff-regridded.zarr", storage_options)
+
+    figure = False
+    if plot:
+        try:
+            figure = reshaped["diff"].count(dims).plot()
+        except Exception:
+            warnings.warn(
+                "An error occurred when plotting the regridded dataset.",
+                RuntimeWarning,
+            )
+    return reshaped, figure
 
 
 def compute_emission_pdf(
@@ -521,6 +591,10 @@ def compute_emission_pdf(
     recapture_std: float,
     chunk_time: int = 24,
     dims: list[str] = ["cells"],
+    plot=False,
+    save=False,
+    target_root=".",
+    storage_options: dict = None,
     **kwargs,
 ):
     """Compute the temporal emission matrices given a dataset and tagging events.
@@ -540,11 +614,23 @@ def compute_emission_pdf(
         Spatial dimensions. Either ["x", "y"] or ["cells"]
     chunk_time : int, default: 24
         Chunk size for the time dimension
+    plot : bool, default: False
+        Whether to return a plot of the dataset
+    save : bool, default: False
+        Whether to save the dataset
+    target_root : str, default: "."
+        Root of the folder to save the `.zarr` array (under `{target_root}/emission.zarr`).
+        Only used if `save=True`
+    storage_options : dict, optional
+        Dictionary containing storage options for connecting to the S3 bucket.
+        Only used if `save=True`
 
     Returns
     -------
     emission_pdf : xr.Dataset
         The emission pdf
+    figure : plt.Figure or None
+        The plot of `emission_pdf`, or None if plot=False
     """
 
     if dims == ["x", "y"]:
@@ -611,7 +697,22 @@ def compute_emission_pdf(
     attrs = diff_ds.attrs.copy()
     attrs.update({"differences_std": differences_std, "recapture_std": recapture_std})
     emission_pdf = emission_pdf.assign_attrs(attrs)
-    return emission_pdf.chunk({"time": chunk_time} | {d: -1 for d in dims})
+    emission_pdf = emission_pdf.chunk({"time": chunk_time} | {d: -1 for d in dims})
+
+    figure = False
+    if save:
+        _save_zarr(emission_pdf, f"{target_root}/emission.zarr", storage_options)
+
+    if plot:
+        try:
+            emission_pdf = emission_pdf.persist()
+            figure = emission_pdf["pdf"].count(dims).plot()
+        except Exception:
+            warnings.warn(
+                "An error occurred when plotting the emission dataset.",
+                RuntimeWarning,
+            )
+    return emission_pdf, figure
 
 
 def compute_acoustic_pdf(
@@ -621,6 +722,10 @@ def compute_acoustic_pdf(
     receiver_buffer: pint.Quantity,
     chunk_time=24,
     dims: list[str] = ["cells"],
+    plot=False,
+    save=False,
+    target_root=".",
+    storage_options: dict = None,
     **kwargs,
 ):
     """Compute a emission probability distribution from (acoustic) detection data.
@@ -637,11 +742,23 @@ def compute_acoustic_pdf(
         Chunk size for the time dimension
     dims : List[str], default: ["cells"]
         The list of the dimensions. Either ["x", "y"] or ["cells"]
-
+    plot : bool, default: False
+        Whether to return a plot of the dataset
+    save : bool, default: False
+        Whether to save the dataset
+    target_root : str, default: "."
+        Root of the folder to save the `.zarr` array (under `{target_root}/acoustic.zarr`).
+        Only used if `save=True`
+    storage_options : dict, optional
+        Dictionary containing storage options for connecting to the S3 bucket.
+        Only used if `save=True`
     Returns
     -------
     acoustic_pdf : xr.Dataset
-        The emission pdf
+        The acoustic emission pdf
+    figure : plt.Figure or None
+        The plot of `acoustic_pdf`, or None if plot=False
+
     """
 
     if dims == ["cells"]:
@@ -665,7 +782,21 @@ def compute_acoustic_pdf(
     attrs = emission_ds.attrs.copy()
     attrs.update({"receiver_buffer": str(receiver_buffer)})
     acoustic_pdf = acoustic_pdf.assign_attrs(attrs)
-    return acoustic_pdf
+
+    figure = False
+    if save:
+        _save_zarr(acoustic_pdf, f"{target_root}/acoustic.zarr", storage_options)
+
+    if plot:
+        try:
+            acoustic_pdf = acoustic_pdf.persist()
+            figure = acoustic_pdf["acoustic"].count(dims).plot()
+        except Exception:
+            warnings.warn(
+                "An error occurred when plotting the acoustic dataset.",
+                RuntimeWarning,
+            )
+    return acoustic_pdf, figure
 
 
 def combine_pdfs(
@@ -674,6 +805,7 @@ def combine_pdfs(
     acoustic_ds: xr.Dataset,
     chunks: dict,
     dims=None,
+    plot=False,
     **kwargs,
 ):
     """Combine and normalize 2 probability distributions (pdfs).
@@ -688,11 +820,15 @@ def combine_pdfs(
         How to chunk the data
     dims : dict, optional
         Spatial dimensions to transpose the combined dataset. Relevant in case of a 2D, such as ["x", "y"] or ["y", "x"]
+    plot : bool, default: False
+        Whether to plot the sum of the distributions along the time dimension.
+
 
     Returns
     -------
     combined : xr.Dataset
         The combined pdf
+    figure : plt.Figure, or None if `plot=False`
     """
     spatial_dims = [dim for dim in acoustic_ds.dims if dim != "time"]
     merged = emission_ds.merge(acoustic_ds)
@@ -737,7 +873,17 @@ def combine_pdfs(
         combined.attrs.update(ds.attrs)
         if combined.coords.get("cell_ids", None) is not None:
             combined["cell_ids"].attrs.update(ds["cell_ids"].attrs)
-    return combined
+
+    figure = False
+    if plot:
+        try:
+            figure = combined["pdf"].sum(dims).plot(ylim=(0, 2))
+        except Exception:
+            warnings.warn(
+                "An error occurred when plotting the combined dataset.",
+                RuntimeWarning,
+            )
+    return combined, figure
 
 
 def _get_predictor_factory(ds: xr.Dataset, truncate: float, dims: list[str]):
@@ -866,7 +1012,7 @@ def optimize_pdf(
             pd.DataFrame.from_dict(params, orient="index").to_json(
                 str(path_to_json), storage_options=storage_options
             )
-        except Exception as e:
+        except Exception:
             warnings.warn(
                 f'An error occurred when attempting to export the results under "{path_to_json}".',
                 RuntimeWarning,
@@ -881,6 +1027,7 @@ def predict_positions(
     chunks: dict,
     track_modes=["mean", "mode"],
     additional_track_quantities=["speed", "distance"],
+    save=True,
     **kwargs,
 ):
     """High-level helper function for predicting fish's positions and generating the consequent trajectories.
@@ -901,6 +1048,8 @@ def predict_positions(
         Options for decoding trajectories. See `pangeo_fish.hmm.estimator.EagerEstimator.decode`
     additional_track_quantities : list[str], default: ["speed", "distance"]
         Additional quantities to compute from the decoded tracks. See `pangeo_fish.hmm.estimator.EagerEstimator.decode`
+    save : bool, default: True
+        Whether to save the `states` distribution and the trajectories.
 
     Returns
     -------
@@ -950,12 +1099,8 @@ def predict_positions(
     states = states.to_dataset().chunk(chunks)  # type: xr.Dataset
     states.attrs.update(emission.attrs)
 
-    states.to_zarr(
-        f"{target_root}/states.zarr",
-        mode="w",
-        consolidated=True,
-        storage_options=storage_options,
-    )
+    if save:
+        _save_zarr(states, f"{target_root}/states.zarr", storage_options)
 
     trajectories = optimized.decode(
         emission,
@@ -965,7 +1110,8 @@ def predict_positions(
         additional_quantities=additional_track_quantities,
     )
 
-    save_trajectories(trajectories, target_root, storage_options, format="parquet")
+    if save:
+        save_trajectories(trajectories, target_root, storage_options, format="parquet")
 
     return states, trajectories
 
@@ -1232,11 +1378,11 @@ def render_distributions(
     # quick input checking
     if not all(var_name in data.variables for var_name in ["emission", "states"]):
         raise ValueError(
-            f'"emission" and/or "states" variable(s) not found in the dataset.'
+            '"emission" and/or "states" variable(s) not found in the dataset.'
         )
     if sorted(list(data.dims)) != ["time", "x", "y"]:
         raise ValueError(
-            f'The dataset must have its dimensions equal to ["time", "x", "y"].'
+            'The dataset must have its dimensions equal to ["time", "x", "y"].'
         )
 
     time_slice = slice(0, data["time"].size - 1, time_step)
