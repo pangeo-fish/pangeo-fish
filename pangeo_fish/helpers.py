@@ -1,43 +1,48 @@
 import inspect
 import os
 import sys
-import fsspec
-import pint
-import s3fs
-import intake
-import xdggs
-import tqdm
 import warnings
-
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+import fsspec
+
 # import hvplot.xarray
 import holoviews as hv
-import numpy as np
-import xarray as xr
-import pandas as pd
 import imageio as iio
-
-from pangeo_fish.cf import bounds_to_bins
-from pangeo_fish.acoustic import emission_probability
-from pangeo_fish.diff import diff_z
-from pangeo_fish.grid import center_longitude
+import intake
+import numpy as np
+import pandas as pd
+import pint
+import s3fs
+import tqdm
+import xarray as xr
+import xdggs
+from toolz.dicttoolz import valfilter
+from toolz.functoolz import curry  # to change
 from xarray_healpy import HealpyGridInfo, HealpyRegridder
-from pangeo_fish.io import open_copernicus_catalog, open_tag, prepare_dataset, read_trajectories, save_html_hvplot, save_trajectories, tz_convert
-from pangeo_fish.tags import adapt_model_time, reshape_by_bins, to_time_slice
-from pangeo_fish.hmm.prediction import Gaussian1DHealpix, Gaussian2DCartesian
-from pangeo_fish.hmm.estimator import EagerEstimator
-from pangeo_fish.hmm.optimize import EagerBoundsSearch
-from pangeo_fish.utils import temporal_resolution
-from pangeo_fish.visualization import filter_by_states, plot_map, render_frame
-from pangeo_fish.pdf import combine_emission_pdf, normal
 
 import pangeo_fish.distributions as distrib
-
-from toolz.functoolz import curry # to change
-from toolz.dicttoolz import valfilter
-
+from pangeo_fish.acoustic import emission_probability
+from pangeo_fish.cf import bounds_to_bins
+from pangeo_fish.diff import diff_z
+from pangeo_fish.grid import center_longitude
+from pangeo_fish.hmm.estimator import EagerEstimator
+from pangeo_fish.hmm.optimize import EagerBoundsSearch
+from pangeo_fish.hmm.prediction import Gaussian1DHealpix, Gaussian2DCartesian
+from pangeo_fish.io import (
+    open_copernicus_catalog,
+    open_tag,
+    prepare_dataset,
+    read_trajectories,
+    save_html_hvplot,
+    save_trajectories,
+    tz_convert,
+)
+from pangeo_fish.pdf import combine_emission_pdf, normal
+from pangeo_fish.tags import adapt_model_time, reshape_by_bins, to_time_slice
+from pangeo_fish.utils import temporal_resolution
+from pangeo_fish.visualization import filter_by_states, plot_map, render_frame
 
 __all__ = [
     "to_healpix",
@@ -58,7 +63,7 @@ __all__ = [
     "open_distributions",
     "plot_distributions",
     "render_frames",
-    "render_distributions"
+    "render_distributions",
 ]
 
 
@@ -69,8 +74,7 @@ def _inspect_curry_obj(curried_obj):
     # default parameters
     params = {
         k: v.default if v.default is not inspect.Parameter.empty else None
-            for k, v in sig.parameters.items()
-
+        for k, v in sig.parameters.items()
     }
 
     # sig.parameters is ordered, so we can add the args of `curried_obj`
@@ -82,7 +86,7 @@ def _inspect_curry_obj(curried_obj):
     return params
 
 
-def _update_params_dict(factory, params: Dict):
+def _update_params_dict(factory, params: dict):
     """Inspect `factory` (assumed to be a curried object) to get its kw/args and update `params`.
 
     Note that `params` is updated with string representations of the arguments retrieved **except `cell_ids`**.
@@ -100,12 +104,11 @@ def _update_params_dict(factory, params: Dict):
         The updated dictionary
     """
 
-    kwargs = {k: str(v) for k, v in _inspect_curry_obj(factory).items() if k != "cell_ids"}
-
-    params["predictor_factory"] = {
-        "class": str(factory),
-        "kwargs": kwargs
+    kwargs = {
+        k: str(v) for k, v in _inspect_curry_obj(factory).items() if k != "cell_ids"
     }
+
+    params["predictor_factory"] = {"class": str(factory), "kwargs": kwargs}
 
     return params
 
@@ -156,7 +159,14 @@ def load_tag(*, tag_root: str, tag_name: str, storage_options: dict = None, **kw
     return tag, tag_log, time_slice
 
 
-def update_stations(*, tag: xr.DataTree, station_file_uri: str, method="merge", storage_options={}, **kwargs):
+def update_stations(
+    *,
+    tag: xr.DataTree,
+    station_file_uri: str,
+    method="merge",
+    storage_options={},
+    **kwargs,
+):
     """Add or replace the acoustic receiver data of a tag.
 
     Parameters
@@ -180,7 +190,7 @@ def update_stations(*, tag: xr.DataTree, station_file_uri: str, method="merge", 
     """
 
     if method not in ["merge", "replace"]:
-        raise ValueError(f"Unknown method \"{method}\".")
+        raise ValueError(f'Unknown method "{method}".')
 
     if not station_file_uri.endswith(".csv"):
         warnings.warn("`uri` should include the extension `.csv`.", UserWarning)
@@ -202,14 +212,14 @@ def update_stations(*, tag: xr.DataTree, station_file_uri: str, method="merge", 
 
 
 def plot_tag(
-        *,
-        tag: xr.DataTree,
-        tag_log: xr.Dataset,
-        save_html=False,
-        target_root=".",
-        storage_options:dict = None,
-        **kwargs
-    ):
+    *,
+    tag: xr.DataTree,
+    tag_log: xr.Dataset,
+    save_html=False,
+    target_root=".",
+    storage_options: dict = None,
+    **kwargs,
+):
     """Plot a tag.
 
     Parameters
@@ -254,8 +264,9 @@ def plot_tag(
             save_html_hvplot(plot, str(path_to_html), storage_options=storage_options)
         except Exception as e:
             warnings.warn(
-                "An error occurred when saving the Holoview plot of the tag:\n" + str(e),
-                category=UserWarning
+                "An error occurred when saving the Holoview plot of the tag:\n"
+                + str(e),
+                category=UserWarning,
             )
     return plot
 
@@ -308,19 +319,19 @@ def _open_parquet_model(parquet_url: str):
     reference_ds = xr.open_dataset(
         m, engine="zarr", chunks={}, backend_kwargs={"consolidated": False}
     )
-    reference_ds.coords["depth"].values[0] = 0.
+    reference_ds.coords["depth"].values[0] = 0.0
     return reference_ds
 
 
 def load_model(
-        *,
-        uri: str,
-        tag_log: xr.Dataset,
-        time_slice: slice,
-        bbox: Dict[str, Tuple[float, float]],
-        chunk_time=24,
-        **kwargs
-    ) -> xr.Dataset:
+    *,
+    uri: str,
+    tag_log: xr.Dataset,
+    time_slice: slice,
+    bbox: dict[str, tuple[float, float]],
+    chunk_time=24,
+    **kwargs,
+) -> xr.Dataset:
     """Load and prepare a reference model.
 
     Parameters
@@ -348,29 +359,30 @@ def load_model(
         reference_ds = _open_parquet_model(uri)
         model = prepare_dataset(reference_ds)
     else:
-        raise ValueError("Only intake catalogs and \"parqed\" data can be loaded.")
+        raise ValueError('Only intake catalogs and "parqed" data can be loaded.')
 
     reference_model = (
         model.sel(time=adapt_model_time(time_slice))
         .sel(lat=slice(*bbox["latitude"]), lon=slice(*bbox["longitude"]))
         .pipe(
             lambda ds: ds.sel(
-                depth=slice(None, (tag_log["pressure"].max() - ds["XE"].min()).compute())
+                depth=slice(
+                    None, (tag_log["pressure"].max() - ds["XE"].min()).compute()
+                )
             )
         )
     ).chunk({"time": chunk_time, "lat": -1, "lon": -1, "depth": -1})
     return reference_model
 
 
-
 def compute_diff(
-        *,
-        reference_model: xr.Dataset,
-        tag_log: xr.Dataset,
-        relative_depth_threshold: float,
-        chunk_time=24,
-        **kwargs
-    ):
+    *,
+    reference_model: xr.Dataset,
+    tag_log: xr.Dataset,
+    relative_depth_threshold: float,
+    chunk_time=24,
+    **kwargs,
+):
     """Compute the difference between the reference model and the DST data of a tag.
 
     Parameters
@@ -402,11 +414,7 @@ def compute_diff(
         other_dim="obs",
     ).chunk({"time": chunk_time})
     attrs = tag_log.attrs.copy()
-    attrs.update(
-        {
-            "relative_depth_threshold": relative_depth_threshold
-        }
-    )
+    attrs.update({"relative_depth_threshold": relative_depth_threshold})
     diff = (
         diff_z(reference_model, reshaped_tag, depth_threshold=relative_depth_threshold)
         .assign_attrs(attrs)
@@ -451,14 +459,14 @@ def open_diff_dataset(*, target_root: str, storage_options: dict, **kwargs):
 
 
 def regrid_dataset(
-        *,
-        ds: xr.Dataset,
-        nside: int,
-        min_vertices=1,
-        rot={"lat": 0, "lon": 0},
-        dims: List[str] = ["cells"],
-        **kwargs
-    ):
+    *,
+    ds: xr.Dataset,
+    nside: int,
+    min_vertices=1,
+    rot={"lat": 0, "lon": 0},
+    dims: list[str] = ["cells"],
+    **kwargs,
+):
     """Regrid a dataset as a HEALPix grid, whose primary advantage is that all its cells/pixels cover the same surface area.
 
     Parameters
@@ -496,7 +504,7 @@ def regrid_dataset(
             cell_ids=lambda ds: ds.cell_ids.astype("int64")
         )
     else:
-        raise ValueError(f"Unknown dims \"{dims}\".")
+        raise ValueError(f'Unknown dims "{dims}".')
 
     # adds the attributes found in `ds` as well as `min_vertices`
     attrs = ds.attrs.copy()
@@ -506,15 +514,15 @@ def regrid_dataset(
 
 
 def compute_emission_pdf(
-        *,
-        diff_ds: xr.Dataset,
-        events_ds: xr.Dataset,
-        differences_std: float,
-        recapture_std: float,
-        chunk_time: int = 24,
-        dims: List[str] = ["cells"],
-        **kwargs
-    ):
+    *,
+    diff_ds: xr.Dataset,
+    events_ds: xr.Dataset,
+    differences_std: float,
+    recapture_std: float,
+    chunk_time: int = 24,
+    dims: list[str] = ["cells"],
+    **kwargs,
+):
     """Compute the temporal emission matrices given a dataset and tagging events.
 
     Parameters
@@ -544,12 +552,10 @@ def compute_emission_pdf(
     elif dims == ["cells"]:
         is_2d = False
     else:
-        raise ValueError(f"Unknown dims \"{dims}\".")
-
+        raise ValueError(f'Unknown dims "{dims}".')
 
     if not is_2d:
         diff_ds = to_healpix(diff_ds)
-
 
     grid = diff_ds[["latitude", "longitude"]].compute()
     initial_position = events_ds.sel(event_name="release")
@@ -558,17 +564,24 @@ def compute_emission_pdf(
     if dims == ["x", "y"]:
         cov = distrib.create_covariances(1e-6, coord_names=["latitude", "longitude"])
         initial_probability = distrib.normal_at(
-            grid, pos=initial_position, cov=cov, normalize=True, axes=["latitude", "longitude"]
+            grid,
+            pos=initial_position,
+            cov=cov,
+            normalize=True,
+            axes=["latitude", "longitude"],
         )
     else:
-        initial_probability = distrib.healpix.normal_at(grid, pos=initial_position, sigma=1e-5)
-
+        initial_probability = distrib.healpix.normal_at(
+            grid, pos=initial_position, sigma=1e-5
+        )
 
     if final_position[["longitude", "latitude"]].to_dataarray().isnull().all():
         final_probability = None
     else:
         if is_2d:
-            cov = distrib.create_covariances(recapture_std**2, coord_names=["latitude", "longitude"])
+            cov = distrib.create_covariances(
+                recapture_std**2, coord_names=["latitude", "longitude"]
+            )
             final_probability = distrib.normal_at(
                 grid,
                 pos=final_position,
@@ -577,8 +590,9 @@ def compute_emission_pdf(
                 axes=["latitude", "longitude"],
             )
         else:
-            final_probability = distrib.healpix.normal_at(grid, pos=final_position, sigma=recapture_std)
-
+            final_probability = distrib.healpix.normal_at(
+                grid, pos=final_position, sigma=recapture_std
+            )
 
     emission_pdf = (
         normal(diff_ds["diff"], mean=0, std=differences_std, dims=dims)
@@ -595,25 +609,20 @@ def compute_emission_pdf(
         )
     )  # type: xr.Dataset
     attrs = diff_ds.attrs.copy()
-    attrs.update(
-        {
-            "differences_std": differences_std,
-            "recapture_std": recapture_std
-        }
-    )
+    attrs.update({"differences_std": differences_std, "recapture_std": recapture_std})
     emission_pdf = emission_pdf.assign_attrs(attrs)
     return emission_pdf.chunk({"time": chunk_time} | {d: -1 for d in dims})
 
 
 def compute_acoustic_pdf(
-        *,
-        emission_ds: xr.Dataset,
-        tag: xr.DataTree,
-        receiver_buffer: pint.Quantity,
-        chunk_time=24,
-        dims: List[str] = ["cells"],
-        **kwargs
-    ):
+    *,
+    emission_ds: xr.Dataset,
+    tag: xr.DataTree,
+    receiver_buffer: pint.Quantity,
+    chunk_time=24,
+    dims: list[str] = ["cells"],
+    **kwargs,
+):
     """Compute a emission probability distribution from (acoustic) detection data.
 
     Parameters
@@ -636,7 +645,9 @@ def compute_acoustic_pdf(
     """
 
     if dims == ["cells"]:
-        lon, lat = emission_ds["cell_ids"].attrs.get("lat", 0), emission_ds["cell_ids"].attrs.get("lon", 0)
+        lon, lat = emission_ds["cell_ids"].attrs.get("lat", 0), emission_ds[
+            "cell_ids"
+        ].attrs.get("lon", 0)
         emission_ds = to_healpix(emission_ds)
         # adds back "lon" and "lat" keys
         emission_ds["cell_ids"].attrs["lon"] = lon
@@ -649,26 +660,22 @@ def compute_acoustic_pdf(
         nondetections="mask",
         cell_ids="keep",
         chunk_time=chunk_time,
-        dims=dims
+        dims=dims,
     )
     attrs = emission_ds.attrs.copy()
-    attrs.update(
-        {
-            "receiver_buffer": str(receiver_buffer)
-        }
-    )
+    attrs.update({"receiver_buffer": str(receiver_buffer)})
     acoustic_pdf = acoustic_pdf.assign_attrs(attrs)
     return acoustic_pdf
 
 
 def combine_pdfs(
-        *,
-        emission_ds: xr.Dataset,
-        acoustic_ds: xr.Dataset,
-        chunks: dict,
-        dims=None,
-        **kwargs
-    ):
+    *,
+    emission_ds: xr.Dataset,
+    acoustic_ds: xr.Dataset,
+    chunks: dict,
+    dims=None,
+    **kwargs,
+):
     """Combine and normalize 2 probability distributions (pdfs).
 
     Parameters
@@ -690,39 +697,36 @@ def combine_pdfs(
     spatial_dims = [dim for dim in acoustic_ds.dims if dim != "time"]
     merged = emission_ds.merge(acoustic_ds)
     time_mask = xr.ufuncs.logical_or(
-        (merged["acoustic"] == 0),
-        xr.ufuncs.isnan(merged["pdf"])
-    ).all(dim=spatial_dims)  # type: xr.DataArray
+        (merged["acoustic"] == 0), xr.ufuncs.isnan(merged["pdf"])
+    ).all(
+        dim=spatial_dims
+    )  # type: xr.DataArray
 
     num_times = time_mask.sum().to_numpy().item()  # type: int
     if num_times != 0:
-        warnings.warn(
-            f"The combined pdf sums to 0 for {num_times} times.",
-            UserWarning
-        )
+        warnings.warn(f"The combined pdf sums to 0 for {num_times} times.", UserWarning)
         # temparory fix: replaces by the values from acoustic
         time_mask = time_mask.compute()
         mask = (merged["mask"].notnull()).compute()
-        #TODO: is this actually correct? Even though we normalize, isn't the prod of the distributions half of `acoustic_ds["acoustic"]`?
+        # TODO: is this actually correct? Even though we normalize, isn't the prod of the distributions half of `acoustic_ds["acoustic"]`?
         # careful here: we erase "pdf" by "acoustic" with `acoustic`: using acoustic_ds may erase attributes!
-        merged["pdf"][time_mask] = acoustic_ds["acoustic"][time_mask].where(mask, drop=False)
+        merged["pdf"][time_mask] = acoustic_ds["acoustic"][time_mask].where(
+            mask, drop=False
+        )
 
-    combined = (
-        merged.pipe(combine_emission_pdf)
-        .chunk(chunks)
-    )
+    combined = merged.pipe(combine_emission_pdf).chunk(chunks)
 
     # optional spatial transposition
     if (dims is not None) and ("cells" not in dims):
-        #TODO: still not enough...
+        # TODO: still not enough...
         if not all([d in combined.dims for d in dims]):
             raise ValueError(
-                f"Not all the dimensions provided (dims=\"{dims}\") were found in the emission distribution."
+                f'Not all the dimensions provided (dims="{dims}") were found in the emission distribution.'
             )
         if "time" in dims:
             warnings.warn(
-                "\"time\" was found in \"dims\". Spatial dimensions are expected.",
-                UserWarning
+                '"time" was found in "dims". Spatial dimensions are expected.',
+                UserWarning,
             )
             combined = combined.transpose(*dims)
         else:
@@ -736,7 +740,7 @@ def combine_pdfs(
     return combined
 
 
-def _get_predictor_factory(ds: xr.Dataset, truncate: float, dims: List[str]):
+def _get_predictor_factory(ds: xr.Dataset, truncate: float, dims: list[str]):
     if dims == ["x", "y"]:
         predictor = curry(Gaussian2DCartesian, truncate=truncate)
     elif dims == ["cells"]:
@@ -750,18 +754,18 @@ def _get_predictor_factory(ds: xr.Dataset, truncate: float, dims: List[str]):
             optimize_convolution=True,
         )
     else:
-        raise ValueError(f"Unknown dims \"{dims}\".")
+        raise ValueError(f'Unknown dims "{dims}".')
     return predictor
 
 
 def _get_max_sigma(
-        ds: xr.Dataset,
-        earth_radius: pint.Quantity,
-        adjustment_factor: float,
-        truncate: float,
-        maximum_speed: pint.Quantity,
-        as_radians: bool
-    ) -> float:
+    ds: xr.Dataset,
+    earth_radius: pint.Quantity,
+    adjustment_factor: float,
+    truncate: float,
+    maximum_speed: pint.Quantity,
+    as_radians: bool,
+) -> float:
     earth_radius_ = xr.DataArray(earth_radius, dims=None)
 
     timedelta = temporal_resolution(ds["time"]).pint.quantify().pint.to("h")
@@ -769,28 +773,32 @@ def _get_max_sigma(
 
     maximum_speed_ = xr.DataArray(maximum_speed, dims=None).pint.to("km / h")
     if as_radians:
-        max_grid_displacement = maximum_speed_ * timedelta * adjustment_factor / earth_radius_
-    else: # in pixels
-        max_grid_displacement = maximum_speed_ * timedelta * adjustment_factor / grid_resolution
+        max_grid_displacement = (
+            maximum_speed_ * timedelta * adjustment_factor / earth_radius_
+        )
+    else:  # in pixels
+        max_grid_displacement = (
+            maximum_speed_ * timedelta * adjustment_factor / grid_resolution
+        )
     max_sigma = max_grid_displacement.pint.to("dimensionless").pint.magnitude / truncate
 
     return max_sigma.item()
 
 
 def optimize_pdf(
-        *,
-        ds: xr.Dataset,
-        earth_radius: pint.Quantity,
-        adjustment_factor: float,
-        truncate: float,
-        maximum_speed: pint.Quantity,
-        tolerance: float,
-        dims: List[str] = ["cells"],
-        save_parameters= False,
-        storage_options: dict = None,
-        target_root=".",
-        **kwargs
-    ) -> dict:
+    *,
+    ds: xr.Dataset,
+    earth_radius: pint.Quantity,
+    adjustment_factor: float,
+    truncate: float,
+    maximum_speed: pint.Quantity,
+    tolerance: float,
+    dims: list[str] = ["cells"],
+    save_parameters=False,
+    storage_options: dict = None,
+    target_root=".",
+    **kwargs,
+) -> dict:
     """Optimize a temporal probability distribution.
 
     Parameters
@@ -833,11 +841,13 @@ def optimize_pdf(
     else:
         as_radians = False
 
-    max_sigma = _get_max_sigma(ds, earth_radius, adjustment_factor, truncate, maximum_speed, as_radians)
+    max_sigma = _get_max_sigma(
+        ds, earth_radius, adjustment_factor, truncate, maximum_speed, as_radians
+    )
     predictor_factory = _get_predictor_factory(ds=ds, truncate=truncate, dims=dims)
 
     estimator = EagerEstimator(sigma=None, predictor_factory=predictor_factory)
-    ds.attrs["max_sigma"] = max_sigma # limitation of the helper
+    ds.attrs["max_sigma"] = max_sigma  # limitation of the helper
 
     optimizer = EagerBoundsSearch(
         estimator,
@@ -858,21 +868,21 @@ def optimize_pdf(
             )
         except Exception as e:
             warnings.warn(
-                f"An error occurred when attempting to export the results under \"{path_to_json}\".",
-                RuntimeWarning
+                f'An error occurred when attempting to export the results under "{path_to_json}".',
+                RuntimeWarning,
             )
     return params
 
 
 def predict_positions(
-        *,
-        target_root: str,
-        storage_options: dict,
-        chunks: dict,
-        track_modes=["mean", "mode"],
-        additional_track_quantities=["speed", "distance"],
-        **kwargs
-    ):
+    *,
+    target_root: str,
+    storage_options: dict,
+    chunks: dict,
+    track_modes=["mean", "mode"],
+    additional_track_quantities=["speed", "distance"],
+    **kwargs,
+):
     """High-level helper function for predicting fish's positions and generating the consequent trajectories.
     It futhermore saves the latter under `states.zarr` and `trajectories.parq`.
 
@@ -922,13 +932,19 @@ def predict_positions(
     truncate = float(params["predictor_factory"]["kwargs"]["truncate"])
     cls_name = params["predictor_factory"]["class"]  # type: str
     if "Gaussian2DCartesian" in cls_name:
-        predictor_factory = _get_predictor_factory(emission, truncate=truncate, dims=["x", "y"])
+        predictor_factory = _get_predictor_factory(
+            emission, truncate=truncate, dims=["x", "y"]
+        )
     elif "Gaussian1DHealpix" in cls_name:
-        predictor_factory = _get_predictor_factory(emission, truncate=truncate, dims=["cells"])
+        predictor_factory = _get_predictor_factory(
+            emission, truncate=truncate, dims=["cells"]
+        )
     else:
         raise RuntimeError("Could not infer predictor's class from the `.json` file.")
 
-    optimized = EagerEstimator(sigma=params["sigma"],  predictor_factory=predictor_factory)
+    optimized = EagerEstimator(
+        sigma=params["sigma"], predictor_factory=predictor_factory
+    )
 
     states = optimized.predict_proba(emission)
     states = states.to_dataset().chunk(chunks)  # type: xr.Dataset
@@ -955,13 +971,13 @@ def predict_positions(
 
 
 def plot_trajectories(
-        *,
-        target_root: str,
-        track_modes: list[str],
-        storage_options: dict,
-        save_html=True,
-        **kwargs
-    ):
+    *,
+    target_root: str,
+    track_modes: list[str],
+    storage_options: dict,
+    save_html=True,
+    **kwargs,
+):
     """Read decoded trajectories and plots an interactive visualization.
     Optionally, the plot can be saved as a HTML file.
 
@@ -1011,13 +1027,8 @@ def plot_trajectories(
 
 
 def open_distributions(
-    *,
-    target_root: str,
-    storage_options: dict,
-    chunks: dict,
-    chunk_time=24,
-    **kwargs
-    ):
+    *, target_root: str, storage_options: dict, chunks: dict, chunk_time=24, **kwargs
+):
     """Load and merge the `emission` and `states` probability distributions into a single dataset.
 
     .. warning::
@@ -1096,7 +1107,7 @@ def plot_distributions(*, data: xr.Dataset, bbox=None, **kwargs):
         Interactive plot of the `states` and `emission` distributions
     """
 
-    #TODO: adding coastlines reverts the xlim / ylim arguments
+    # TODO: adding coastlines reverts the xlim / ylim arguments
     plot1 = plot_map(data["states"], bbox)
     plot2 = plot_map(data["emission"], bbox)
     plot = hv.Layout([plot1, plot2]).cols(2)
@@ -1130,33 +1141,24 @@ def render_frames(*, ds: xr.Dataset, time_slice: slice = None, **kwargs):
         ds = ds.isel(time=time_slice)
 
     ds.map_blocks(
-        render_frame,
-        kwargs=kwargs,
-        template=ds
-    ).compute() # to trigger the computation
+        render_frame, kwargs=kwargs, template=ds
+    ).compute()  # to trigger the computation
 
 
-def _render_video(
-        frames_fp: list[str],
-        video_fn: str,
-        extension="gif",
-        fps=10
-    ) -> str:
+def _render_video(frames_fp: list[str], video_fn: str, extension="gif", fps=10) -> str:
 
     def _is_format_available(format_name: str):
         formats = iio.config.known_plugins.keys()
         return format_name in formats
 
     if extension == "gif":
-        kwargs = dict(
-            uri=f"{video_fn}.gif",
-            mode="I",
-            fps=fps
-        )
+        kwargs = dict(uri=f"{video_fn}.gif", mode="I", fps=fps)
 
     elif extension == "mp4":
         if not _is_format_available("FFMPEG"):
-            raise ModuleNotFoundError("FFMPEG not found: have you installed imageio[ffmpeg]?")
+            raise ModuleNotFoundError(
+                "FFMPEG not found: have you installed imageio[ffmpeg]?"
+            )
 
         kwargs = dict(
             uri=f"{video_fn}.mp4",
@@ -1165,11 +1167,11 @@ def _render_video(
             format="FFMPEG",
             codec="libx264",
             pixelformat="yuv420p",
-            ffmpeg_params=["-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2"]
+            ffmpeg_params=["-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2"],
         )
 
     else:
-        raise ValueError(f"Unknown extension \"{extension}\".")
+        raise ValueError(f'Unknown extension "{extension}".')
 
     pbar = tqdm.tqdm(sorted(frames_fp), file=sys.stdout)
     pbar.set_description("Rendering the video...")
@@ -1182,17 +1184,17 @@ def _render_video(
 
 
 def render_distributions(
-        *,
-        data: xr.Dataset,
-        time_step=3,
-        frames_dir="frames",
-        output_path="states",
-        extension="gif",
-        fps=10,
-        remove_frames=True,
-        storage_options: dict = None,
-        **kwargs
-    ):
+    *,
+    data: xr.Dataset,
+    time_step=3,
+    frames_dir="frames",
+    output_path="states",
+    extension="gif",
+    fps=10,
+    remove_frames=True,
+    storage_options: dict = None,
+    **kwargs,
+):
     """Render a video of a dataset resulting from the merging of `emission` and the `states` distributions.
     See `pangeo_fish.helpers.open_distributions()`.
 
@@ -1229,18 +1231,26 @@ def render_distributions(
 
     # quick input checking
     if not all(var_name in data.variables for var_name in ["emission", "states"]):
-        raise ValueError(f"\"emission\" and/or \"states\" variable(s) not found in the dataset.")
+        raise ValueError(
+            f'"emission" and/or "states" variable(s) not found in the dataset.'
+        )
     if sorted(list(data.dims)) != ["time", "x", "y"]:
-        raise ValueError(f"The dataset must have its dimensions equal to [\"time\", \"x\", \"y\"].")
+        raise ValueError(
+            f'The dataset must have its dimensions equal to ["time", "x", "y"].'
+        )
 
     time_slice = slice(0, data["time"].size - 1, time_step)
     sliced_data = (
         data.isel(time=time_slice)
         .chunk({"time": 1, "x": -1, "y": -1})
         .pipe(lambda ds: ds.merge(ds[["longitude", "latitude"]].compute()))
-    ).pipe(filter_by_states)  # type: xr.Dataset
+    ).pipe(
+        filter_by_states
+    )  # type: xr.Dataset
     # add a time index
-    sliced_data = sliced_data.assign_coords(time_index=("time", np.arange(sliced_data.sizes["time"])))
+    sliced_data = sliced_data.assign_coords(
+        time_index=("time", np.arange(sliced_data.sizes["time"]))
+    )
     sliced_data = sliced_data.chunk({"time": 1, "x": -1, "y": -1})
 
     path_to_frames = Path(frames_dir)
@@ -1253,21 +1263,20 @@ def render_distributions(
             frames_fp=[file.resolve() for file in path_to_frames.glob("*.png")],
             video_fn=filename,
             extension=extension,
-            fps=fps
+            fps=fps,
         )
         if path_root.startswith("s3://"):
             if storage_options is None:
                 warnings.warn(
                     "Remote video uploading to S3 cancelled: no storage options found.",
-                    RuntimeWarning
+                    RuntimeWarning,
                 )
             else:
                 s3 = s3fs.S3FileSystem(**storage_options)
                 s3.put_file(video_fp, f"{path_root}/{video_fp}")
     except Exception as e:
         warnings.warn(
-            "An error occurred when rendering the video:\n" + str(e),
-            RuntimeWarning
+            "An error occurred when rendering the video:\n" + str(e), RuntimeWarning
         )
         video_fp = ""
     finally:
