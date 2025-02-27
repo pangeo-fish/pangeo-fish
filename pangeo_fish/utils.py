@@ -11,7 +11,7 @@ from rich.progress import (
 
 
 def clear_attrs(obj, variables=None):
-    # FIXME: remove this after figuring out how to port this to upstream xarray
+    # TODO: remove this after figuring out how to port this to upstream xarray
     new_obj = obj.copy()
     new_obj.attrs.clear()
 
@@ -26,6 +26,7 @@ def clear_attrs(obj, variables=None):
 
 
 def postprocess_depth(ds):
+    # TODO: remove this as it is unused
     new_names = {
         detected: standard
         for standard, (detected,) in ds.cf.standard_names.items()
