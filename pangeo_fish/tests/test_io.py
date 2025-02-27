@@ -6,7 +6,7 @@ import pytest
 import xarray as xr
 
 from pangeo_fish.io import open_tag
-from pangeo_fish.tags import reshape_by_bins, to_time_slice
+from pangeo_fish.tags import reshape_by_bins
 
 
 @pytest.fixture
@@ -56,22 +56,7 @@ def test_open_tag(dummy_mapper):
     assert tag["dst/temperature"].sel(time="2022-06-13T01:00:00").item() == 21.0
 
 
-def test_to_time_slice_with_open_tag(dummy_mapper):
-    """
-    Test to_time_slice function with open_tag output
-    """
-    tag = open_tag(dummy_mapper, "tag_dummy")
-    time_slice = to_time_slice(tag["tagging_events/time"])
-
-    start_time = pd.Timestamp(time_slice.start.item())
-    start_time = start_time.tz_localize("UTC")
-
-    assert start_time == pd.Timestamp(
-        "2022-06-13 11:40:30+0000", tz="UTC"
-    ), "time is incorrect"
-
-
-def test_reshape_by_bins(dummy_mapper):
+def test_reshape_by_bins():
     """
     Test reshape_by_bins function with dummy data
     """

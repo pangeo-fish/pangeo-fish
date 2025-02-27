@@ -13,7 +13,6 @@ def to_time_slice(times):
 
 
 def adapt_model_time(slice_):
-
     start = np.datetime64(slice_.start)
     stop = np.datetime64(slice_.stop)
 
