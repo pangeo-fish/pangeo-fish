@@ -108,3 +108,16 @@ def test_detect_spatial_dims(ds, expected):
     actual = utils._detect_spatial_dims(ds)
 
     assert sorted(actual) == sorted(expected)
+
+
+@pytest.mark.parametrize(
+    ["ds", "expected"],
+    (
+        (xr.Dataset(coords={"time": np.arange(4)}), ["time"]),
+        (xr.Dataset(coords={"timestep": ("t", np.arange(3), {"axis": "T"})}), ["t"]),
+    ),
+)
+def test_detect_temporal_dims(ds, expected):
+    actual = utils._detect_temporal_dims(ds)
+
+    assert sorted(actual) == sorted(expected)
