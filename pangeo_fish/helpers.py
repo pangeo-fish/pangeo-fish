@@ -10,6 +10,7 @@ import fsspec
 import holoviews as hv
 import imageio as iio
 import intake
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pint
@@ -17,6 +18,7 @@ import s3fs
 import tqdm
 import xarray as xr
 import xdggs
+from matplotlib.figure import Figure
 from toolz.dicttoolz import valfilter
 from toolz.functoolz import curry  # to change
 from xarray_healpy import HealpyGridInfo, HealpyRegridder
@@ -64,6 +66,13 @@ __all__ = [
     "render_frames",
     "render_distributions",
 ]
+
+
+def _plot_in_figure(ds: xr.Dataset, **plot_kwargs) -> Figure:
+    """Helper that plots statically `ds` in a plt.Figure."""
+    fig, ax = plt.subplots()
+    ds.plot(**(plot_kwargs | {"ax": ax}))
+    return fig
 
 
 def _save_zarr(ds: xr.Dataset, path: str, storage_options=None):
@@ -455,17 +464,16 @@ def compute_diff(
     if save:
         _save_zarr(diff, f"{target_root}/diff.zarr", storage_options)
 
+    figure = None
     if plot:
         try:
             diff = diff.compute()
-            figure = diff["diff"].count(["lat", "lon"]).plot()
+            figure = _plot_in_figure(diff["diff"].count(["lat", "lon"]))
         except Exception:
             warnings.warn(
                 "An error occurred when plotting diff.",
                 RuntimeWarning,
             )
-    else:
-        figure = False
     return diff, figure
 
 
@@ -574,7 +582,7 @@ def regrid_dataset(
     figure = False
     if plot:
         try:
-            figure = reshaped["diff"].count(dims).plot()
+            figure = _plot_in_figure(reshaped["diff"].count(dims))
         except Exception:
             warnings.warn(
                 "An error occurred when plotting the regridded dataset.",
@@ -699,14 +707,14 @@ def compute_emission_pdf(
     emission_pdf = emission_pdf.assign_attrs(attrs)
     emission_pdf = emission_pdf.chunk({"time": chunk_time} | {d: -1 for d in dims})
 
-    figure = False
     if save:
         _save_zarr(emission_pdf, f"{target_root}/emission.zarr", storage_options)
 
+    figure = False
     if plot:
         try:
             emission_pdf = emission_pdf.persist()
-            figure = emission_pdf["pdf"].count(dims).plot()
+            figure = _plot_in_figure(emission_pdf["pdf"].count(dims))
         except Exception:
             warnings.warn(
                 "An error occurred when plotting the emission dataset.",
@@ -783,14 +791,14 @@ def compute_acoustic_pdf(
     attrs.update({"receiver_buffer": str(receiver_buffer)})
     acoustic_pdf = acoustic_pdf.assign_attrs(attrs)
 
-    figure = False
     if save:
         _save_zarr(acoustic_pdf, f"{target_root}/acoustic.zarr", storage_options)
 
+    figure = False
     if plot:
         try:
             acoustic_pdf = acoustic_pdf.persist()
-            figure = acoustic_pdf["acoustic"].count(dims).plot()
+            figure = _plot_in_figure(acoustic_pdf["acoustic"].count(dims))
         except Exception:
             warnings.warn(
                 "An error occurred when plotting the acoustic dataset.",
@@ -877,7 +885,7 @@ def combine_pdfs(
     figure = False
     if plot:
         try:
-            figure = combined["pdf"].sum(dims).plot(ylim=(0, 2))
+            figure = _plot_in_figure(combined["pdf"].sum(dims), ylim=(0, 2))
         except Exception:
             warnings.warn(
                 "An error occurred when plotting the combined dataset.",
