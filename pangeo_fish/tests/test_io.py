@@ -50,10 +50,10 @@ def test_open_tag(dummy_mapper):
     """
 
     tag = open_tag(dummy_mapper, "tag_dummy")
-    assert set(tag.keys()) >= {"dst", "tagging_events", "stations", "acoustic"}
+    assert not {"dst", "tagging_events", "stations", "acoustic"}.difference(tag.keys())
     assert tag["/"].attrs.get("dummy_key") == "dummy_value"
-    assert tag["dst"].temperature.sel(time="2022-06-13T00:00:00").item() == 20.0
-    assert tag["dst"].temperature.sel(time="2022-06-13T01:00:00").item() == 21.0
+    assert tag["dst/temperature"].sel(time="2022-06-13T00:00:00").item() == 20.0
+    assert tag["dst/temperature"].sel(time="2022-06-13T01:00:00").item() == 21.0
 
 
 def test_to_time_slice_with_open_tag(dummy_mapper):
