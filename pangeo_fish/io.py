@@ -29,22 +29,6 @@ def tz_convert(df, timezones):
     return df.assign(**new_columns)
 
 
-def read_tag_database(url):
-    """read the tag database
-
-    Parameters
-    ----------
-    url : str, path-like or file-like
-        The file path, url, path-like or pre-opened file object of the file to open
-
-    Returns
-    -------
-    tag_database : pandas.DataFrame
-        The opened tag database
-    """
-    return pd.read_csv(url, sep=";")
-
-
 def read_detection_database(url):
     """read the detection database
 
