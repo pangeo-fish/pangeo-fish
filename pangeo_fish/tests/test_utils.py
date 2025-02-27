@@ -110,6 +110,12 @@ def test_detect_spatial_dims(ds, expected):
     assert sorted(actual) == sorted(expected)
 
 
+def test_detect_spatial_dims_error():
+    ds = xr.Dataset(coords={"xi": np.arange(3), "yi": np.arange(4)})
+    with pytest.raises(ValueError, match="could not determine spatial dimensions"):
+        utils._detect_spatial_dims(ds)
+
+
 @pytest.mark.parametrize(
     ["ds", "expected"],
     (
@@ -121,3 +127,9 @@ def test_detect_temporal_dims(ds, expected):
     actual = utils._detect_temporal_dims(ds)
 
     assert sorted(actual) == sorted(expected)
+
+
+def test_detect_temporal_dims_error():
+    ds = xr.Dataset(coords={"t": np.arange(3)})
+    with pytest.raises(ValueError, match="could not determine temporal dimensions"):
+        utils._detect_temporal_dims(ds)
