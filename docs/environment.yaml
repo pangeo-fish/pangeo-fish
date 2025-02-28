@@ -21,4 +21,5 @@ dependencies:
       - nbsphinx_link
       - sphinx_remove_toctrees
       - zarr==2.18.2
+      - xarray-healpy @ git+https://github.com/iaocea/xarray-healpy.git@0ffca6058f4008f4f22f076e2d60787fcf32ac82
       - -e ../.
