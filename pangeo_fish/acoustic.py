@@ -68,7 +68,10 @@ def count_detections(detections, by):
 def deployment_reception_masks(
     stations, grid, buffer_size, method="recompute", dims=["x", "y"]
 ):
-    rot = {"lat": grid["cell_ids"].attrs["lat"], "lon": grid["cell_ids"].attrs["lon"]}
+    rot = {
+        "lat": grid["cell_ids"].attrs.get("lat", 0),
+        "lon": grid["cell_ids"].attrs.get("lon", 0),
+    }
     if method == "recompute":
         phi, theta = geographic_to_astronomic(
             lon=grid["longitude"], lat=grid["latitude"], rot=rot
@@ -91,6 +94,7 @@ def deployment_reception_masks(
             rot=rot,
             dim="deployment_id",
         )
+
     if dims == ["cells"]:
         masks = buffer_points_cells(
             cell_ids,
