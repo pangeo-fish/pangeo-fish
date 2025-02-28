@@ -76,8 +76,7 @@ class Gaussian1DHealpix(Predictor):
         )
         self.new_cell_ids, self.kernel = hc.kernels.gaussian_kernel(
             self.cell_ids,
-            resolution=self.grid_info.level,
-            indexing_scheme=self.grid_info.indexing_scheme,
+            grid_info=self.grid_info,
             sigma=self.sigma,
             truncate=self.truncate,
             kernel_size=self.kernel_size,
