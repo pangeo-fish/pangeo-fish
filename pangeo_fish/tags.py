@@ -15,7 +15,6 @@ def to_time_slice(times):
 
 
 def adapt_model_time(slice_):
-
     start = np.datetime64(slice_.start)
     stop = np.datetime64(slice_.stop)
 
@@ -34,32 +33,23 @@ def adapt_model_time(slice_):
     return slice(model_start, model_stop)
 
 
-def assign_group_labels(ds, *, dim, index, bin_dim, other_dim):
-    value = ds[dim].isel({dim: 0}).to_pandas()
-    indexer = index.get_loc(value)
+def reshape_by_bins(ds, *, dim, bins, other_dim="obs"):
+    def expand_group(group, *, dim, other_dim):
+        return (
+            group.rename_dims({dim: other_dim})
+            .drop_indexes(dim)
+            .assign_coords({other_dim: lambda ds: ds[other_dim]})
+        )
 
-    return ds.assign_coords(
-        {
-            bin_dim: xr.full_like(ds[dim], fill_value=indexer, dtype=int),
-            other_dim: (dim, np.arange(ds.sizes[dim])),
-        }
-    )
+    index = bins.to_index()
+    grouper = xr.groupers.BinGrouper(index, include_lowest=True)
 
-
-def reshape_by_bins(ds, *, dim, bins, bin_dim="bincount", other_dim="obs"):
-    index = bins.to_index().astype("interval")
-    vertices = np.concatenate([index.left, index.right[-1:]])
-
-    grouped = ds.groupby_bins(dim, bins=vertices)
-    processed = grouped.map(
-        assign_group_labels, dim=dim, bin_dim=bin_dim, other_dim=other_dim, index=index
+    processed = ds.groupby({dim: grouper}).map(
+        expand_group, dim=dim, other_dim=other_dim
     )
 
     return (
-        processed.swap_dims({dim: other_dim})
-        .set_index({"stacked": [bin_dim, other_dim]})
-        .unstack("stacked")
-        .assign_coords({dim: lambda ds: bins[dim].isel({dim: ds[bin_dim]})})
-        .swap_dims({bin_dim: dim})
-        .drop_vars([bin_dim, bins.name], errors="ignore")
+        processed.drop_vars("time")
+        .rename_dims({"time_bins": "time"})
+        .rename_vars({"time_bins": "time"})
     )

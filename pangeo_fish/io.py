@@ -2,7 +2,6 @@
 
 import io
 import json
-import os
 import warnings
 
 import fsspec
@@ -31,55 +30,12 @@ def tz_convert(df, timezones):
     return df.assign(**new_columns)
 
 
-def read_tag_database(url):
-    """read the tag database
-
-    Parameters
-    ----------
-    url : str, path-like or file-like
-        The file path, url, path-like or pre-opened file object of the file to open
-
-    Returns
-    -------
-    tag_database : pandas.DataFrame
-        The opened tag database
-    """
-    return pd.read_csv(url, sep=";")
-
-
-def read_detection_database(url):
-    """read the detection database
-
-    Parameters
-    ----------
-    url : str, path-like or file-like
-        The file path, url, path-like or pre-opened file object of the file to open
-
-    Returns
-    -------
-    detection_database : pandas.DataFrame
-        The opened detection database
-
-    """
-    if isinstance(url, os.PathLike):
-        url = os.fsspath(url)
-
-    if isinstance(url, str):
-        opened = fsspec.open(url, mode="r")
-    else:
-        opened = url
-
-    with opened as f:
-        # work around the weird quoting
-        lines = (line.replace('"', "") for line in f)
-        data = "\n".join(lines)
-
-    content = io.StringIO(data)
-    return (
-        pd.read_csv(content, parse_dates=[1])
-        .rename(columns={"date_time": "time"})
-        .set_index("time")
-    )
+def read_stations(f):
+    return pd.read_csv(
+        f,
+        parse_dates=["deploy_time", "recover_time"],
+        index_col="deployment_id",
+    ).pipe(tz_convert, {"deploy_time": None, "recover_time": None})
 
 
 def open_tag(root, name, storage_options=None):
@@ -125,11 +81,7 @@ def open_tag(root, name, storage_options=None):
         "tagging_events": tagging_events.to_xarray(),
     }
     if mapper.dirfs.exists("stations.csv"):
-        stations = pd.read_csv(
-            mapper.dirfs.open("stations.csv"),
-            parse_dates=["deploy_time", "recover_time"],
-            index_col="deployment_id",
-        ).pipe(tz_convert, {"deploy_time": None, "recover_time": None})
+        stations = read_stations(mapper.dirfs.open("stations.csv"))
         if len(stations) > 0:
             mapping["stations"] = stations.to_xarray()
 
