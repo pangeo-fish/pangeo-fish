@@ -1,3 +1,5 @@
+import warnings
+
 import dask
 import dask.array as da
 import numpy as np
@@ -43,7 +45,14 @@ def score(emission, predictor, initial_probability, mask=None):
         prediction = predictor.predict(previous, mask=mask)
         updated = prediction * dask.compute(emission[index, ...])[0]
 
-        normalizations.append(np.sum(updated))
+        normalization_factor = np.sum(updated)
+        if normalization_factor == 0:
+            warnings.warn(
+                f"Empty product of the prediction with the true distribution at step {index+1}.",
+                RuntimeWarning,
+            )
+            return 1e6
+        normalizations.append(normalization_factor)
         normalized = updated / normalizations[index]
 
         previous = normalized
