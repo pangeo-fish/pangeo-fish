@@ -20,62 +20,6 @@ from pangeo_fish.healpy import (
 )
 
 
-def extract_receivers(
-    detections,
-    columns=[
-        "deployment_id",
-        "deploy_latitude",
-        "deploy_longitude",
-        "station_name",
-    ],
-):
-    """extract the generic receiver information from the detection database
-
-    Parameters
-    ----------
-    detections : pandas.DataFrame
-        All detections in the database.
-    columns : list of hashable, default: ["deployment_id", "deploy_latitude", \
-                                          "deploy_longitude", "station_name"]
-        Receiver-specific columns.
-
-    Returns
-    -------
-    pandas.DataFrame
-        The extracted receiver information.
-    """
-    subset = detections[columns]
-
-    return subset.set_index("deployment_id").drop_duplicates()
-
-
-def search_acoustic_tag_id(tag_database, pit_tag_id):
-    """translate DST tag ID to the ID of the acoustic emitter
-
-    Parameters
-    ----------
-    tag_database : pandas.DataFrame
-        The database containing information about the individual deployments.
-    pit_tag_id : str
-        The ID of the DST tag
-
-    Returns
-    -------
-    str
-        The ID of the acoustic tag
-
-    Raises
-    ------
-    ValueError
-        if the given DST tag ID is not in the database.
-    """
-    try:
-        info = tag_database.set_index("pit_tag_number").loc[pit_tag_id]
-        return info["acoustic_tag_id"]
-    except KeyError:
-        raise ValueError(f"unknown tag id: {pit_tag_id}") from None
-
-
 def count_detections(detections, by):
     """count the amount of detections by interval
 
@@ -125,35 +69,13 @@ def count_detections(detections, by):
     return result.drop_vars(["time"]).assign_coords({"time": by["time"].variable})
 
 
-def select_detections_by_tag_id(database, tag_id):
-    """select detections by the acoustic tag id
-
-    Parameters
-    ----------
-    database : pandas.DataFrame
-        The detections database.
-    tag_id : str
-        The acoustic tag id to search for.
-
-    Returns
-    -------
-    detections : xarray.Dataset
-        The selected detections.
-    """
-    return (
-        database[["deployment_id", "acoustic_tag_id"]]
-        .to_xarray()
-        .set_coords(["acoustic_tag_id"])
-        .set_xindex("acoustic_tag_id")
-        .sel({"acoustic_tag_id": tag_id})
-        .drop_vars(["acoustic_tag_id"])
-    )
-
-
 def deployment_reception_masks(
     stations, grid, buffer_size, method="recompute", dims=["x", "y"]
 ):
-    rot = {"lat": grid["cell_ids"].attrs["lat"], "lon": grid["cell_ids"].attrs["lon"]}
+    rot = {
+        "lat": grid["cell_ids"].attrs.get("lat", 0),
+        "lon": grid["cell_ids"].attrs.get("lon", 0),
+    }
     if method == "recompute":
         phi, theta = geographic_to_astronomic(
             lon=grid["longitude"], lat=grid["latitude"], rot=rot
@@ -176,6 +98,7 @@ def deployment_reception_masks(
             rot=rot,
             dim="deployment_id",
         )
+
     if dims == ["cells"]:
         masks = buffer_points_cells(
             cell_ids,
