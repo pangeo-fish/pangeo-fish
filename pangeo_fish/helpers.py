@@ -374,7 +374,9 @@ def load_model(
     """
 
     if uri.endswith(".yaml"):
-        model = _open_copernicus_model(uri)
+        model = _open_copernicus_model(
+            uri, chunks={"time": 8, "lat": -1, "lon": -1, "depth": -1}
+        )
     elif uri.endswith(".parq") or uri.endswith(".parq/"):
         reference_ds = _open_parquet_model(uri)
         model = prepare_dataset(reference_ds)
@@ -469,6 +471,8 @@ def compute_diff(
         try:
             diff = diff.compute()
             figure = _plot_in_figure(diff["diff"].count(["lat", "lon"]))
+            [ax] = figure.get_axes()
+            ax.set_title("Number of none-zero pixels")
         except Exception:
             warnings.warn(
                 "An error occurred when plotting diff.",
@@ -583,6 +587,8 @@ def regrid_dataset(
     if plot:
         try:
             figure = _plot_in_figure(reshaped["diff"].count(dims))
+            [ax] = figure.get_axes()
+            ax.set_title("Number of none-zero pixels")
         except Exception:
             warnings.warn(
                 "An error occurred when plotting the regridded dataset.",
@@ -715,6 +721,8 @@ def compute_emission_pdf(
         try:
             emission_pdf = emission_pdf.persist()
             figure = _plot_in_figure(emission_pdf["pdf"].count(dims))
+            [ax] = figure.get_axes()
+            ax.set_title("Number of none-zero pixels")
         except Exception:
             warnings.warn(
                 "An error occurred when plotting the emission dataset.",
@@ -760,6 +768,7 @@ def compute_acoustic_pdf(
     storage_options : dict, optional
         Dictionary containing storage options for connecting to the S3 bucket.
         Only used if `save=True`
+
     Returns
     -------
     acoustic_pdf : xr.Dataset
@@ -798,7 +807,9 @@ def compute_acoustic_pdf(
     if plot:
         try:
             acoustic_pdf = acoustic_pdf.persist()
-            figure = _plot_in_figure(acoustic_pdf["acoustic"].count(dims))
+            figure = _plot_in_figure((acoustic_pdf["acoustic"] != 0).sum(dims))
+            [ax] = figure.get_axes()
+            ax.set_title("Sum of none-zero pixels")
         except Exception:
             warnings.warn(
                 "An error occurred when plotting the acoustic dataset.",
@@ -886,6 +897,8 @@ def combine_pdfs(
     if plot:
         try:
             figure = _plot_in_figure(combined["pdf"].sum(dims), ylim=(0, 2))
+            [ax] = figure.get_axes()
+            ax.set_title("Sum of the probabilities")
         except Exception:
             warnings.warn(
                 "An error occurred when plotting the combined dataset.",
