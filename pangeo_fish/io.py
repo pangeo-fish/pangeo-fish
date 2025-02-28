@@ -1,6 +1,5 @@
 """Module for managing I/O operations."""
 
-import io
 import json
 import warnings
 
