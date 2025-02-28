@@ -35,7 +35,7 @@ templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", ".ipynb_checkpoints"]
 remove_from_toctrees = ["generated/*"]
 
-html_theme = "sphinx_rtd_theme"
+html_theme = "sphinx_book_theme"
 pygments_style = "sphinx"
 
 html_static_path = []

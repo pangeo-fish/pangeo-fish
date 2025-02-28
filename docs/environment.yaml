@@ -5,6 +5,11 @@ dependencies:
   # docs' requirements
   - nbsphinx
   - pandoc
+  - sphinx-book-theme
+  - sphinx-copybutton
+  - myst-parser
+  - nbsphinx-link
+  - sphinx-remove-toctrees
   # for importing pangeo-fish
   - flox
   - dask
@@ -13,13 +18,8 @@ dependencies:
   - cmocean
   - hvplot
   - cartopy
+  - zarr=2.18.2
   - pip
   - pip:
-      - sphinx_rtd_theme
-      - sphinx_copybutton
-      - myst_parser
-      - nbsphinx_link
-      - sphinx_remove_toctrees
-      - zarr==2.18.2
       - xarray-healpy @ git+https://github.com/iaocea/xarray-healpy.git@0ffca6058f4008f4f22f076e2d60787fcf32ac82
       - -e ../.
