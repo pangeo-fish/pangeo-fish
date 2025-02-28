@@ -1,0 +1,24 @@
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  # docs' requirements
+  - nbsphinx
+  - pandoc
+  # for importing pangeo-fish
+  - flox
+  - dask
+  - rich
+  - cartopy
+  - cmocean
+  - hvplot
+  - cartopy
+  - pip
+  - pip:
+      - sphinx_rtd_theme
+      - sphinx_copybutton
+      - myst_parser
+      - nbsphinx_link
+      - sphinx_remove_toctrees
+      - zarr==2.18.2
+      - -e ../.
