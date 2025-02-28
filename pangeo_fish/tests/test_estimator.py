@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
+import xdggs  # noqa: F401
 from tlz.functoolz import curry
 
 from pangeo_fish.hmm.estimator import EagerEstimator
@@ -18,17 +19,22 @@ def sample_dataset():
     start_time = pd.Timestamp("2022-06-13T12:00:00")
     end_time = pd.Timestamp("2022-06-24T05:00:00")
     time = pd.date_range(start=start_time, end=end_time, periods=num_time_steps)
-    nside = 8
-    cell_ids = np.arange(4 * nside**2, 6 * nside**2)
-    num_cells = cell_ids.size
-    initial = np.zeros(num_cells)
+
+    level = 4
+    cell_ids = np.arange(4 * 4**level, 6 * 4**level)
+
+    initial = np.zeros_like(cell_ids, dtype="float64")
     initial[len(initial) // 2] = 0.80
     initial[len(initial) // 2 + 1] = 0.20
-    final = np.zeros(num_cells)
+    final = np.zeros_like(cell_ids, dtype="float64")
     final[(len(final) // 2)] = 0.75
-    mask = np.ones(num_cells)
-    pdf = np.random.rand(num_time_steps, num_cells)
+
+    mask = np.full_like(cell_ids, fill_value=True, dtype=bool)
+
+    rng = np.random.default_rng(seed=0)
+    pdf = rng.random(size=(num_time_steps, cell_ids.size))
     pdf /= pdf.sum(axis=1, keepdims=True)
+
     ds = xr.Dataset(
         coords={"cell_ids": ("cells", cell_ids), "time": ("time", time)},
         data_vars={
@@ -39,7 +45,7 @@ def sample_dataset():
         },
     )
     return ds.dggs.decode(
-        {"grid_name": "healpix", "level": 12, "indexing_scheme": "nested"}
+        {"grid_name": "healpix", "level": level, "indexing_scheme": "nested"}
     ).dggs.assign_latlon_coords()
 
 
