@@ -53,8 +53,7 @@ class TestHealpix:
             np.reshape(expected_center, (1, 1)),
             np.reshape(cell_ids, (1, -1)),
             axis=-1,
-            nside=grid_info_.nside,
-            nest=grid_info_.nest,
+            grid_info=grid_info_,
         )
 
         assert (pdf > 0).sum() > 5

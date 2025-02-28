@@ -4,7 +4,7 @@ import scipy.stats
 import xarray as xr
 from more_itertools import first
 
-from pangeo_fish.utils import _detect_spatial_dims, clear_attrs, normalize
+from pangeo_fish.utils import _detect_spatial_dims, normalize
 
 
 # also try: multivariate_normal, gaussian_kde
@@ -48,7 +48,7 @@ def normal(samples, mean, std, *, dims):
         exclude_dims=set(param_dims),
         vectorize=True,
     )
-    return result.rename("pdf").pipe(clear_attrs)
+    return result.rename("pdf").drop_attrs(deep=False)
 
 
 def combine_emission_pdf(raw, exclude=("initial", "final", "mask")):
