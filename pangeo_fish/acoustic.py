@@ -239,7 +239,8 @@ def emission_probability(
 
         - "keep": use the cell ids given by the model. This is the more correct method.
         - "recompute": recompute the cell ids based on the rotated lat / lon coords.
-    dims :
+    dims : list of str, default: ["x", "y"]
+        The spatial dimensions.
 
     Returns
     -------
