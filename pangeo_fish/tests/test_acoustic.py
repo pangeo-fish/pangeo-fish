@@ -19,41 +19,24 @@ def dummy_grid():
     The dataset includes normalized probabilities, initial/final states, and a mask.
     The DGGS chain decodes the grid (Healpix) and assigns lat/lon coordinates.
     """
-    num_time_steps = 10
+    num_time_steps = 5
     start_time = pd.Timestamp("2022-06-13T12:00:00")
     end_time = pd.Timestamp("2022-06-24T05:00:00")
     time = pd.date_range(start=start_time, end=end_time, periods=num_time_steps)
 
-    nside = 8
-    cell_ids = np.arange(4 * nside**2, 6 * nside**2)
-    num_cells = cell_ids.size
+    level = 1
+    cell_ids = np.arange(4 * 4**level, 6 * 4**level)
 
-    # Create a normalized probability distribution for each time step
-    pdf = np.random.rand(num_time_steps, num_cells)
-    pdf /= pdf.sum(axis=1, keepdims=True)
+    mask = np.full_like(cell_ids, fill_value=True, dtype=bool)
+    mask[4:6] = False
 
-    # Define arbitrary initial and final state distributions
-    initial = np.zeros(num_cells)
-    initial[len(initial) // 2] = 0.80
-    initial[len(initial) // 2 + 1] = 0.20
-    final = np.zeros(num_cells)
-    final[len(final) // 2] = 0.75
-
-    mask = np.ones(num_cells)
-
+    grid_info = {"grid_name": "healpix", "level": level, "indexing_scheme": "nested"}
     ds = xr.Dataset(
-        coords={"cell_ids": ("cells", cell_ids), "time": ("time", time)},
-        data_vars={
-            "pdf": (("time", "cells"), pdf),
-            "initial": ("cells", initial),
-            "final": ("cells", final),
-            "mask": ("cells", mask),
-        },
+        coords={"cell_ids": ("cells", cell_ids, grid_info), "time": ("time", time)},
+        data_vars={"mask": ("cells", mask)},
     )
     # Decode the grid using DGGS and assign lat/lon coordinates
-    return ds.dggs.decode(
-        {"grid_name": "healpix", "level": 12, "indexing_scheme": "nested"}
-    ).dggs.assign_latlon_coords()
+    return ds.dggs.decode().dggs.assign_latlon_coords()
 
 
 @pytest.fixture
@@ -148,7 +131,8 @@ def dummy_tag():
     return tag
 
 
-def test_emission_probability(dummy_tag, dummy_grid):
+@pytest.mark.parametrize("detections", [False, True])
+def test_emission_probability(detections, dummy_tag, dummy_grid):
     """
     Test of the `emission_probability` function using small datasets (10 time steps).
     """
@@ -158,7 +142,11 @@ def test_emission_probability(dummy_tag, dummy_grid):
     dummy_grid.cell_ids.attrs["lat"] = 0
     dummy_grid.cell_ids.attrs["lon"] = 0
 
-    emission = emission_probability(
+    if not detections:
+        del dummy_tag["stations"]
+        del dummy_tag["acoustic"]
+
+    actual = emission_probability(
         tag=dummy_tag,
         grid=dummy_grid,
         buffer_size=receiver_buffer,
@@ -168,7 +156,12 @@ def test_emission_probability(dummy_tag, dummy_grid):
         dims=["cells"],
     )
 
-    result = emission.compute()
+    if not detections:
+        expected = xr.Dataset()
+        xr.testing.assert_identical(actual, expected)
+        return
 
-    assert "acoustic" in emission.data_vars
-    assert result["acoustic"].notnull().any()
+    assert "acoustic" in actual.data_vars
+
+    actual_ = actual.compute()
+    assert actual_["acoustic"].notnull().any()
