@@ -3,6 +3,7 @@ channels:
 dependencies:
   - python=3.12
   # docs' requirements
+  - sphinx>=0.9
   - nbsphinx
   - pandoc
   - sphinx-book-theme
