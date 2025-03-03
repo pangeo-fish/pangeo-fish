@@ -68,7 +68,7 @@ However, unlike terrestrial animals, whose positions can be directly tracked usi
 This limitation hinders the accurate delineation of protected areas, which is crucial for the protection of important fish habitats and fish exploitation.
 To address this issue, various tagging experiments have been conducted on a variety of fish species [@spanish_tagging; @skagerrak_tagging], and methods have been proposed for approximating the fish locations, referred to as geolocation models [@pontual_seabass_migration_2023; @woillez_hmm-based_2016].
 
-![Promotion of the FISH-INTEL tagging campaign.\label{fig:fishintel}](fishintel.png)
+![Promotion of the FISH-INTEL tagging campaign.\label{fig:fishintel}](fishintel.png){ width=20% }
 
 Archival tags and acoustic tags are two commonly tagging systems used in biologging campaigns.
 Archival tags — also called Data Storage Tag (DST) — record and store a wide range of data such as temperature, pressure or salinity until their battery expires (whose timespan usually ranges from 6 months to 2 years).
@@ -77,8 +77,9 @@ Tagging campaigns usually address this challenge by promoting and possibly rewar
 Acoustic tags work differently, since they emit signals that can be detected by detection devices when fish come within their range, hence providing the fish location.
 As such, acoustic tags do not need to be returned, but there is no garuantee that the tagged fish will swim around the receivers.
 
+![Example of an acoustic tag (on the left) and an archival tag (on the right).\label{fig:tag}](archival_tag.png){ width=20% }
+
 \autoref{fig:tag} shows an example of an acoustic tag as well as a DTS.
-![Example of an acoustic tag (on the left) and an archival tag (on the right).\label{fig:tag}](archival_tag.png)
 
 The estimation of fish positions depends on the likelihood of the observed data from the DTS's logs, such as temperature at specific depths, alongside the reference geoscience data such as satellite observations.
 Some approaches can enhance the accuracy of the model's predictions by using additional information, such as telemetric detection data from the acoustic tags mentioned above [@a_combination_tag_2023].
