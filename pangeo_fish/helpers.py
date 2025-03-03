@@ -5,12 +5,13 @@ import warnings
 from pathlib import Path
 
 import fsspec
-
-# import hvplot.xarray
 import holoviews as hv
 import imageio as iio
 import intake
 import matplotlib.pyplot as plt
+
+# import hvplot.xarray
+import movingpandas  # noqa: F401
 import numpy as np
 import pandas as pd
 import pint
@@ -69,7 +70,7 @@ __all__ = [
 
 
 def _plot_in_figure(ds: xr.Dataset, **plot_kwargs) -> Figure:
-    """Helper that plots statically `ds` in a plt.Figure."""
+    """Helper that plots statically ``ds`` in a plt.Figure."""
     fig, ax = plt.subplots()
     ds.plot(**(plot_kwargs | {"ax": ax}))
     return fig
@@ -107,20 +108,20 @@ def _inspect_curry_obj(curried_obj):
 
 
 def _update_params_dict(factory, params: dict):
-    """Inspect `factory` (assumed to be a curried object) to get its kw/args and update `params`.
+    """Inspect ``factory`` (assumed to be a curried object) to get its kw/args and update ``params``.
 
-    Note that `params` is updated with string representations of the arguments retrieved **except `cell_ids`**.
+    Note that ``params`` is updated with string representations of the arguments retrieved **except ``cell_ids``**.
 
     Parameters
     -----------
     factory : Curried object
-        It must have the attributes `func`, `args`, and `keywords`
-    params : Dict
+        It must have the attributes ``func``, ``args``, and ``keywords``
+    params : mapping
         The dictionary to update
 
     Returns
     --------
-    params : Dict
+    params : mapping
         The updated dictionary
     """
 
@@ -128,9 +129,7 @@ def _update_params_dict(factory, params: dict):
         k: str(v) for k, v in _inspect_curry_obj(factory).items() if k != "cell_ids"
     }
 
-    params["predictor_factory"] = {"class": str(factory), "kwargs": kwargs}
-
-    return params
+    return params | {"predictor_factory": {"class": str(factory), "kwargs": kwargs}}
 
 
 def to_healpix(ds: xr.Dataset) -> xr.Dataset:
@@ -157,17 +156,17 @@ def load_tag(*, tag_root: str, tag_name: str, storage_options: dict = None, **kw
     Parameters
     ----------
     tag_root : str
-        Path to the folder that contains the tag data under a folder `tag_name`
+        Path to the folder that contains the tag data under a folder ``tag_name``
     tag_name : str
-        Name of the tagged fish (e.g, "A19124"). Notably, It is used to fetch the biologging data from `{tag_root}/{tag_name}/`
+        Name of the tagged fish (e.g, "A19124"). Notably, It is used to fetch the biologging data from ``{tag_root}/{tag_name}/``
     storage_options : dict, optional
         Dictionary containing storage options for connecting to the S3 bucket
 
     Returns
     -------
-    tag : xr.DataTree
+    tag : xarray.DataTree
         The tag
-    tag_log : xr.Dataset
+    tag_log : xarray.Dataset
         The DST data (sliced w.r.t released and recapture dates)
     time_slice : slice or like
         Time interval described by the released and recapture dates
@@ -191,21 +190,22 @@ def update_stations(
 
     Parameters
     ----------
-    tag : xr.DataTree
+    tag : xarray.DataTree
         The tag to update
     station_file_uri : str
-        Path to the `.csv` file
+        Path to the ``.csv`` file
     method : str, default: "merge"
         Operation to perform between the current and the new databases:
-        - `merge` (default): the databases are merged.
-        - `replace`: the current data is replaced by the new one.
 
-    storage_options : dict, default: {}
+        - ``merge`` (default): the databases are merged.
+        - ``replace``: the current data is replaced by the new one.
+
+    storage_options : mapping, default: {}
         Dictionary containing storage options for connecting to the S3 bucket
 
     Returns
     -------
-    tag : xr.DataTree
+    tag : xarray.DataTree
         The updated tag
     """
 
@@ -244,22 +244,22 @@ def plot_tag(
 
     Parameters
     ----------
-    tag : xr.DataTree
+    tag : xarray.DataTree
         The tag
-    tag_log : xr.Dataset
+    tag_log : xarray.Dataset
         The DST data
     save_html : bool, default: False
         Whether to save the plot as a HTML file
     target_root : str, default: "."
-        Root of the folder to save `plot` as a HMTL file `tags.html`.
-        Only used if `save_html=True`
-    storage_options : dict, optional
+        Root of the folder to save ``plot`` as a HMTL file ``tags.html``.
+        Only used if ``save_html=True``
+    storage_options : mapping, optional
         Dictionary containing storage options for connecting to the S3 bucket.
-        Only used if `save_html=True` and that the saving is done on a S3 bucket.
+        Only used if ``save_html=True`` and that the saving is done on a S3 bucket.
 
     Returns
     -------
-    hvplot : hv.Overlay
+    hvplot : holoviews.Overlay
         Interactive plot of the pressure and temperature timeseries of the tag
     """
 
@@ -297,14 +297,14 @@ def _open_copernicus_model(yaml_url: str, chunks: dict = None):
     Parameters
     ----------
     catalog_url : str
-        Path to the `.yaml` file
+        Path to the ``.yaml`` file
     chunks : dict, optional
         How to chunk the data
 
     Returns
     -------
-    model : xr.Dataset
-        A dataset with the (notable) variables `TEMP`, `XE` and `H0`
+    model : xarray.Dataset
+        A dataset with the (notable) variables ``TEMP``, ``XE`` and ``H0``
     """
     cat = intake.open_catalog(yaml_url)
     model = open_copernicus_catalog(cat, chunks)
@@ -312,16 +312,16 @@ def _open_copernicus_model(yaml_url: str, chunks: dict = None):
 
 
 def _open_parquet_model(parquet_url: str):
-    """Open a `.parq` dataset assembled with `virtualzarr`.
+    """Open a ``.parq`` dataset assembled with ``virtualzarr``.
 
     Parameters
     ----------
     parquet_url : str
-        Path to the `.parq` folders
+        Path to the ``.parq`` folders
 
     Returns
     -------
-    model : xr.Dataset
+    model : xarray.Dataset
         The dataset found
     """
 
@@ -357,19 +357,19 @@ def load_model(
     Parameters
     ----------
     uri : str
-        Path to the data. either an intake catalog (thus ending with `.yaml`) or a parquet array (thus ending with `.parq/`)
-    tag_log : xr.Dataset
+        Path to the data. either an intake catalog (thus ending with ``.yaml``) or a parquet array (thus ending with ``.parq/``)
+    tag_log : xarray.Dataset
         The DST data
     time_slice : slice
         Time slice to sample the model from
     bbox : dict
-        Spatial boundaries indexed by their coordinates (i.e, `longitude` and `latitude`) as well as the maximum depth indexed by `max_depth`.
+        Spatial boundaries indexed by their coordinates (i.e, ``longitude`` and ``latitude``) as well as the maximum depth indexed by ``max_depth``.
     chunk_time : int, default: 24
         Chunk size for the time dimension
 
     Returns
     -------
-    model : xr.Dataset
+    model : xarray.Dataset
         The subset data
     """
 
@@ -412,10 +412,10 @@ def compute_diff(
 
     Parameters
     ----------
-    reference_model : xr.Dataset
+    reference_model : xarray.Dataset
         The reference model
-    tag_log : xr.Dataset
-        The DST data. *Hint: given a tag model, it corresponds to `tag["dst"].ds`*
+    tag_log : xarray.Dataset
+        The DST data. *Hint: given a tag model, it corresponds to ``tag["dst"].ds``*
     relative_depth_threshold : float
         Relative (seabed's) depth threshold to deal with cases where the fish's depths are lower than the seabed's depth
     chunk_time : int, default: 24
@@ -425,15 +425,15 @@ def compute_diff(
     save : bool, default: False
         Whether to save the dataset
     target_root : str, default: "."
-        Root of the folder to save the `.zarr` array (under `{target_root}/diff.zarr`)
-        Only used if `save=True`
+        Root of the folder to save the `.zarr` array (under ``{target_root}/diff.zarr``)
+        Only used if ``save=True``
     storage_options : dict, optional
         Dictionary containing storage options for connecting to the S3 bucket.
-        Only used if `save=True`
+        Only used if ``save=True``
 
     Returns
     -------
-    diff : xr.Dataset
+    diff : xarray.Dataset
         The difference between the biologging and field data
     figure : plt.Figure or None
         The plot of `diff`, or None if plot=False
@@ -482,18 +482,18 @@ def compute_diff(
 
 
 def open_diff_dataset(*, target_root: str, storage_options: dict, **kwargs):
-    """Ppen a diff dataset.
+    """Open a diff dataset.
 
     Parameters
     ----------
     target_root : str
-        Path root where to find `diff.zarr`
-    storage_options : dict
-        Additional information for `xarray` to open the `.zarr` array
+        Path root where to find ``diff.zarr``
+    storage_options : mapping
+        Additional information for ``xarray`` to open the ``.zarr`` array
 
     Returns
     -------
-    ds : xr.Dataset
+    ds : xarray.Dataset
         The dataset
     """
 
@@ -528,30 +528,30 @@ def regrid_dataset(
 
     Parameters
     ----------
-    tag_log : xr.Dataset
+    ds : xarray.Dataset
         The DST data
     nside : int
         Tesolution of the HEALPix grid
     min_vertices : int, default: 1
         Minimum number of vertices for a valid transcription
-    rot : Dict[str, Tuple[float, float]], default: {"lat": 0, "lon": 0}
+    rot : mapping of str to tuple of float, default: {"lat": 0, "lon": 0}
         Mapping of angles to rotate the HEALPix grid. It must contain the keys "lon" and "lat"
-    dims : List[str], default: ["cells"]
+    dims : list of str, default: ["cells"]
         The list of the dimensions for the regridding. Either ["x", "y"] or ["cells"]
     plot : bool, default: False
         Whether to return a plot of the dataset
     save : bool, default: False
         Whether to save the dataset
     target_root : str, default: "."
-        Root of the folder to save the `.zarr` array (under `{target_root}/diff-regridded.zarr`).
-        Only used if `save=True`
-    storage_options : dict, optional
+        Root of the folder to save the ``.zarr`` array (under ``{target_root}/diff-regridded.zarr``).
+        Only used if ``save=True``
+    storage_options : mapping, optional
         Dictionary containing storage options for connecting to the S3 bucket.
-        Only used if `save=True`
+        Only used if ``save=True``
 
     Returns
     -------
-    reshaped : xr.Dataset
+    reshaped : xarray.Dataset
         HEALPix version of `ds`
     figure : plt.Figure or None
         The plot of `reshaped`, or None if plot=False
@@ -615,16 +615,16 @@ def compute_emission_pdf(
 
     Parameters
     ----------
-    diff_ds : xr.Dataset
-        A dataset that must have the variables `diff` and `ocean_mask`
-    events_ds : xr.Dataset
-        The tagging events. It must have the coordinate `event_name` and values `release` and `fish_death`.
-        *Hint: given a tag model, it corresponds to `tag["tagging_events"].ds`*
+    diff_ds : xarray.Dataset
+        A dataset that must have the variables ``diff`` and ``ocean_mask``
+    events_ds : xarray.Dataset
+        The tagging events. It must have the coordinate ``event_name`` and values ``release`` and ``fish_death``.
+        *Hint: given a tag model, it corresponds to ``tag["tagging_events"].ds``*
     differences_std : float
-        Standard deviation that is applied to the data (passed to `scipy.stats.norm.pdf`). It'd express the estimated certainty of the field of difference
+        Standard deviation that is applied to the data (passed to ``scipy.stats.norm.pdf``). It'd express the estimated certainty of the field of difference
     recapture_std : float
         Covariance for the recapture event. It should reflect the certainty of the final recapture area
-    dims : List[str], default: ["cells"]
+    dims : list of str, default: ["cells"]
         Spatial dimensions. Either ["x", "y"] or ["cells"]
     chunk_time : int, default: 24
         Chunk size for the time dimension
@@ -633,15 +633,15 @@ def compute_emission_pdf(
     save : bool, default: False
         Whether to save the dataset
     target_root : str, default: "."
-        Root of the folder to save the `.zarr` array (under `{target_root}/emission.zarr`).
-        Only used if `save=True`
-    storage_options : dict, optional
+        Root of the folder to save the `.zarr` array (under ``{target_root}/emission.zarr``).
+        Only used if ``save=True``
+    storage_options : mapping, optional
         Dictionary containing storage options for connecting to the S3 bucket.
-        Only used if `save=True`
+        Only used if ``save=True``
 
     Returns
     -------
-    emission_pdf : xr.Dataset
+    emission_pdf : xarray.Dataset
         The emission pdf
     figure : plt.Figure or None
         The plot of `emission_pdf`, or None if plot=False
@@ -748,33 +748,33 @@ def compute_acoustic_pdf(
 
     Parameters
     ----------
-    emission_ds : xr.Dataset
-        A dataset that must have the variables `time`, `mask` and `cell_ids`
-    tag : xr.DataTree
-        The tag data. It must have the datasets `acoustic` and `stations`
+    emission_ds : xarray.Dataset
+        A dataset that must have the variables ``time``, ``mask`` and ``cell_ids``
+    tag : xarray.DataTree
+        The tag data. It must have the datasets ``acoustic`` and ``stations``
     receiver_buffer : pint.Quantity
         Maximum allowed detection distance for acoustic receivers
     chunk_time : int, default: 24
         Chunk size for the time dimension
-    dims : List[str], default: ["cells"]
+    dims : list of str, default: ["cells"]
         The list of the dimensions. Either ["x", "y"] or ["cells"]
     plot : bool, default: False
         Whether to return a plot of the dataset
     save : bool, default: False
         Whether to save the dataset
     target_root : str, default: "."
-        Root of the folder to save the `.zarr` array (under `{target_root}/acoustic.zarr`).
-        Only used if `save=True`
-    storage_options : dict, optional
+        Root of the folder to save the ``.zarr`` array (under ``{target_root}/acoustic.zarr``).
+        Only used if ``save=True``
+    storage_options : mapping, optional
         Dictionary containing storage options for connecting to the S3 bucket.
         Only used if `save=True`
 
     Returns
     -------
-    acoustic_pdf : xr.Dataset
+    acoustic_pdf : xarray.Dataset
         The acoustic emission pdf
     figure : plt.Figure or None
-        The plot of `acoustic_pdf`, or None if plot=False
+        The plot of `acoustic_pdf`, or None if ``plot=False``
 
     """
 
@@ -831,13 +831,13 @@ def combine_pdfs(
 
     Parameters
     ----------
-    emission_ds : xr.Dataset
+    emission_ds : xarray.Dataset
         Dataset of emission probabilities
-    acoustic_ds : xr.Dataset
+    acoustic_ds : xarray.Dataset
         Dataset of acoustic probabilities
-    chunks : dict
+    chunks : mapping
         How to chunk the data
-    dims : dict, optional
+    dims : mapping, optional
         Spatial dimensions to transpose the combined dataset. Relevant in case of a 2D, such as ["x", "y"] or ["y", "x"]
     plot : bool, default: False
         Whether to plot the sum of the distributions along the time dimension.
@@ -845,9 +845,9 @@ def combine_pdfs(
 
     Returns
     -------
-    combined : xr.Dataset
+    combined : xarray.Dataset
         The combined pdf
-    figure : plt.Figure, or None if `plot=False`
+    figure : plt.Figure, or None if ``plot=False``
     """
     spatial_dims = [dim for dim in acoustic_ds.dims if dim != "time"]
     merged = emission_ds.merge(acoustic_ds)
@@ -970,7 +970,7 @@ def optimize_pdf(
 
     Parameters
     ----------
-    ds : xr.Dataset
+    ds : xarray.Dataset
         Dataset of emission probabilities
     earth_radius : pint.Quantity
         Radius of the Earth used for distance calculations
@@ -982,16 +982,16 @@ def optimize_pdf(
         Maximum fish's velocity
     tolerance : float
         Tolerance level for the optimised parameter search computation
-    dims : List[str], default: ["cells"]
+    dims : list of str, default: ["cells"]
         The list of the dimensions. Either ["x", "y"] or ["cells"]
     save_parameters : bool, default: False
-        Whether to save the results under `{target_root}/parameters.json`
+        Whether to save the results under ``{target_root}/parameters.json``
     target_root : str, default: "."
-        Root of the folder to save the results as a json file `parameters.json`
-        Only used if `save_parameters=True`
+        Root of the folder to save the results as a json file ``parameters.json``
+        Only used if ``save_parameters=True``
     storage_options : dict, optional
         Dictionary containing storage options for connecting to the S3 bucket.
-        Only used if `save_parameters=True` and that the saving is done on a S3 bucket.
+        Only used if ``save_parameters=True`` and that the saving is done on a S3 bucket.
 
     Returns
     -------
@@ -1052,32 +1052,36 @@ def predict_positions(
     **kwargs,
 ):
     """High-level helper function for predicting fish's positions and generating the consequent trajectories.
-    It futhermore saves the latter under `states.zarr` and `trajectories.parq`.
+    It futhermore saves the latter under ``states.zarr`` and ``trajectories.parq``.
 
     .. warning::
-        `target_root` must not end with "/".
+        ``target_root`` must not end with "/".
 
     Parameters
     ----------
     target_root : str
-        Path to a folder that must contain a folder `combined.zarr` and the file `parameters.json`
+        Path to a folder that must contain a folder ``combined.zarr`` and the file ``parameters.json``
     storage_options : dict
-        Additional information for `xarray` to open the `.zarr` array
+        Additional information for ``xarray`` to open the ``.zarr`` array
     chunks : dict
-        Chunk size to load the xr.Dataset `combined.zarr`
-    track_modes : list[str], default: ["mean", "mode"]
-        Options for decoding trajectories. See `pangeo_fish.hmm.estimator.EagerEstimator.decode`
-    additional_track_quantities : list[str], default: ["speed", "distance"]
-        Additional quantities to compute from the decoded tracks. See `pangeo_fish.hmm.estimator.EagerEstimator.decode`
+        Chunk size to load the xarray.Dataset ``combined.zarr``
+    track_modes : list of str, default: ["mean", "mode"]
+        Options for decoding trajectories.
+    additional_track_quantities : list of str, default: ["speed", "distance"]
+        Additional quantities to compute from the decoded tracks.
     save : bool, default: True
-        Whether to save the `states` distribution and the trajectories.
+        Whether to save the ``states`` distribution and the trajectories.
 
     Returns
     -------
-    states : xr.Dataset
+    states : xarray.Dataset
         A geolocation model, i.e., positional temporal probabilities
-    trajectories : TrajectoryCollection
+    trajectories : movingpandas.TrajectoryCollection
         The tracks decoded from `states`
+
+    See Also
+    --------
+    pangeo_fish.hmm.estimator.EagerEstimator.decode
     """
 
     # loads the normalized .zarr array
@@ -1149,22 +1153,22 @@ def plot_trajectories(
     Optionally, the plot can be saved as a HTML file.
 
     .. warning::
-        `target_root` must not end with "/".
+        ``target_root`` must not end with "/".
 
     Parameters
     ----------
     target_root : str
-        Path to a folder that must contain a trajectory collection `trajectories.parq`
-    track_modes : list[str]
+        Path to a folder that must contain a trajectory collection ``trajectories.parq``
+    track_modes : list of str
         Names of the tracks
     storage_options : dict
-        Additional information for `xarray` to open the `.zarr` array
+        Additional information for ``xarray`` to open the ``.zarr`` array
     save_html : bool, default: True
-        Whether to save the plot (under `{target_root}/trajectories.html`)
+        Whether to save the plot (under ``{target_root}/trajectories.html``)
 
     Returns
     -------
-    plot : hv.Layout
+    plot : holoviews.Layout
         Interactive plot of the trajectories
     """
 
@@ -1196,32 +1200,32 @@ def plot_trajectories(
 def open_distributions(
     *, target_root: str, storage_options: dict, chunks: dict, chunk_time=24, **kwargs
 ):
-    """Load and merge the `emission` and `states` probability distributions into a single dataset.
+    """Load and merge the ``emission`` and ``states`` probability distributions into a single dataset.
 
     .. warning::
         Since this function is assumed to be used for visualization and rendering tasks,\
-        and that only 2D-indexed data is currently supported by `pangeo-fish`, **the dataset returned is regridded to 2D.**
+        and that only 2D-indexed data is currently supported by ``pangeo-fish``, **the dataset returned is regridded to 2D.**
 
     Parameters
     ----------
     target_root : str
-        Path to a folder that must contain the `combined.zarr` and `states.zarr` files.
+        Path to a folder that must contain the ``combined.zarr`` and ``states.zarr`` files.
         **Must not end with "/".**
     storage_options : dict
-        Additional information for `xarray` to open the `.zarr` array
+        Additional information for ``xarray`` to open the ``.zarr`` array
     chunks : dict
-        Mapping of the chunk sizes for each dimension of the xr.Datasets to load: namely, the `.zarr` arrays `combined` and `states`
+        Mapping of the chunk sizes for each dimension of the xarray.Datasets to load: namely, the ``.zarr`` arrays ``combined`` and ``states``
     chunk_time : int, default: 24
         Chunk size of the dimension "time" to use to chunk the result
 
     Returns
     -------
-    data : xr.Dataset
+    data : xarray.Dataset
         The merged and cleaned dataset, 2D-indexed
 
     See Also
     --------
-    `helpers.plot_distributions()` and `helpers.render_distributions()`.
+    pangeo_fish.helpers.plot_distributions and pangeo_fish.helpers.render_distributions.
     """
 
     emission = (
@@ -1251,27 +1255,30 @@ def open_distributions(
         data = to_healpix(data)
         data = regrid_to_2d(data)
 
-    data = data.assign_coords(longitude=((data["longitude"] + 180) % 360 - 180))
+    data = data.assign_coords(longitude=center_longitude(data["longitude"], center=0))
     data = data.chunk({d: -1 if d != "time" else chunk_time for d in data.dims})
 
     return data
 
 
 def plot_distributions(*, data: xr.Dataset, bbox=None, **kwargs):
-    """Plot an interactive visualization of dataset resulting from the merging of `emission` and the `states` distributions.
-    See `pangeo_fish.helpers.open_distributions()`.
+    """Plot an interactive visualization of dataset resulting from the merging of ``emission`` and the ``states`` distributions.
 
     Parameters
     ----------
-    data : xr.Dataset
-        A dataset that contains the `emission` and `states` variables
-    bbox : dict[str, tuple[float, float]], optional
+    data : xarray.Dataset
+        A dataset that contains the ``emission`` and ``states`` variables
+    bbox : mapping of str to tuple of float, optional
         The spatial boundaries of the area of interest. Must have the keys "longitude" and "latitude".
 
     Returns
     -------
-    plot : hv.Layout
-        Interactive plot of the `states` and `emission` distributions
+    plot : holoviews.Layout
+        Interactive plot of the ``states`` and ``emission`` distributions
+
+    See Also
+    --------
+    pangeo_fish.helpers.open_distributions.
     """
 
     # TODO: adding coastlines reverts the xlim / ylim arguments
@@ -1287,8 +1294,8 @@ def render_frames(*, ds: xr.Dataset, time_slice: slice = None, **kwargs):
 
     Parameters
     ----------
-    ds : xr.Dataset
-        A dataset which the `emission` and `states` variables
+    ds : xarray.Dataset
+        A dataset which the ``emission`` and ``states`` variables
     time_slice : slice, default: None
         Timesteps to render. If not provided, all timesteps are rendered (not recommended)
 
@@ -1298,9 +1305,9 @@ def render_frames(*, ds: xr.Dataset, time_slice: slice = None, **kwargs):
         Nothing is returned
 
     Other Parameters
-    ---------------
+    ----------------
     kwargs : dict
-        Additional arguments passed to `pangeo-fish.visualization.render_frame()`.
+        Additional arguments passed to pangeo_fish.visualization.render_frame.
         See its documentation for more information.
     """
 
@@ -1362,15 +1369,14 @@ def render_distributions(
     storage_options: dict = None,
     **kwargs,
 ):
-    """Render a video of a dataset resulting from the merging of `emission` and the `states` distributions.
-    See `pangeo_fish.helpers.open_distributions()`.
+    """Render a video of a dataset resulting from the merging of ``emission`` and the ``states`` distributions.
 
     Parameters
     ----------
-    data : xr.Dataset
-        A dataset that contains the `emission` and `states` variables
+    data : xarray.Dataset
+        A dataset that contains the ``emission`` and ``states`` variables
     time_step : int, default: 3
-        Time step to sample data from `data`
+        Time step to sample data from ``data``
     frames_dir : str, default: "frames"
         Name of the folder to save the images to
     output_path : str, default: "states"
@@ -1390,6 +1396,10 @@ def render_distributions(
     -------
     video_fn : str
         Local path to the video
+
+    See Also
+    --------
+    pangeo_fish.helpers.open_distributions.
     """
 
     # os.path.split(.) removes the "/"!
