@@ -169,10 +169,10 @@ def prepare_dataset(dataset, chunks=None, bbox=None, names=None):
     chunks : mapping, optional
         The initial chunk size. Should be multiples of the on-disk chunk sizes. By
         default, the chunksizes are ``{"lat": -1, "lon": -1, "depth": 11, "time": 8}``
-    bbox : dict[str, tuple[float, float]], optional
+    bbox : mapping of str to tuple of float, optional
         The spatial boundaries of the area of interest. Shoud have the keys "longitude" and "latitude".
         If provided, it checks whether there is data available within the dataset for the area.
-    names : dict[str, str], optional
+    names : mapping of str to str, optional
         A dictionary that maps the three variables that correspond to the "TEMP", "XE" and "H0" data. By
         default, the names align data from the Copernicus Marine Service with ``{"thetao": "TEMP", "zos": "XE", "deptho": "H0"}``.
 
@@ -404,7 +404,7 @@ def open_copernicus_zarr(
     Returns
     -------
     xarray.Dataset
-        Dataset containing retrieved data.
+        xarray.Dataset containing retrieved data.
     """
     # Add here datas which are valid.
 

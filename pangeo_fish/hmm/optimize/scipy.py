@@ -36,7 +36,7 @@ class GridSearch:
 
         Parameters
         ----------
-        X : Dataset
+        X : xarray.Dataset
             The input data.
 
         Returns
@@ -95,7 +95,7 @@ class EagerBoundsSearch:
 
         Parameters
         ----------
-        X : Dataset
+        X : xarray.Dataset
             The input data.
 
         Returns
@@ -147,7 +147,7 @@ class TargetBoundsSearch:
 
         Parameters
         ----------
-        X : Dataset
+        X : xarray.Dataset
             The input data.
 
         Returns

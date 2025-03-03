@@ -16,7 +16,7 @@ def normal(samples, mean, std, *, dims):
 
     Parameters
     ----------
-    samples : DataArray, Variable, or array-like
+    samples : xarray.DataArray, Variable, or array-like
         The samples to compute the pdf from
     mean : float
         The mean of the distribution
@@ -27,7 +27,7 @@ def normal(samples, mean, std, *, dims):
 
     Returns
     -------
-    pdf : DataArray
+    pdf : xarray.DataArray
         The computed pdf
     """
 

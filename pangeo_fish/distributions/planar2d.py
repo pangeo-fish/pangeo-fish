@@ -24,11 +24,11 @@ def normal_at(grid, *, pos, cov, axes=["X", "Y"], normalize=False):
 
     Parameters
     ----------
-    grid : Dataset
+    grid : xarray.Dataset
         The reference grid.
-    pos : Dataset
+    pos : xarray.Dataset
         The position of the mean of the distribution
-    cov : DataArray
+    cov : xarray.DataArray
         The covariance matrix of the distribution. Has to have a ``i`` dimension
         for variances and ``i`` and ``j`` for covariances. Both need to have ``axes``
         as coordinate values.
@@ -102,9 +102,9 @@ def delta_at(grid, *, pos, method="nearest", axes=["X", "Y"]):
 
     Parameters
     ----------
-    grid : Dataset
+    grid : xarray.Dataset
         The reference grid.
-    pos : Dataset
+    pos : xarray.Dataset
         The position of the peak.
     axes : list of hashable, default: ["X", "Y"]
         The coordinates to use. Can be anything that ``cf-xarray``'s ``.cf`` accessor understands.
@@ -118,7 +118,7 @@ def delta_at(grid, *, pos, method="nearest", axes=["X", "Y"]):
 
     Returns
     -------
-    DataArray
+    xarray.DataArray
         The delta function
 
     See Also

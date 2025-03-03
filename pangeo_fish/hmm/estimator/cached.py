@@ -149,7 +149,7 @@ class CachedEstimator:
 
         Parameters
         ----------
-        X : Dataset
+        X : xarray.Dataset
             The emission probability maps. The dataset should contain these variables:
                 - ``initial``, the initial probability map
                 - ``pdf``, the emission probabilities
@@ -165,7 +165,7 @@ class CachedEstimator:
 
         Returns
         -------
-        state_probabilities : DataArray
+        state_probabilities : xarray.DataArray
             The computed state probabilities
 
         Notes
@@ -197,7 +197,7 @@ class CachedEstimator:
 
         Parameters
         ----------
-        X : Dataset
+        X : xarray.Dataset
             The emission probability maps. The dataset should contain these variables:
                 - ``pdf``, the emission probabilities
                 - ``mask``, a mask to select ocean pixels
@@ -241,14 +241,14 @@ class CachedEstimator:
 
         Parameters
         ----------
-        X : Dataset
+        X : xarray.Dataset
             The emission probability maps. The dataset should contain these variables:
                 - ``pdf``, the emission probabilities
                 - ``mask``, a mask to select ocean pixels
                 - ``initial``, the initial probability map
                 - ``final``, the final probability map (optional)
 
-        states : Dataset, optional
+        states : xarray.Dataset, optional
             The precomputed state probability maps. The dataset should contain these variables:
                 - ``states``, the state probabilities
 

@@ -123,7 +123,7 @@ class EagerEstimator:
 
         Parameters
         ----------
-        X : Dataset
+        X : xarray.Dataset
             The emission probability maps. The dataset should contain these variables:
                 - ``initial``, the initial probability map
                 - ``pdf``, the emission probabilities
@@ -137,7 +137,7 @@ class EagerEstimator:
 
         Returns
         -------
-        state_probabilities : DataArray
+        state_probabilities : xarray.DataArray
             The computed state probabilities
         """
         state = self._forward_backward_algorithm(
@@ -156,7 +156,7 @@ class EagerEstimator:
 
         Parameters
         ----------
-        X : Dataset
+        X : xarray.Dataset
             The emission probability maps. The dataset should contain these variables:
                 - ``pdf``, the emission probabilities
                 - ``mask``, a mask to select ocean pixels
@@ -191,14 +191,14 @@ class EagerEstimator:
 
         Parameters
         ----------
-        X : Dataset
+        X : xarray.Dataset
             The emission probability maps. The dataset should contain these variables:
                 - `pdf`, the emission probabilities
                 - `mask`, a mask to select ocean pixels
                 - `initial`, the initial probability map
                 - `final`, the final probability map (optional)
 
-        states : Dataset, optional
+        states : xarray.Dataset, optional
             The precomputed state probability maps. The dataset should contain these variables:
                 - `states`, the state probabilities
         mode : str or list of str, default: "viterbi"

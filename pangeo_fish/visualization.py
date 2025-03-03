@@ -22,15 +22,15 @@ def create_single_frame(ds: xr.Dataset, figure, **kwargs):
 
     Parameters
     ----------
-    ds : xr.Dataset
+    ds : xarray.Dataset
         A **timeless** dataset, i.e., whose dimensions are ``[x, y]``, that has the ``emission`` and ``states`` variables.
     figure : A matplotlib Figure
         The figure to which add the axes and plots
-    xlim : tuple[float, float], optional
+    xlim : tuple of float, optional
         The longitude interval to plot
-    ylim : tuple[float, float], optional
+    ylim : tuple of float, optional
         The latitude interval to plot
-    vmax : dict[str, float], optional
+    vmax : mapping of str to float, optional
         Mapping of the maximum values for coloring the plots, indexed by "emission" and "states"
 
     Returns
@@ -167,7 +167,7 @@ def render_frame(ds: xr.Dataset, *args, figsize=(14, 8), frames_dir=".", **kwarg
 
     Returns
     -------
-    ds : xr.Dataset
+    ds : xarray.Dataset
         The input dataset (see ``dask.map_blocks()``)
     """
 

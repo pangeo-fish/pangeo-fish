@@ -43,16 +43,16 @@ def astronomic_to_cartesian(theta, phi, dim="receiver_id"):
 
     Parameters
     ----------
-    theta : DataArray
+    theta : xarray.DataArray
         astronomic colatitude, in degrees
-    phi : DataArray
+    phi : xarray.DataArray
         astronomic longitude, in degrees
     dim : hashable
         Name of the dimension
 
     Returns
     -------
-    cartesian : Dataset
+    cartesian : xarray.Dataset
         Cartesian coordinates
 
     See Also
@@ -78,12 +78,12 @@ def astronomic_to_cell_ids(nside, phi, theta):
     ----------
     nside : int
         Healpix resolution level
-    phi, theta : xr.DataArray
+    phi, theta ; xarray.DataArray
         astronomic longitude and colatitude, in degrees
 
     Returns
     -------
-    cell_ids : xr.DataArray
+    cell_ids ; xarray.DataArray
         The computed cell ids
     """
     phi_, theta_ = dask.compute(phi, theta)
@@ -139,9 +139,9 @@ class HealpyGridInfo:
         HealPix grid resolution
     rot : dict of str to float
         Rotation of the healpix sphere.
-    coords : xr.Dataset
+    coords : xarray.Dataset
         Unstructured grid coordinates: latitude, longitude, cell ids.
-    indices : xr.DataArray
+    indices ; xarray.DataArray
         Indices that can be used to reorder to a flattened 2D healpy grid
     """
 
@@ -267,7 +267,7 @@ class HealpyRegridder:
 
     Parameters
     ----------
-    input_grid : xr.Dataset
+    input_grid : xarray.Dataset
         The input dataset. For now, it has to have the ``"latitude"`` and ``"longitude"`` coordinates.
     output_grid : HealpyGridInfo
         The target grid, containing healpix parameters like ``nside`` and ``rot``.
@@ -337,12 +337,12 @@ class HealpyRegridder:
 
         Parameters
         ----------
-        ds : xr.Dataset
+        ds : xarray.Dataset
             The input dataset.
 
         Returns
         -------
-        regridded : xr.Dataset
+        regridded : xarray.Dataset
             The regridded dataset
         """
         # based on https://github.com/pangeo-data/xESMF/issues/222#issuecomment-1524041837
