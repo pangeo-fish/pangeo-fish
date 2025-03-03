@@ -18,7 +18,7 @@ import pint
 import s3fs
 import tqdm
 import xarray as xr
-import xdggs
+import xdggs  # noqa: F401
 from matplotlib.figure import Figure
 from toolz.dicttoolz import valfilter
 from toolz.functoolz import curry  # to change
@@ -133,16 +133,17 @@ def _update_params_dict(factory, params: dict):
 
 
 def to_healpix(ds: xr.Dataset) -> xr.Dataset:
-    """Helper that loads a Dataset as a HEALPix grid (indexed by "cell_ids")."""
+    """Helper that loads a Dataset as a HEALPix grid (indexed by ``"cell_ids"``)."""
 
-    ds["cell_ids"].attrs["grid_name"] = "healpix"
-    attrs_to_keep = ["level", "grid_name"]
-    ds["cell_ids"].attrs = {
-        key: value
-        for (key, value) in ds["cell_ids"].attrs.items()
-        if key in attrs_to_keep
-    }
-    return ds.pipe(xdggs.decode)
+    attrs_to_keep = ["level", "indexing_scheme"]
+    cell_ids_attrs = ds["cell_ids"].attrs
+
+    attrs = {k: v for (k, v) in cell_ids_attrs.items() if k in attrs_to_keep}
+
+    if "indexing_scheme" not in attrs.keys():
+        attrs["indexing_scheme"] = "nested"
+
+    return ds.dggs.decode({"grid_name": "healpix"} | attrs)
 
 
 def regrid_to_2d(ds: xr.Dataset):
