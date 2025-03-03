@@ -53,6 +53,7 @@ nbsphinx_execute = "never"
 templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", ".ipynb_checkpoints"]
 remove_from_toctrees = ["generated/*"]
+suppress_warnings = ["config.cache"]
 
 html_theme = "sphinx_book_theme"
 pygments_style = "sphinx"
