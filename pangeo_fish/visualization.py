@@ -18,12 +18,12 @@ def filter_by_states(ds):
 
 
 def create_single_frame(ds: xr.Dataset, figure, **kwargs):
-    """Default function for plotting a snapshot (i.e, **timeless** data) of the `emission` and `states` distributions.
+    """Default function for plotting a snapshot (i.e, **timeless** data) of the ``emission`` and ``states`` distributions.
 
     Parameters
     ----------
     ds : xr.Dataset
-        A **timeless** dataset, i.e., whose dimensions are `[x, y]`, that has the `emission` and `states` variables.
+        A **timeless** dataset, i.e., whose dimensions are ``[x, y]``, that has the ``emission`` and ``states`` variables.
     figure : A matplotlib Figure
         The figure to which add the axes and plots
     xlim : tuple[float, float], optional
@@ -149,26 +149,26 @@ def create_single_frame(ds: xr.Dataset, figure, **kwargs):
 def render_frame(ds: xr.Dataset, *args, figsize=(14, 8), frames_dir=".", **kwargs):
     """
     .. warning::
-        Designed to be used with `dask.map_blocks()`.
-        As such, `ds` must have the following variables:
-        - `time_index`, representing the time index. It is used for naming the image (`.png`)
-        - `emission` and `states`, the data to plot
+        Designed to be used with ``dask.map_blocks()``.
+        As such, ``ds`` must have the following variables:
+        - ``time_index``, representing the time index. It is used for naming the image (``.png``)
+        - ``emission`` and ``states``, the data to plot
 
 
-    Used along with `dask.map_blocks()`, it will call create_single_frame() for each timestep,\
-    and save the consequent images under `{frames_dir}/frame_XXXXX.png`.
+    Used along with ``dask.map_blocks()``, it will call create_single_frame() for each timestep,\
+    and save the consequent images under ``{frames_dir}/frame_XXXXX.png``.
 
     Parameters
     ----------
     frames_dir : str, default: "."
         Name of the folder to save the frame
-    figsize : tuple[float, float], default: (14, 8)
+    figsize : tuple of float, default: (14, 8)
         Name of the folder to save the frame
 
     Returns
     -------
     ds : xr.Dataset
-        The input dataset (see `dask.map_blocks()`)
+        The input dataset (see ``dask.map_blocks()``)
     """
 
     figure = plt.figure(figsize=figsize)  # figsize=(12, 6)
@@ -213,7 +213,7 @@ def plot_map(
     cmap="cmo.amp",
     **kwargs,
 ):
-    """wrapper around `DataArray.hvplot.quadmesh`, with different defaults"""
+    """Wrapper around ``DataArray.hvplot.quadmesh``, with different defaults"""
     return arr.hvplot.quadmesh(
         x=x,
         y=y,

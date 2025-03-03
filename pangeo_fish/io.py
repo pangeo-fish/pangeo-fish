@@ -38,17 +38,17 @@ def read_stations(f):
 
 
 def open_tag(root, name, storage_options=None):
-    """open a tag
+    """Open a tag
 
     Parameters
     ----------
     root : str or fsspec.FSMap
-        The tag root. If not a mapper object, `storage_options` need
+        The tag root. If not a mapper object, ``storage_options`` need
         to contain the necessary access options.
     name : str
         The DST name of the tag.
     storage_options : mapping, optional
-        The storage options required to open the mapper. Only used if `root` is a url.
+        The storage options required to open the mapper. Only used if ``root`` is a url.
 
     Returns
     -------
@@ -97,7 +97,7 @@ def open_tag(root, name, storage_options=None):
 
 
 def open_copernicus_catalog(cat, chunks=None):
-    """assemble the given intake catalog into a dataset
+    """Assemble the given intake catalog into a dataset
 
     .. warning::
         This will only work for the catalog at https://data-taos.ifremer.fr/references/copernicus.yaml
@@ -108,7 +108,7 @@ def open_copernicus_catalog(cat, chunks=None):
         The pre-opened intake catalog
     chunks : mapping, optional
         The initial chunk size. Should be multiples of the on-disk chunk sizes. By
-        default, the chunksizes are `{"lat": -1, "lon": -1, "depth": 11, "time": 8}`
+        default, the chunksizes are ``{"lat": -1, "lon": -1, "depth": 11, "time": 8}``
 
     Returns
     -------
@@ -271,7 +271,7 @@ def save_trajectories(traj, root, storage_options=None, format="geoparquet"):
 
 
 def read_trajectories(names, root, storage_options=None, format="geoparquet"):
-    """read trajectories from disk
+    """Read trajectories from disk
 
     Parameters
     ----------
@@ -315,10 +315,10 @@ def read_trajectories(names, root, storage_options=None, format="geoparquet"):
 
 
 def save_html_hvplot(plot, filepath, storage_options=None):
-    """save a Holoviews plot to an HTML file either locally or on an S3 bucket.
+    """Save a Holoviews plot to an HTML file either locally or on an S3 bucket.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     plot :
         Holoviews plot object.
     filepath : str
@@ -326,8 +326,8 @@ def save_html_hvplot(plot, filepath, storage_options=None):
     storage_options : (dict, optional)
         Dictionary containing storage options for connecting to the S3 bucket (required if saving to S3).
 
-    Returns:
-    --------
+    Returns
+    -------
     success : bool
         True if the plot was saved successfully, False otherwise.
     message : str
@@ -369,8 +369,8 @@ def open_copernicus_zarr(
         This function is not fully finalized and may require further adjustments.
 
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     name : str
         Name of the dataset to retrieve. Supported models and corresponding frequencies are:
             - "GLOBAL_ANALYSISFORECAST_PHY_001_024" with freq = "D" (daily)

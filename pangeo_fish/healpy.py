@@ -13,7 +13,7 @@ import xarray as xr
 
 
 def geographic_to_astronomic(lat, lon, rot):
-    """transform geographic coordinates to astronomic coordinates
+    """Transform geographic coordinates to astronomic coordinates
 
     Parameters
     ----------
@@ -39,7 +39,7 @@ def geographic_to_astronomic(lat, lon, rot):
 
 
 def astronomic_to_cartesian(theta, phi, dim="receiver_id"):
-    """transform astronomic coordinates to cartesian coordinates
+    """Transform astronomic coordinates to cartesian coordinates
 
     Parameters
     ----------
@@ -131,7 +131,7 @@ def _compute_coords(nside):
 
 @dataclass
 class HealpyGridInfo:
-    """class representing a HealPix grid
+    """Class representing a HealPix grid
 
     Attributes
     ----------
@@ -263,14 +263,14 @@ def _weights_to_sparse(weights):
 
 @dataclass(repr=False)
 class HealpyRegridder:
-    """regrid a dataset to healpy face 0
+    """Regrid a dataset to healpy face 0
 
     Parameters
     ----------
     input_grid : xr.Dataset
-        The input dataset. For now, it has to have the `"latitude"` and `"longitude"` coordinates.
+        The input dataset. For now, it has to have the ``"latitude"`` and ``"longitude"`` coordinates.
     output_grid : HealpyGridInfo
-        The target grid, containing healpix parameters like `nside` and `rot`.
+        The target grid, containing healpix parameters like ``nside`` and ``rot``.
     """
 
     input_grid: xr.Dataset
@@ -331,7 +331,7 @@ class HealpyRegridder:
         )
 
     def regrid_ds(self, ds):
-        """regrid a dataset on the same grid as the input grid
+        """Regrid a dataset on the same grid as the input grid
 
         The regridding method is restricted to linear interpolation so far.
 
@@ -422,7 +422,7 @@ def buffer_points(
     factor=4,
     intersect=False,
 ):
-    """select the cells within a circular buffer around the given positions
+    """Select the cells within a circular buffer around the given positions
 
     Parameters
     ----------
@@ -435,19 +435,19 @@ def buffer_points(
     nside : int
         The resolution of the healpix grid.
     sphere_radius : float, default: 6371000
-        The radius of the underlying sphere, used to convert `radius` to radians. By
+        The radius of the underlying sphere, used to convert ``radius`` to radians. By
         default, this is the standard earth's radius in meters.
     factor : int, default: 4
         The increased resolution for the buffer search.
     intersect : bool, default: False
-        If `False`, select all cells where the center is within the buffer. If `True`,
+        If ``False``, select all cells where the center is within the buffer. If ``True``,
         select cells which intersect the buffer.
 
     Returns
     -------
     masks : xarray.DataArray
-        The masks for each position. The cells within the buffer are `True`, every other
-        cell is set to `False`.
+        The masks for each position. The cells within the buffer are ``True``, every other
+        cell is set to ``False``.
 
     See Also
     --------

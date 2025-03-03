@@ -6,7 +6,7 @@ import numpy as np
 
 
 def score(emission, predictor, initial_probability, mask=None):
-    """score of a single pass (forwards) of the spatial HMM filter
+    """Score of a single pass (forwards) of the spatial HMM filter
 
     Parameters
     ----------
@@ -63,7 +63,7 @@ def score(emission, predictor, initial_probability, mask=None):
 
 
 def forward(emission, predictor, initial_probability, mask=None):
-    """single pass (forwards) of the spatial HMM filter
+    """Single pass (forwards) of the spatial HMM filter
 
     Parameters
     ----------
@@ -124,7 +124,7 @@ def backward(states, predictions, predictor, mask=None):
 
 
 def forward_backward(emission, predictor, initial_probability, mask=None):
-    """double pass (forwards and backwards) of the spatial HMM filter
+    """Double pass (forwards and backwards) of the spatial HMM filter
 
     Parameters
     ----------
@@ -187,7 +187,7 @@ def track(sequence, *, display=False, **kwargs):
 
 
 def _forward_zarr(ingroup, outgroup, predictor, progress=False):
-    """single pass (forwards) of the spatial HMM filter while writing to zarr
+    """Single pass (forwards) of the spatial HMM filter while writing to zarr
 
     Parameters
     ----------
@@ -237,7 +237,7 @@ def _forward_zarr(ingroup, outgroup, predictor, progress=False):
 
 
 def _backward_zarr(ingroup, outgroup, predictor, progress=False):
-    """single pass (backwards) of the spatial HMM filter while writing to zarr
+    """Single pass (backwards) of the spatial HMM filter while writing to zarr
 
     Parameters
     ----------

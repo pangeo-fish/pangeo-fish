@@ -91,7 +91,7 @@ class EagerBoundsSearch:
         self.optimizer_kwargs = optimizer_kwargs
 
     def fit(self, X):
-        """optimize the score of the estimator
+        """Optimize the score of the estimator
 
         Parameters
         ----------
@@ -143,7 +143,7 @@ class TargetBoundsSearch:
         self.x0 = x0
 
     def fit(self, X):
-        """optimize the score of the estimator
+        """Optimize the score of the estimator
 
         Parameters
         ----------

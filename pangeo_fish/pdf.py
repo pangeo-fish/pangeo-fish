@@ -12,7 +12,7 @@ from pangeo_fish.utils import _detect_spatial_dims, normalize
 # also try: multivariate_normal, gaussian_kde
 # TODO: use numba to vectorize (using `guvectorize`?)
 def normal(samples, mean, std, *, dims):
-    """compute the combined pdf of independent layers
+    """Compute the combined pdf of independent layers
 
     Parameters
     ----------

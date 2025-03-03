@@ -20,7 +20,7 @@ def create_covariances(cov, coord_names):
 
 
 def normal_at(grid, *, pos, cov, axes=["X", "Y"], normalize=False):
-    """multivariate normal distribution
+    """Multivariate normal distribution
 
     Parameters
     ----------
@@ -29,11 +29,11 @@ def normal_at(grid, *, pos, cov, axes=["X", "Y"], normalize=False):
     pos : Dataset
         The position of the mean of the distribution
     cov : DataArray
-        The covariance matrix of the distribution. Has to have a `i` dimension
-        for variances and `i` and `j` for covariances. Both need to have `axes`
+        The covariance matrix of the distribution. Has to have a ``i`` dimension
+        for variances and ``i`` and ``j`` for covariances. Both need to have ``axes``
         as coordinate values.
     axes : list of hashable, default: ["X", "Y"]
-        The coordinates to use. Can be anything that `cf-xarray`'s `.cf` accessor understands.
+        The coordinates to use. Can be anything that ``cf-xarray``'s ``.cf`` accessor understands.
     normalize : bool, default: False
         Normalize the distribution before returning.
     """
@@ -98,7 +98,7 @@ def zeros(coords, dtype=float):
 
 
 def delta_at(grid, *, pos, method="nearest", axes=["X", "Y"]):
-    """spatial delta function / Dirac distribution
+    """Spatial delta function / Dirac distribution
 
     Parameters
     ----------
@@ -107,14 +107,14 @@ def delta_at(grid, *, pos, method="nearest", axes=["X", "Y"]):
     pos : Dataset
         The position of the peak.
     axes : list of hashable, default: ["X", "Y"]
-        The coordinates to use. Can be anything that `cf-xarray`'s `.cf` accessor understands.
+        The coordinates to use. Can be anything that ``cf-xarray``'s ``.cf`` accessor understands.
     method : {"nearest", "point-in-polygon"}, default: "nearest"
         The method to "snap" the position to the grid.
 
         One of:
             - "nearest": search for the nearest grid center (in cartesian space)
                 Uses the coordinate's "nearest" search.
-            - "point-in-polygon": perform a point-in-polygon search on the cell bounds using `xvec`.
+            - "point-in-polygon": perform a point-in-polygon search on the cell bounds using ``xvec``.
 
     Returns
     -------
