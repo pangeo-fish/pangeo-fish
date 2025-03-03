@@ -17,7 +17,7 @@ def tz_convert(df, timezones):
 
     Parameters
     ----------
-    df : pd.DataFrame
+    df : pandas.DataFrame
         The dataframe.
     timezones : mapping of str to str
         The time zones to convert to per column.
@@ -284,7 +284,7 @@ def read_trajectories(names, root, storage_options=None, format="geoparquet"):
 
     Returns
     -------
-    mpd.TrajectoryCollection
+    movingpandas.TrajectoryCollection
         The read tracks as a collection.
     """
 
@@ -319,11 +319,11 @@ def save_html_hvplot(plot, filepath, storage_options=None):
 
     Parameters
     ----------
-    plot :
-        Holoviews plot object.
+    plot : holoviews.core.overlay.NdOverlay or holoviews.element.Element
+        A Holoviews plot object.
     filepath : str
         The file path where the plot HTML file will be saved. If the file path starts with 's3://', the plot will be saved to an S3 bucket.
-    storage_options : (dict, optional)
+    storage_options : dict, optional
         Dictionary containing storage options for connecting to the S3 bucket (required if saving to S3).
 
     Returns

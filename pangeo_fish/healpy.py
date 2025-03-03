@@ -21,7 +21,7 @@ def geographic_to_astronomic(lat, lon, rot):
         geographic latitude, in degrees
     lon : array-like
         geographic longitude, in degrees
-    rot : list-like
+    rot : array-like
         Two element list with the rotation transformation (shift?) used by the grid, in
         degrees
 
@@ -43,9 +43,9 @@ def astronomic_to_cartesian(theta, phi, dim="receiver_id"):
 
     Parameters
     ----------
-    theta : xarray.DataArray
+    theta : array-like
         astronomic colatitude, in degrees
-    phi : xarray.DataArray
+    phi : array-like
         astronomic longitude, in degrees
     dim : hashable
         Name of the dimension
@@ -78,12 +78,12 @@ def astronomic_to_cell_ids(nside, phi, theta):
     ----------
     nside : int
         Healpix resolution level
-    phi, theta ; xarray.DataArray
+    phi, theta : array-like
         astronomic longitude and colatitude, in degrees
 
     Returns
     -------
-    cell_ids ; xarray.DataArray
+    cell_ids : xarray.DataArray
         The computed cell ids
     """
     phi_, theta_ = dask.compute(phi, theta)
