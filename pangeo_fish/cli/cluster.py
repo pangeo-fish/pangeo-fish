@@ -16,6 +16,7 @@ def create_cluster(spec, *, scale=None, additional_kwargs=None):
         - the scheduler address of a running cluster: ``tcp://<ip>:<port>``
         - ``dask-jobqueue:<path-to-spec-file>``
         - ``dask-hpcconfig:<name>``
+
     scale : int or mapping, optional
         Scale the cluster after creation. Not allowed with scheduler addresses.
     additional_kwargs : mapping, optional

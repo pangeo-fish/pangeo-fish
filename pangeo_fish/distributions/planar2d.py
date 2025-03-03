@@ -110,11 +110,11 @@ def delta_at(grid, *, pos, method="nearest", axes=["X", "Y"]):
         The coordinates to use. Can be anything that ``cf-xarray``'s ``.cf`` accessor understands.
     method : {"nearest", "point-in-polygon"}, default: "nearest"
         The method to "snap" the position to the grid.
-
         One of:
-            - "nearest": search for the nearest grid center (in cartesian space)
-                Uses the coordinate's "nearest" search.
-            - "point-in-polygon": perform a point-in-polygon search on the cell bounds using ``xvec``.
+
+        - "nearest": search for the nearest grid center (in cartesian space)
+            Uses the coordinate's "nearest" search.
+        - "point-in-polygon": perform a point-in-polygon search on the cell bounds using ``xvec``.
 
     Returns
     -------

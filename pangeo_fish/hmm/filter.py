@@ -3,6 +3,7 @@ import warnings
 import dask
 import dask.array as da
 import numpy as np
+import zarr  # noqa: F401
 
 
 def score(emission, predictor, initial_probability, mask=None):
@@ -193,9 +194,11 @@ def _forward_zarr(ingroup, outgroup, predictor, progress=False):
     ----------
     ingroup: zarr.Group
         zarr group containing:
+
         - the probability density function of the observations (emission probabilities)
         - the initial probability
         - (optionally) a mask to apply after each step. No shadowing yet.
+
     outgroup : zarr.Group
         Zarr object to write the result to.
     predictor : Predictor
@@ -243,9 +246,11 @@ def _backward_zarr(ingroup, outgroup, predictor, progress=False):
     ----------
     ingroup: zarr.Group
         zarr group containing:
+
         - the probability density function of the observations (emission probabilities)
         - the initial probability
         - (optionally) a mask to apply after each step. No shadowing yet.
+
     outgroup : zarr.Group
         Zarr object to write the result to.
     predictor: Predictor
