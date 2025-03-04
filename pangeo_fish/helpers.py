@@ -265,16 +265,21 @@ def plot_tag(
         Interactive plot of the pressure and temperature timeseries of the tag
     """
 
+    width = 1000
+    height = 500
+
     plot = (
-        (-tag["dst"].pressure).hvplot(width=1000, height=500, color="blue")
-        * (-tag_log).hvplot.scatter(
-            x="time", y="pressure", color="red", size=5, width=1000, height=500
-        )
+        (-tag["dst"].pressure).hvplot().opts(width=width, height=height, color="blue")
+        * (-tag_log)
+        .pressure.hvplot.scatter(x="time", y="pressure")
+        .opts(color="red", size=5, width=width, height=height)
         * (
-            (tag["dst"].temperature).hvplot(width=1000, height=500, color="blue")
-            * (tag_log).hvplot.scatter(
-                x="time", y="temperature", color="red", size=5, width=1000, height=500
-            )
+            (tag["dst"].temperature)
+            .hvplot()
+            .opts(width=width, height=height, color="blue")
+            * (tag_log)
+            .temperature.hvplot.scatter(x="time", y="temperature")
+            .opts(color="red", size=5, width=width, height=height)
         )
     )  # type: hv.Overlay
     if save_html:
