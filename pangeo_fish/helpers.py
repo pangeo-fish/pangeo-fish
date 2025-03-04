@@ -108,6 +108,11 @@ def _inspect_curry_obj(curried_obj):
     return params
 
 
+def _s3_path_to_str(path: Path):
+    """Helper function that returns a AWS path with the double slashes (which are removed by Path-like objects)."""
+    return re.sub(r"^s3:/([^/])", r"s3://\1", str(path))
+
+
 def _update_params_dict(factory, params: dict):
     """Inspect ``factory`` (assumed to be a curried object) to get its kw/args, and join ``params`` with the kw/args retreived.
 
@@ -291,7 +296,10 @@ def plot_tag(
             # ensure the path is created (if needed) in case of local saving
             if storage_options is None:
                 path_to_html.parent.mkdir(parents=True, exist_ok=True)
-            save_html_hvplot(plot, str(path_to_html), storage_options=storage_options)
+                str_path = str(path_to_html)
+            else:
+                str_path = _s3_path_to_str(path_to_html)
+            save_html_hvplot(plot, str_path, storage_options=storage_options)
         except Exception as e:
             warnings.warn(
                 "An error occurred when saving the Holoview plot of the tag:\n"
@@ -1042,8 +1050,7 @@ def optimize_pdf(
                 path_to_json.parent.mkdir(parents=True, exist_ok=True)
                 str_path_to_json = str(path_to_json)
             else:
-                # using Path object removes the double slashes of the AWS URI
-                str_path_to_json = re.sub(r"^s3:/([^/])", r"s3://\1", str(path_to_json))
+                str_path_to_json = _s3_path_to_str(path_to_json)
             pd.DataFrame.from_dict(params, orient="index").to_json(
                 str_path_to_json, storage_options=storage_options
             )
@@ -1206,7 +1213,10 @@ def plot_trajectories(
         path_to_html = Path(target_root) / "trajectories.html"
         if storage_options is None:
             path_to_html.parent.mkdir(parents=True, exist_ok=True)
-        save_html_hvplot(plot, str(path_to_html), storage_options)
+            str_path = str(path_to_html)
+        else:
+            str_path = _s3_path_to_str(path_to_html)
+        save_html_hvplot(plot, str_path, storage_options)
 
     return plot
 
