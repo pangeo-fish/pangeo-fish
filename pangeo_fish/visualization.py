@@ -4,9 +4,7 @@ import cartopy.crs as ccrs
 import cartopy.feature as cf
 import cmocean  # noqa: F401
 import hvplot.xarray  # noqa: F401
-import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
-import numpy as np
 import xarray as xr
 from shapely.errors import ShapelyDeprecationWarning
 
