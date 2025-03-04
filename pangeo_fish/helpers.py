@@ -181,7 +181,7 @@ def load_tag(*, tag_root: str, tag_name: str, storage_options: dict = None, **kw
 
     # TODO: should we move the input checking lower (i.e. to open_tag())?
     if not tag_root.startswith("s3://"):
-        storage_options = storage_options | {"client_kwargs": None}
+        storage_options = {}
     tag = open_tag(tag_root, tag_name, storage_options)
     time_slice = to_time_slice(tag["tagging_events/time"])
     tag_log = tag["dst"].ds.sel(time=time_slice).assign_attrs({"tag_name": tag_name})
