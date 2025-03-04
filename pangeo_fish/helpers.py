@@ -1,5 +1,6 @@
 import inspect
 import os
+import re
 import sys
 import warnings
 from pathlib import Path
@@ -108,7 +109,7 @@ def _inspect_curry_obj(curried_obj):
 
 
 def _update_params_dict(factory, params: dict):
-    """Inspect ``factory`` (assumed to be a curried object) to get its kw/args and update ``params``.
+    """Inspect ``factory`` (assumed to be a curried object) to get its kw/args, and join ``params`` with the kw/args retreived.
 
     Note that ``params`` is updated with string representations of the arguments retrieved **except ``cell_ids``**.
 
@@ -122,7 +123,7 @@ def _update_params_dict(factory, params: dict):
     Returns
     --------
     params : mapping
-        The updated dictionary
+        A copy of the updated dictionary `params`
     """
 
     kwargs = {
@@ -1024,15 +1025,19 @@ def optimize_pdf(
     )
     optimized = optimizer.fit(ds)
     params = optimized.to_dict()  # type: dict
-    _update_params_dict(factory=predictor_factory, params=params)
+    params = _update_params_dict(factory=predictor_factory, params=params)
 
     if save_parameters:
         try:
             path_to_json = Path(target_root) / "parameters.json"
             if storage_options is None:
                 path_to_json.parent.mkdir(parents=True, exist_ok=True)
+                str_path_to_json = str(path_to_json)
+            else:
+                # using Path object removes the double slashes of the AWS URI
+                str_path_to_json = re.sub(r"^s3:/([^/])", r"s3://\1", str(path_to_json))
             pd.DataFrame.from_dict(params, orient="index").to_json(
-                str(path_to_json), storage_options=storage_options
+                str_path_to_json, storage_options=storage_options
             )
         except Exception:
             warnings.warn(
