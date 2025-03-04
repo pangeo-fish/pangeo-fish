@@ -6,11 +6,3 @@ def lookup(mapping, key, message="unknown key: {key}"):
 
     return value
 
-
-class Pipeline:
-    def __init__(self, data):
-        self.data = data
-
-    def pipe(self, f, *args, **kwargs):
-        result = f(self.data, *args, **kwargs)
-        return type(self)(result)
