@@ -1,8 +1,6 @@
 import logging
 import threading
-import time
 import warnings
-from contextlib import contextmanager
 
 from distributed import Client, LocalCluster
 
@@ -36,22 +34,3 @@ def get_client():
 
     return client
 
-
-@contextmanager
-def isolated_clients():
-    global clients
-
-    backup = clients
-
-    try:
-        clients = {}
-        yield
-    finally:
-        for thread_id, client in clients.items():
-            # make sure we don't cancel anything
-            while [_ for _ in client.processing().values() if _]:
-                time.sleep(2)
-            client.shutdown()
-            client.close()
-
-        clients = backup
