@@ -6,7 +6,6 @@ from pangeo_fish.grid import center_longitude
 
 def test_center_longitude():
     num_cells = 10  # Small grid size for testing
-    center = 0
 
     lons = np.linspace(-20, 380, num_cells)
     lats = np.linspace(-90, 90, num_cells)
