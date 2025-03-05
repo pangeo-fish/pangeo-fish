@@ -1,4 +1,4 @@
-#!/bin/bash  
+#!/bin/bash
 
 read -r -d "" help <<-EOF
 Usage: $0 [options] confname

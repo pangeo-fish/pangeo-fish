@@ -21,7 +21,7 @@ dependencies:
   - xarray
   - scipy
   - numba
-#  - scikit-learn==0.20.3
+  #  - scikit-learn==0.20.3
   # units, bounds, and cf-conventions
   - cf_xarray
   - pint-xarray
@@ -57,7 +57,7 @@ dependencies:
   - datashader
   - cmocean
   - pip:
-    - dask-hpcconfig
-    - xarray[complete]
-    - xdggs
+      - dask-hpcconfig
+      - xarray[complete]
+      - xdggs
 #    - git+git://github.com/IAOCEA/xarray-healpy.git

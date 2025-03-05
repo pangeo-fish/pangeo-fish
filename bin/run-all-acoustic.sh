@@ -1,4 +1,4 @@
-#!/bin/bash 
+#!/bin/bash
 
 rm -rf template
 
@@ -34,4 +34,3 @@ rm ./notebooks/workflow/parametrized/$tagconf/*ipynb
 #./bin/run-workflow.sh $tagconf  --environment /home1/datawork/todaka/micromamba/envs/pangeo-fish-1023  --html-root /home/datawork-taos-s/public/fish/newbase >$tagconf.log &
    ./bin/run-workflow.sh $tagconf  --environment /home1/datawork/todaka/micromamba/envs/pangeo-fish-0723  --html-root /home/datawork-taos-s/public/fish/acoustic >$tagconf.log &
 done
-
