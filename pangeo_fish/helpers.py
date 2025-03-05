@@ -37,10 +37,10 @@ from pangeo_fish.io import (
     open_copernicus_catalog,
     open_tag,
     prepare_dataset,
+    read_stations,
     read_trajectories,
     save_html_hvplot,
     save_trajectories,
-    tz_convert,
 )
 from pangeo_fish.pdf import combine_emission_pdf, normal
 from pangeo_fish.tags import adapt_model_time, reshape_by_bins, to_time_slice
@@ -49,7 +49,7 @@ from pangeo_fish.visualization import filter_by_states, plot_map, render_frame
 
 __all__ = [
     "to_healpix",
-    "regrid_to_2d",
+    "reshape_to_2d",
     "load_tag",
     "update_stations",
     "plot_tag",
@@ -152,7 +152,7 @@ def to_healpix(ds: xr.Dataset) -> xr.Dataset:
     return ds.dggs.decode({"grid_name": "healpix"} | attrs)
 
 
-def regrid_to_2d(ds: xr.Dataset):
+def reshape_to_2d(ds: xr.Dataset):
     grid = HealpyGridInfo(level=ds.dggs.grid_info.level)
     return grid.to_2d(ds)
 
@@ -227,13 +227,7 @@ def update_stations(
         station_file_uri += ".csv"
 
     with fsspec.open(station_file_uri, **storage_options) as file:
-        stations = pd.read_csv(
-            file,
-            parse_dates=["deploy_time", "recover_time"],
-            index_col="deployment_id",
-        ).pipe(tz_convert, {"deploy_time": None, "recover_time": None})
-
-        ds = xr.Dataset.from_dataframe(stations)
+        ds = read_stations(file).to_xarray()
     if method == "merge":
         tag["stations"] = tag["stations"].ds.merge(ds)
     else:
@@ -345,17 +339,11 @@ def _open_parquet_model(parquet_url: str):
 
     target_opts = {"anon": False}
     remote_opts = {"anon": False}
-    fs = fsspec.filesystem(
-        "reference",
-        fo=parquet_url,
-        remote_protocol="s3",
-        remote_options=remote_opts,
-        target_options=target_opts,
-    )
-    m = fs.get_mapper("")
-
     reference_ds = xr.open_dataset(
-        m, engine="zarr", chunks={}, backend_kwargs={"consolidated": False}
+        parquet_url,
+        engine="kerchunk",
+        chunks={},
+        storage_options={"target_options": target_opts, "remote_options": remote_opts},
     )
     reference_ds.coords["depth"].values[0] = 0.0
     return reference_ds
@@ -468,8 +456,7 @@ def compute_diff(
         bin_dim="bincount",
         other_dim="obs",
     ).chunk({"time": chunk_time})
-    attrs = tag_log.attrs.copy()
-    attrs.update({"relative_depth_threshold": relative_depth_threshold})
+    attrs = tag_log.attrs | {"relative_depth_threshold": relative_depth_threshold}
     diff = (
         diff_z(reference_model, reshaped_tag, depth_threshold=relative_depth_threshold)
         .assign_attrs(attrs)
@@ -1142,8 +1129,9 @@ def predict_positions(
     )
 
     states = optimized.predict_proba(emission)
-    states = states.to_dataset().chunk(chunks)  # type: xr.Dataset
-    states.attrs.update(emission.attrs)
+    states = (
+        states.to_dataset().chunk(chunks).assign_attrs(emission.attrs)
+    )  # type: xr.Dataset
 
     if save:
         _save_zarr(states, f"{target_root}/states.zarr", storage_options)
@@ -1277,7 +1265,7 @@ def open_distributions(
     # since this function is expected to be used for plotting and rendering tasks
     if "cells" in data.dims:
         data = to_healpix(data)
-        data = regrid_to_2d(data)
+        data = reshape_to_2d(data)
 
     data = data.assign_coords(longitude=center_longitude(data["longitude"], center=0))
     data = data.chunk({d: -1 if d != "time" else chunk_time for d in data.dims})
