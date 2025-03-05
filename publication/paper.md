@@ -15,19 +15,19 @@ authors:
     affiliation: 1
   - name: Quentin Mazouni
     orcid: 0009-0003-3519-5514
-    affiliation: 3
+    affiliation: 2
   - name: Etienne Cap
     orcid: 0009-0007-0360-0692
     affiliation: 1
   - name: Marine Gonse
     orcid: 0000-0002-5378-8482
-    affiliation: 2
+    affiliation: 3
   - name: Mathieu Woillez
     orcid: 0000-0002-1032-2105
-    affiliation: 2
+    affiliation: 3
   - name: Anne Fouilloux
     orcid: 0000-0002-1784-2920
-    affiliation: 3
+    affiliation: 2
   - name: Jean-Marc Delouis
     orcid: 0000-0002-0713-1658
     affiliation: 1
@@ -37,9 +37,9 @@ authors:
 affiliations:
   - name: LOPS (Laboratory for Ocean Physics and Satellite remote sensing) UMR 6523, Univ Brest-Ifremer-CNRS-IRD, Plouzané, France
     index: 1
-  - name: DECOD (Ecosystem Dynamics and Sustainability), IFREMER-Institut Agro-INRAE, Plouzané, France
-    index: 2
   - name: Simula Research Laboratory, Oslo, Norway
+    index: 2
+  - name: DECOD (Ecosystem Dynamics and Sustainability), IFREMER-Institut Agro-INRAE, Plouzané, France
     index: 3
 date: 05 March 2025
 bibliography: paper.bib
@@ -68,7 +68,7 @@ However, unlike terrestrial animals, whose positions can be directly tracked usi
 This limitation hinders the accurate delineation of protected areas, which is crucial for the protection of important fish habitats and fish exploitation.
 To address this issue, various tagging experiments have been conducted on a variety of fish species [@spanish_tagging; @skagerrak_tagging], and methods have been proposed for approximating the fish locations, referred to as geolocation models [@pontual_seabass_migration_2023; @woillez_hmm-based_2016].
 
-![Promotion of the FISH-INTEL tagging campaign.\label{fig:fishintel}](fishintel.png){ width=50% }
+![Promotion of the FISH-INTEL tagging campaign.\label{fig:fishintel}](fishintel.png){ width=35% }
 
 Archival tags and acoustic tags are two commonly tagging systems used in biologging campaigns.
 Archival tags — also called Data Storage Tag (DST) — record and store a wide range of data such as temperature, pressure or salinity until their battery expires (whose timespan usually ranges from 6 months to 2 years).
@@ -77,7 +77,7 @@ Tagging campaigns usually address this challenge by promoting and possibly rewar
 Acoustic tags work differently, since they emit signals that can be detected by detection devices when fish come within their range, hence providing the fish location.
 As such, acoustic tags do not need to be returned, but there is no garuantee that the tagged fish will swim around the receivers.
 
-![Example of an acoustic tag (on the left) and a DST (on the right).\label{fig:tag}](archival_tag.png){ width=50% }
+![Example of an acoustic tag (on the left) and a DST (on the right). See the centimeter scale for size reference.\label{fig:tag}](archival_tag.png){ width=35% }
 
 \autoref{fig:tag} shows an example of an acoustic tag as well as a DTS.
 
@@ -98,15 +98,16 @@ In particular, **pangeo-fish** has a robust data model based on [Xarray](https:/
 <!-- and [Jupyter Notebooks](https://jupyter.org/) -->
 
 Data loading processes are furthermore streamlined by libraries like `intake`, `kerchunk` or `fsspec`, and the previously mentioned `xarray` data model enables interactive visualization of the results thanks to tools such as the `hvplot` library and the JupyterLab environment.
+Similarly, `pangeo-fish`'s I/O operations are automatically distributed with the combination of Dask and [Zarr](https://zarr.dev/).
 The Pangeo software stack provides researchers with the necessary tools to access reference data and perform intensive computations in a scalable and interactive manner;
 `pangeo-fish` gives biologists a user-friendly tool for inferring fish locations from biologging data, hence filling the gap between their expertise and the Pangeo's environment capabilities.
 
 # Geolocation Model
 
-**pangeo-fish** implements a method well established in the fish trajectory reconstruction literature [@woillez_hmm-based_2016; @pontual_seabass_migration_2023, @a_combination_tag_2023; @100008].
+**pangeo-fish** implements a method well established in the fish trajectory reconstruction literature [@woillez_hmm-based_2016; @pontual_seabass_migration_2023; @a_combination_tag_2023; @100008].
 It consists of a Hidden Markov Model (HMM).
 
-![Illustration of the Hidden Markov Model. The hidden states $Xt$ describe the fish's positions, and the emission probabilities $P(Y_t|X_t)$ correspond to the likelihood of observing the fish at time $t$.\label{fig:hmm}](hmm.png)
+![Illustration of the Hidden Markov Model. The hidden states $Xt$ describe the fish's positions, and the emission probabilities $P(Y_t|X_t)$ correspond to the likelihood of observing the fish at time $t$.\label{fig:hmm}](hmm.png){ width=50% }
 
 As illustrated in \autoref{fig:hmm}, the latent (or _hidden_) states $X_t$ of the HMM infer the (daily) fish's positions, and the observation process relates the sensor records with the oceanic data.
 The transition matrix between the hidden states is modelled by a Brownian motion parametrized by $\sigma$.
@@ -202,5 +203,6 @@ Designed to work with the Pangeo ecosystem, it aims to support the biologists wi
 
 T Odaka, JM Delouis and J Magin are supported by the CNES Appel, a projet R&T R-S23/DU-0002-025-01.
 T Odaka, JM Delouis and M Woillez are supported by the TAOS project funded by the IFREMER via the AMII OCEAN 2100 programme.
+Q Mazouni, M Woillez, A Fouilloux and T Odaka are supported by Global Fish Tracking System (GFTS), a Destination Earth use case procured and funded by ESA (SA Contract No. 4000140320/23/I-NS, DESTINATION EARTH USE CASES - DESP USE CASES - ROUND (YEAR 2023))
 
 # References
