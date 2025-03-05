@@ -4,7 +4,7 @@ import scipy.stats
 import xarray as xr
 from more_itertools import first
 
-from .utils import _detect_spatial_dims, clear_attrs, normalize
+from pangeo_fish.utils import _detect_spatial_dims, normalize
 
 
 # also try: multivariate_normal, gaussian_kde
@@ -32,7 +32,7 @@ def normal(samples, mean, std, *, dims):
     def _pdf(samples, mean, std):
         return scipy.stats.norm.pdf(samples, mean, std)
 
-    if isinstance(std, (int, float)) or std.size == 1:
+    if isinstance(std, int | float) or std.size == 1:
         param_dims = []
     else:
         param_dims = mean.dims
@@ -48,11 +48,11 @@ def normal(samples, mean, std, *, dims):
         exclude_dims=set(param_dims),
         vectorize=True,
     )
-    return result.rename("pdf").pipe(clear_attrs)
+    return result.rename("pdf").drop_attrs(deep=False)
 
 
 def combine_emission_pdf(raw, exclude=("initial", "final", "mask")):
-    exclude = list(more_itertools.always_iterable(exclude))
+    exclude = [n for n in more_itertools.always_iterable(exclude) if n in raw.variables]
 
     to_combine = [name for name in raw.data_vars if name not in exclude]
     if len(to_combine) == 1:

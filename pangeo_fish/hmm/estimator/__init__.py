@@ -1,2 +1,2 @@
-from .naive import NaiveGaussianRandomWalkSTHMM  # noqa: F401
-from .split import EagerScoreEstimator  # noqa: F401
+from pangeo_fish.hmm.estimator.cached import CachedEstimator  # noqa: F401
+from pangeo_fish.hmm.estimator.eager import EagerEstimator  # noqa: F401

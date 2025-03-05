@@ -87,7 +87,7 @@ class EagerBoundsSearch:
 
     def __init__(self, estimator, param_bounds, *, optimizer_kwargs={}):
         self.estimator = estimator
-        self.param_bounds = param_bounds
+        self.param_bounds = tuple(float(v) for v in param_bounds)
         self.optimizer_kwargs = optimizer_kwargs
 
     def fit(self, X):
@@ -104,12 +104,18 @@ class EagerBoundsSearch:
             The estimator with optimized parameters.
         """
 
-        def f(sigma,X):
+        def f(sigma, X):
             # computing is important to avoid recomputing as many times as the result is used
-            return self.estimator.set_params(sigma=sigma).score(X).compute().data
+            result = self.estimator.set_params(sigma=sigma).score(X)
+            if not hasattr(result, "compute"):
+                return float(result)
+
+            return float(result.compute())
 
         lower, upper = self.param_bounds
-        result = scipy.optimize.fminbound(f, lower, upper,args=(X,), **self.optimizer_kwargs)
+        result = scipy.optimize.fminbound(
+            f, lower, upper, args=(X,), **self.optimizer_kwargs
+        )
 
         return self.estimator.set_params(sigma=result.item())
 
@@ -152,7 +158,11 @@ class TargetBoundsSearch:
 
         def f(sigma):
             # computing is important to avoid recomputing as many times as the result is used
-            return self.estimator.set_params(sigma=sigma).score(X).compute()
+            result = self.estimator.set_params(sigma=sigma).score(X)
+            if not hasattr(result, "compute"):
+                return result
+
+            return result.compute()
 
         lower, upper = self.param_bounds
         # result = scipy.optimize.fminbound(f, lower, upper, **self.optimizer_kwargs)

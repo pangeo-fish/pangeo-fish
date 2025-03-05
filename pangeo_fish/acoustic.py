@@ -1,4 +1,5 @@
 import flox.xarray
+import healpy as hp
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -6,70 +7,13 @@ from tlz.itertoolz import first
 from xarray_healpy.conversions import geographic_to_cartesian
 from xarray_healpy.operations import buffer_points
 
+from pangeo_fish import utils
+from pangeo_fish.cf import bounds_to_bins
 from pangeo_fish.healpy import (
     astronomic_to_cartesian,
     astronomic_to_cell_ids,
     geographic_to_astronomic,
 )
-
-from . import utils
-from .cf import bounds_to_bins
-
-
-def extract_receivers(
-    detections,
-    columns=[
-        "deployment_id",
-        "deploy_latitude",
-        "deploy_longitude",
-        "station_name",
-    ],
-):
-    """extract the generic receiver information from the detection database
-
-    Parameters
-    ----------
-    detections : pandas.DataFrame
-        All detections in the database.
-    columns : list of hashable, default: ["deployment_id", "deploy_latitude", \
-                                          "deploy_longitude", "station_name"]
-        Receiver-specific columns.
-
-    Returns
-    -------
-    pandas.DataFrame
-        The extracted receiver information.
-    """
-    subset = detections[columns]
-
-    return subset.set_index("deployment_id").drop_duplicates()
-
-
-def search_acoustic_tag_id(tag_database, pit_tag_id):
-    """translate DST tag ID to the ID of the acoustic emitter
-
-    Parameters
-    ----------
-    tag_database : pandas.DataFrame
-        The database containing information about the individual deployments.
-    pit_tag_id : str
-        The ID of the DST tag
-
-    Returns
-    -------
-    str
-        The ID of the acoustic tag
-
-    Raises
-    ------
-    ValueError
-        if the given DST tag ID is not in the database.
-    """
-    try:
-        info = tag_database.set_index("pit_tag_number").loc[pit_tag_id]
-        return info["acoustic_tag_id"]
-    except KeyError:
-        raise ValueError(f"unknown tag id: {pit_tag_id}") from None
 
 
 def count_detections(detections, by):
@@ -121,33 +65,13 @@ def count_detections(detections, by):
     return result.drop_vars(["time"]).assign_coords({"time": by["time"].variable})
 
 
-def select_detections_by_tag_id(database, tag_id):
-    """select detections by the acoustic tag id
-
-    Parameters
-    ----------
-    database : pandas.DataFrame
-        The detections database.
-    tag_id : str
-        The acoustic tag id to search for.
-
-    Returns
-    -------
-    detections : xarray.Dataset
-        The selected detections.
-    """
-    return (
-        database[["deployment_id", "acoustic_tag_id"]]
-        .to_xarray()
-        .set_coords(["acoustic_tag_id"])
-        .set_xindex("acoustic_tag_id")
-        .sel({"acoustic_tag_id": tag_id})
-        .drop_vars(["acoustic_tag_id"])
-    )
-
-
-def deployment_reception_masks(stations, grid, buffer_size, method="recompute"):
-    rot = {"lat": grid["cell_ids"].attrs["lat"], "lon": grid["cell_ids"].attrs["lon"]}
+def deployment_reception_masks(
+    stations, grid, buffer_size, method="recompute", dims=["x", "y"]
+):
+    rot = {
+        "lat": grid["cell_ids"].attrs.get("lat", 0),
+        "lon": grid["cell_ids"].attrs.get("lon", 0),
+    }
     if method == "recompute":
         phi, theta = geographic_to_astronomic(
             lon=grid["longitude"], lat=grid["latitude"], rot=rot
@@ -171,26 +95,133 @@ def deployment_reception_masks(stations, grid, buffer_size, method="recompute"):
             dim="deployment_id",
         )
 
-    masks = buffer_points(
-        cell_ids,
-        positions,
-        buffer_size=buffer_size.m_as("m"),
-        nside=2 ** cell_ids.attrs["level"],
-        factor=2**16,
-        intersect=True,
-    )
+    if dims == ["cells"]:
+        masks = buffer_points_cells(
+            cell_ids,
+            positions,
+            buffer_size=buffer_size.m_as("m"),
+            nside=2 ** cell_ids.attrs["level"],
+            factor=2**16,
+            intersect=True,
+        )
+    elif dims == ["x", "y"]:
+        masks = buffer_points(
+            cell_ids,
+            positions,
+            buffer_size=buffer_size.m_as("m"),
+            nside=2 ** cell_ids.attrs["level"],
+            factor=2**16,
+            intersect=True,
+        )
 
     return masks.drop_vars(["cell_ids"])
 
 
+def buffer_points_cells(
+    cell_ids,
+    positions,
+    *,
+    buffer_size,
+    nside,
+    sphere_radius=6371e3,
+    factor=4,
+    intersect=False,
+):
+    """ """
+
+    def _buffer_masks(cell_ids, vector, nside, radius, factor=4, intersect=False):
+        selected_cells = hp.query_disc(
+            nside, vector, radius, nest=True, fact=factor, inclusive=intersect
+        )
+        return np.isin(cell_ids, selected_cells, assume_unique=True)
+
+    radius_ = buffer_size / sphere_radius
+
+    masks = xr.apply_ufunc(
+        _buffer_masks,
+        cell_ids,
+        positions,
+        input_core_dims=[["cells"], ["cartesian"]],
+        kwargs={
+            "radius": radius_,
+            "nside": nside,
+            "factor": factor,
+            "intersect": intersect,
+        },
+        output_core_dims=[["cells"]],
+        vectorize=True,
+    )
+
+    return masks.assign_coords(cell_ids=cell_ids)
+
+
+def create_masked_fill_map(tag, grid, maps, chunk_time=24, dims=["x", "y"]):
+    """
+    Create a masked fill map indicating the detection zones.
+
+    Parameters:
+    - tag (xarray.Dataset): A dataset containing station information, with variables 'recover_time' and 'deploy_time'.
+    - grid (xarray.Dataset): A dataset containing grid information, with a variable 'time'.
+    - maps (xarray.Dataset): A dataset containing map information, containing locations of acoustic stations.
+
+    Returns:
+    - fill_map (xarray.DataArray): A masked fill map indicating the detection zones.
+
+    The function creates a masked fill map based on the station and grid information provided. It calculates
+    the detection zones based on the time intervals specified in the 'recover_time' and 'deploy_time' variables
+    in the tag station dataset. It then masks the fill map based on the grid's mask and returns the
+    resulting fill map.
+    """
+    # load stations informations
+    ds = tag["stations"].to_dataset()[["recover_time", "deploy_time"]]
+    grid_time = grid[["time"]].cf.add_bounds(keys="time")
+
+    # Expand dimensions of grid_time to match the number of deployment_ids
+    stations = grid_time.expand_dims(deployment_id=ds.deployment_id, axis=0)
+
+    # Create a boolean mask indicating if each time bin falls within
+    # deploy_time and recover_time
+    time_mask = (stations.time_bounds[:, 0] >= ds.deploy_time) & (
+        stations.time_bounds[:, 1] <= ds.recover_time
+    )
+
+    # Add a new dimension 'time' to the dataset with the boolean mask
+    stations["detecting"] = time_mask
+    stations = stations.drop_vars(["time_bounds"])
+    stations = stations.where(stations.sum(dim="time") != 0, other=True, drop=True)
+
+    # Expand the maps dataset to match the dimensions of the active stations dataset
+    all_detecting_stations = (
+        maps.sel(deployment_id=stations.deployment_id)
+        .expand_dims({"time": stations.time})
+        .chunk({"time": chunk_time})
+    )
+    a = stations.sel(time=all_detecting_stations.time).chunk({"time": chunk_time})
+    b = all_detecting_stations
+    # keeps working with bool...
+    ds = xr.ufuncs.logical_and(a, b).any(dim="deployment_id")
+
+    all_detecting_stations = xr.where(ds == 0, 1, np.nan)
+    # ...even though we still normalize (and thus turn the type to np.float64)
+    fill_map = all_detecting_stations.detecting.pipe(utils.normalize, dim=dims)
+
+    return fill_map
+
+
 def emission_probability(
-    tag, grid, buffer_size, nondetections="mask", cell_ids="recompute"
+    tag,
+    grid,
+    buffer_size,
+    nondetections="ignore",
+    cell_ids="keep",
+    chunk_time=24,
+    dims=None,
 ):
     """construct emission probability maps from acoustic detections
 
     Parameters
     ----------
-    tag : datatree.DataTree
+    tag : xarray.DataTree
         The tag data.
     grid : xarray.Dataset
         The target grid. Must have the ``cell_ids`` and ``time``
@@ -208,12 +239,17 @@ def emission_probability(
 
         - "keep": use the cell ids given by the model. This is the more correct method.
         - "recompute": recompute the cell ids based on the rotated lat / lon coords.
+    dims : list of str, default: ["x", "y"]
+        The spatial dimensions.
 
     Returns
     -------
     emission : xarray.Dataset
         The resulting emission probability maps.
     """
+    if dims is None:
+        dims = ["x", "y"]
+
     if "acoustic" not in tag or "stations" not in tag:
         return xr.Dataset()
 
@@ -232,23 +268,32 @@ def emission_probability(
         grid[["cell_ids", "longitude", "latitude"]],
         buffer_size,
         method=cell_ids,
-    )
+        dims=dims,
+    ).chunk()  # chunks the map (to prevent autochunk which caused division by zero error)
+
+    maps_index = maps.indexes["deployment_id"]
+    weights_index = weights.indexes["deployment_id"]
+    if weights_index.difference(maps_index, sort=False).size > 0:
+        raise ValueError(
+            "Some receiver ids in `tag.acoustic` are not included in `tag.stations`."
+        )
 
     if nondetections == "ignore":
         fill_map = xr.ones_like(grid["cell_ids"], dtype=float).pipe(
-            utils.normalize, dim="cells"
+            utils.normalize, dim=["x", "y"]
         )
     elif nondetections == "mask":
-        fill_map = maps.any(dim="deployment_id").pipe(np.logical_not).astype(float)
+        # fill_map = maps.any(dim="deployment_id").pipe(np.logical_not).astype(float)
+        fill_map = create_masked_fill_map(tag, grid, maps, chunk_time, dims)
     else:
         raise ValueError("invalid nondetections treatment argument")
 
     return (
         maps.weighted(weights)
         .sum(dim="deployment_id")
-        .transpose("time", "y", "x")
+        .transpose("time", *dims)
         .where((weights != 0).any(dim="deployment_id"), fill_map)
-        .pipe(utils.normalize, dim=["x", "y"])
+        .pipe(utils.normalize, dim=dims)
         .assign_attrs({"buffer_size": buffer_size.m_as("m")})
         .where(grid["mask"])
         .to_dataset(name="acoustic")

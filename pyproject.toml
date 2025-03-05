@@ -10,8 +10,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
 ]
 dependencies = [
-    "xarray",
-    "xarray-datatree",  # remove once datatree has been merged into xarray
+    "xarray>=2024.11.0",
     "pandas",
     "numpy",
     "scipy",
@@ -21,15 +20,22 @@ dependencies = [
     "sparse",
     "healpy",
     "movingpandas",
-    "xarray-healpy"
+    "xarray-healpy",
+    "cf_xarray",
+    "healpix-convolution",
 ]
 dynamic = ["version"]
 
 [project.urls]
 "Homepage" = "https://github.com/iaocea/pangeo-fish"
 
-[tool.setuptools]
-packages = ["pangeo_fish"]
+[project.scripts]
+pangeo-fish = "pangeo_fish.cli:main"
+
+[tool.setuptools.packages.find]
+where = [""]
+include = ["pangeo_fish*"]
+namespaces = false
 
 [build-system]
 requires = [
@@ -42,9 +48,52 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools_scm]
 fallback_version = "999"
 
-[tool.isort]
-profile = "black"
-skip_gitignore = true
-float_to_top = true
-default_section = "THIRDPARTY"
-known_first_party = "pangeo_fish"
+[tool.coverage.run]
+source = ["pangeo_fish"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = ["pragma: no cover", "if TYPE_CHECKING"]
+
+[tool.ruff]
+builtins = ["ellipsis"]
+exclude = [
+    ".git",
+    ".eggs",
+    "build",
+    "dist",
+    "__pycache__",
+    "docs",
+]
+target-version = "py310"
+
+extend-include = ["*.ipynb"]
+line-length = 100
+
+[tool.ruff.lint]
+ignore = [
+    "E203", # whitespace before ':' - doesn't work well with black
+    "E402", # module level import not at top of file
+    "E501", # line too long - let black worry about that
+    "E731", # do not assign a lambda expression, use a def
+]
+select = [
+    "F",  # Pyflakes
+    "E",  # Pycodestyle
+    "I",  # isort
+    "UP", # Pyupgrade
+    "TID", # tidy imports
+]
+extend-safe-fixes = [
+    "TID252",  # absolute imports
+]
+fixable = ["I", "TID", "UP"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["pangeo_fish"]
+known-third-party = []
+
+[tool.ruff.lint.flake8-tidy-imports]
+# Disallow all relative imports.
+ban-relative-imports = "all"
