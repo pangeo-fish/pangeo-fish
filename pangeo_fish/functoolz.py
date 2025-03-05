@@ -5,4 +5,3 @@ def lookup(mapping, key, message="unknown key: {key}"):
         raise ValueError(message.format(key=key))
 
     return value
-

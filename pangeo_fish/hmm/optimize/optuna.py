@@ -33,4 +33,3 @@ def get_client():
     clients[thread_id] = client
 
     return client
-
