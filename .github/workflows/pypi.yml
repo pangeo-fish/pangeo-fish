@@ -1,7 +1,8 @@
 name: Upload Package to PyPI
 
 on:
-   pull_request: ["main"]
+  pull_request:
+    branches: ["main"]
   release:
     types:
       - published
