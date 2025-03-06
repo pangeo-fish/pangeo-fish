@@ -20,7 +20,7 @@ def sample_dataset():
     end_time = pd.Timestamp("2022-06-24T05:00:00")
     time = pd.date_range(start=start_time, end=end_time, periods=num_time_steps)
 
-    level = 4
+    level = 2
     cell_ids = np.arange(4 * 4**level, 6 * 4**level)
 
     initial = np.zeros_like(cell_ids, dtype="float64")
