@@ -36,7 +36,7 @@ jobs:
           path: dist/
 
   upload-to-pypi:
-    if: startsWith(github.ref, "refs/tags/") && github.event_name == "release"
+    if: github.event_name == 'release'
     needs: build-artifacts
     runs-on: ubuntu-latest
 
