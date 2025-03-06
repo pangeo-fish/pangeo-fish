@@ -5,7 +5,7 @@ build:
     python: mambaforge-latest
 
 sphinx:
-  fail_on_warning: false
+  fail_on_warning: true
   configuration: docs/conf.py
 
 conda:
