@@ -48,8 +48,8 @@ I/O
    tz_convert
 
 
-Re-gridding
------------
+Grid Manipulation
+-----------------
 
 .. currentmodule:: pangeo_fish
 .. autosummary::

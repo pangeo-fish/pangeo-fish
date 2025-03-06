@@ -7,7 +7,7 @@ We invite the user to follow along so that you can then translate your data to i
 
 ## Overall Structure
 
-The data repository contains one `.csv` file detailing all the acoustic receivers involved (named `stations.csv`), and each data storage tag (DST) data is stored under a directory whose name corresponds to the tag's identification:
+The data repository contains one `.csv` file detailing all the acoustic receiver deployments involved (named `stations.csv`), and each data storage tag (DST) data is stored under a directory whose name corresponds to the tag's identification:
 
 ```
 your_tag_folder
@@ -35,7 +35,7 @@ Furthermore, time zone-naive datetime data (i.e. without timezone information) *
 
 Strings containing `,` or `\n` must be wrapped in double quotes (`""`).
 
-## `stations.csv`: information of the acoustic receivers
+## `stations.csv`: information of the acoustic receiver deployments
 
 This file aims to encode the deployment information of the acoustic receivers.
 
@@ -43,9 +43,9 @@ If there are no acoustic detections, it may be removed.
 
 It must contain at least eight columns:
 
-- `deployment_id` and `station_name` describe the receivers' id and name, respectively.
+- `deployment_id` and `station_name` describe the deployments' id and name, respectively.
 - Deployment information in `deploy_time`, `deploy_longitude`, `deploy_latitude`.
-- Similarly, recovry information in `recover_time`, `recover_longitude`, and `recover_latitude`.
+- Similarly, recovery information in `recover_time`, `recover_longitude`, and `recover_latitude`.
 
 It may contain arbitrary additional columns.
 
