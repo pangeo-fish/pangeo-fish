@@ -36,9 +36,9 @@ dependencies:
   - rich
   - rich-click
   - pip
-  - xdggs
   - pip:
       - cdshealpix
+      - xdggs
       - healpix-convolution
       - dask-hpcconfig
       - imageio[ffmpeg]
