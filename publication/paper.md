@@ -51,11 +51,11 @@ Geo-referenced data plays an important role in understanding and conserving natu
 Biologging, the practice of attaching small devices (called _tags_) to animals for behavior tracking and environmental data collection, proves to be invaluable in this field.
 However, directly tracking fish underwater presents persistent challenges.
 To address this, models have emerged to estimate fish locations by correlating data from biologging devices — such as temperature and pressure readings — with oceanic temperature and bathymetry models.
-Beside the difficulty of working with vast earth science datasets (due to their size and diversity), there is no open source implementation for modeling fish locations.
+Beside the difficulty of working with vast earth science datasets (due to their size and diversity), there is no open source implementation for biologged fish tracking.
 Yet, these fish geolocation models are critical for better understanding fish behavior and are nowadays seen as a powerful tool by policy makers for fish stock management and preservation.
 
 On one hand, the [Pangeo](https://www.pangeo.io/) ecosystem was created by a community of engineers and geoscientists specifically to address the big earth data analysis related challenges.
-Utilizing pangeo, the **pangeo-fish** software is a Python package for biologging data analysis and fish location estimation.
+Utilizing pangeo, the **pangeo-fish** software is a Python package for biologging data analysis and fish tracking estimation.
 It is dedicated to biologists to manage and process the result of their biologging (or _tagging_) campaigns.
 
 <!-- The accuracy and resolution of these reference datasets significantly impact the precision of reconstructed fish trajectories. Despite recent advancements in earth observation technology and modeling methodologies like digital twins, accessing vast earth science datasets remains cumbersome due to their size and diversity. More crucially, there is no open source for modeling fish locations. Additionally, the computational demands for analysis pose technical barriers. The [Pangeo](https://www.pangeo.io/) ecosystem was created by a community of engineers and geoscientists specifically to address these big earth data analysis challenges. The **pangeo-fish** software is a Python package that utilizes Pangeo to leverage advancements in biologging data analysis for fish. -->
@@ -81,7 +81,7 @@ As such, acoustic tags do not need to be returned, but there is no garuantee tha
 
 \autoref{fig:tag} shows an example of an acoustic tag as well as a DTS.
 
-The estimation of fish positions depends on the likelihood of the observed data from the DTS's logs, such as temperature at specific depths, alongside the reference geoscience data such as satellite observations.
+The estimation of fish positions depends on the likelihood of the observed data from the DTS's logs, such as temperature at specific depths, alongside the reference geoscience data such as satellite observations and ocean dynamic models.
 Some approaches can enhance the accuracy of the model's predictions by using additional information, such as telemetric detection data from the acoustic tags mentioned above [@a_combination_tag_2023].
 The use of oceanic models with high spatial and temporal resolutions can significantly improve the accuracy of reconstructed fish tracks.
 However, higher resolutions involves more data, that requires significant computing power and storage capacity.
@@ -113,7 +113,7 @@ As illustrated in \autoref{fig:hmm}, the latent (or _hidden_) states $X_t$ of th
 The transition matrix between the hidden states is modelled by a Brownian motion parametrized by $\sigma$.
 As such, fitting the geolocation model for a tag's records aims to determine the value of $\sigma$ that maximizes the likelihood of the state sequence (i.e., the fish's trajectory)
 given the observations.
-The optimal likelihood value reflects the level of residual inconsistency between the observed (recorded) and reference data.
+The optimal likelihood value reflects the level of residual inconsistency between the tag observed (recorded) and reference data.
 
 # Key Features of pangeo-fish
 
@@ -184,7 +184,7 @@ A video of the evolution of the state and the emission distributions alongside o
 ```python
 from pangeo_fish.helpers import open_distributions, render_distributions
 data = open_distributions(path_to_previous_results, storage_options, ...)
-render_distributions(data, output_path="results/", extension="mp4", remove_frames=True, ...)
+render_distributions(data, "results/", extension="mp4", remove_frames=True, ...)
 ```
 
 As for the tags' data, the time series of the DST's logs can be easily visualized with:
