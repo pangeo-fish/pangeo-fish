@@ -542,7 +542,7 @@ def regrid_dataset(
     rot : mapping of str to tuple of float, default: {"lat": 0, "lon": 0}
         Mapping of angles to rotate the HEALPix grid. It must contain the keys "lon" and "lat"
     dims : list of str, default: ["cells"]
-        The list of the dimensions for the regridding. Either ["x", "y"] or ["cells"]
+        The list of the dimensions for the regridding. Either ``["x", "y"]`` or ``["cells"]``
     plot : bool, default: False
         Whether to return a plot of the dataset
     save : bool, default: False
@@ -624,13 +624,13 @@ def compute_emission_pdf(
         A dataset that must have the variables ``diff`` and ``ocean_mask``
     events_ds : xarray.Dataset
         The tagging events. It must have the coordinate ``event_name`` and values ``release`` and ``fish_death``.
-        *Hint: given a tag model, it corresponds to ``tag["tagging_events"].ds``*
+        *Hint*: given a tag model, it corresponds to ``tag["tagging_events"].ds``
     differences_std : float
         Standard deviation that is applied to the data (passed to ``scipy.stats.norm.pdf``). It'd express the estimated certainty of the field of difference
     recapture_std : float
         Covariance for the recapture event. It should reflect the certainty of the final recapture area
     dims : list of str, default: ["cells"]
-        Spatial dimensions. Either ["x", "y"] or ["cells"]
+        Spatial dimensions. Either ``["x", "y"]`` or ``["cells"]``
     chunk_time : int, default: 24
         Chunk size for the time dimension
     plot : bool, default: False
@@ -638,7 +638,7 @@ def compute_emission_pdf(
     save : bool, default: False
         Whether to save the dataset
     target_root : str, default: "."
-        Root of the folder to save the `.zarr` array (under ``{target_root}/emission.zarr``).
+        Root of the folder to save the ``.zarr`` array (under ``{target_root}/emission.zarr``).
         Only used if ``save=True``
     storage_options : mapping, optional
         Dictionary containing storage options for connecting to the S3 bucket.
@@ -762,7 +762,7 @@ def compute_acoustic_pdf(
     chunk_time : int, default: 24
         Chunk size for the time dimension
     dims : list of str, default: ["cells"]
-        The list of the dimensions. Either ["x", "y"] or ["cells"]
+        The list of the dimensions. Either ``["x", "y"]`` or ``["cells"]``
     plot : bool, default: False
         Whether to return a plot of the dataset
     save : bool, default: False
@@ -988,7 +988,7 @@ def optimize_pdf(
     tolerance : float
         Tolerance level for the optimised parameter search computation
     dims : list of str, default: ["cells"]
-        The list of the dimensions. Either ["x", "y"] or ["cells"]
+        The list of the dimensions. Either ``["x", "y"]`` or ``["cells"]``
     save_parameters : bool, default: False
         Whether to save the results under ``{target_root}/parameters.json``
     target_root : str, default: "."
