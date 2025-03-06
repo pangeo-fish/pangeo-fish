@@ -2,33 +2,33 @@ API Reference
 =============
 
 
-.. High-level Functions
-.. --------------------
+High-level Functions
+--------------------
 
 
-.. .. currentmodule:: pangeo_fish.helpers
-.. .. autosummary::
-..    :toctree: generated
+.. currentmodule:: pangeo_fish.helpers
+.. autosummary::
+   :toctree: generated
 
-   .. to_healpix
-   .. regrid_to_2d
-   .. load_tag
-   .. update_stations
-   .. plot_tag
-   .. load_model
-   .. compute_diff
-   .. open_diff_dataset
-   .. regrid_dataset
-   .. compute_emission_pdf
-   .. compute_acoustic_pdf
-   .. combine_pdfs
-   .. optimize_pdf
-   .. predict_positions
-   .. plot_trajectories
-   .. open_distributions
-   .. plot_distributions
-   .. render_frames
-   .. render_distributions
+   to_healpix
+   reshape_to_2d
+   load_tag
+   update_stations
+   plot_tag
+   load_model
+   compute_diff
+   open_diff_dataset
+   regrid_dataset
+   compute_emission_pdf
+   compute_acoustic_pdf
+   combine_pdfs
+   optimize_pdf
+   predict_positions
+   plot_trajectories
+   open_distributions
+   plot_distributions
+   render_frames
+   render_distributions
 
 
 I/O
