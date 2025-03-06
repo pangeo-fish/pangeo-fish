@@ -1,95 +1,208 @@
 ---
-title: "Pangeo-fish: A Python package for studying fish movement using bio-logging and earth science data"
+title: "pangeo-fish: A Python package for studying fish movement using biologging and earth science data"
 tags:
   - Python
   - Pangeo
   - Dask
   - Xarray
   - Kerchunk
-  - biologging
-  - geolocation
-  - Earth science
+  - Biologging
+  - Geolocation
+  - Earth Science
 authors:
   - name: Justus Magin
     orcid: 0000-0002-4254-8002
     affiliation: 1
-  - name: Tina Odaka
-    orcid: 0000-0002-1500-0156
+  - name: Quentin Mazouni
+    orcid: 0009-0003-3519-5514
+    affiliation: 2
+  - name: Etienne Cap
+    orcid: 0009-0007-0360-0692
     affiliation: 1
   - name: Marine Gonse
     orcid: 0000-0002-5378-8482
+    affiliation: 3
+  - name: Mathieu Woillez
+    orcid: 0000-0002-1032-2105
+    affiliation: 3
+  - name: Anne Fouilloux
+    orcid: 0000-0002-1784-2920
     affiliation: 2
   - name: Jean-Marc Delouis
     orcid: 0000-0002-0713-1658
     affiliation: 1
-  - name: Mathieu Woillez
-    orcid: 0000-0002-1032-2105
-    affiliation: 2
+  - name: Tina Odaka
+    orcid: 0000-0002-1500-0156
+    affiliation: 1
 affiliations:
   - name: LOPS (Laboratory for Ocean Physics and Satellite remote sensing) UMR 6523, Univ Brest-Ifremer-CNRS-IRD, Plouzané, France
     index: 1
-  - name: DECOD (Ecosystem Dynamics and Sustainability), IFREMER-Institut Agro-INRAE, Plouzané, France
+  - name: Simula Research Laboratory, Oslo, Norway
     index: 2
-date: 21 March 2024
+  - name: DECOD (Ecosystem Dynamics and Sustainability), IFREMER-Institut Agro-INRAE, Plouzané, France
+    index: 3
+date: 05 March 2025
 bibliography: paper.bib
 ---
 
 # Summary
 
-Geo-referenced data plays an important role in understanding and conserving natural resources, particularly when investigating biological phenomena such as fish migration and it's habitats. Biologging, the practice of attaching small devices to animals for behavior tracking and environmental data collection, proves invaluable in this field. However, directly tracking fish underwater presents persistent challenges. To address this, models have emerged to estimate fish locations by correlating data from biologging devices—such as temperature and pressure readings—with ocean temperature and bathymetry models. The accuracy and resolution of these reference datasets significantly impact the precision of reconstructed fish trajectories. Despite recent advancements in earth observation technology and modeling methodologies like digital twins, accessing vast earth science datasets remains cumbersome due to their size and diversity. Additionally, the computational demands for analysis pose technical barriers. The Pangeo ecosystem was created by a community of engineers and geoscientists specifically to address these big earth data analysis challenges. Pangeo-fish is a Python package that utilizes Pangeo to leverage advancements in biologging data analysis for fish.
+Geo-referenced data plays an important role in understanding and conserving natural resources, particularly when investigating biological phenomena such as fish migration and its habitat.
+Biologging, the practice of attaching small devices (called _tags_) to animals for behavior tracking and environmental data collection, proves to be invaluable in this field.
+However, directly tracking fish underwater presents persistent challenges.
+To address this, models have emerged to estimate fish locations by correlating data from biologging devices — such as temperature and pressure readings — with oceanic temperature and bathymetry models.
+Beside the difficulty of working with vast earth science datasets (due to their size and diversity), there is no open source implementation for biologged fish tracking.
+Yet, these fish geolocation models are critical for better understanding fish behavior and are nowadays seen as a powerful tool by policy makers for fish stock management and preservation.
 
-# Statement of need
+On one hand, the [Pangeo](https://www.pangeo.io/) ecosystem was created by a community of engineers and geoscientists specifically to address the big earth data analysis related challenges.
+Utilizing pangeo, the **pangeo-fish** software is a Python package for biologging data analysis and fish tracking estimation.
+It is dedicated to biologists to manage and process the result of their biologging (or _tagging_) campaigns.
 
-Biologging, the process of attaching small devices to animals to monitor their behaviour and collect environmental data, is an important tool for understanding animal habitats.
+<!-- The accuracy and resolution of these reference datasets significantly impact the precision of reconstructed fish trajectories. Despite recent advancements in earth observation technology and modeling methodologies like digital twins, accessing vast earth science datasets remains cumbersome due to their size and diversity. More crucially, there is no open source for modeling fish locations. Additionally, the computational demands for analysis pose technical barriers. The [Pangeo](https://www.pangeo.io/) ecosystem was created by a community of engineers and geoscientists specifically to address these big earth data analysis challenges. The **pangeo-fish** software is a Python package that utilizes Pangeo to leverage advancements in biologging data analysis for fish. -->
 
-However, unlike animals, which can be tracked using GPS technology, tracking fish underwater presents significant challenges. This limitation hinders the accurate delineation of protected areas, which is crucial for the protection of important fish habitats.
+# Statement of Need
 
-To address this issue, various tagging experiments have been conducted on a variety of fish species.
+Biologging describes the process of attaching small devices to animals to monitor their behavior and collect environmental data.
+It is an important tool for understanding animal habitats as well as behavior and migration patterns.
+However, unlike terrestrial animals, whose positions can be directly tracked using GPS technology, tracking fish underwater presents significant challenges.
+This limitation hinders the accurate delineation of protected areas, which is crucial for the protection of important fish habitats and fish exploitation.
+To address this issue, various tagging experiments have been conducted on a variety of fish species [@spanish_tagging; @skagerrak_tagging], and methods have been proposed for approximating the fish locations, referred to as geolocation models [@pontual_seabass_migration_2023; @woillez_hmm-based_2016].
 
-Archival tags and acoustic tags are two common tagging systems used in various projects. Archival tags, implanted in marine animals, record and store a wide range of data including temperature, pressure, light levels and salinity. Similarly, acoustic tags emit signals and are implanted in marine animals to provide location information when fish come within range of acoustic detection devices.
-The computation of fish trajectories depends on the likelihood of observed data from fish tags, such as temperature at specific depths, alongside reference geoscience data such as satellite observations.
+![Promotion of the FISH-INTEL tagging campaign.\label{fig:fishintel}](fishintel.png){ width=35% }
 
-The use of reference data with high spatial and temporal resolution can significantly improve the accuracy of reconstructed fish tracks. However, handling such high resolution data requires significant computing power, storage capacity, parallelization of computations and improved data access patterns.
+Archival tags and acoustic tags are two commonly tagging systems used in biologging campaigns.
+Archival tags — also called Data Storage Tag (DST) — record and store a wide range of data such as temperature, pressure or salinity until their battery expires (whose timespan usually ranges from 6 months to 2 years).
+The main challenge of DSTs are their retrieval, which mostly depends on fishers and the local population living next to the coast.
+Tagging campaigns usually address this challenge by promoting and possibly rewarding tag or fish captures (see for instance, the advertisement from the [FISH-INTEL](https://www.france-energies-marines.org/en/projects/fish-intel/) campaign on \autoref{fig:fishintel}).
+Acoustic tags work differently, since they emit signals that can be detected by detection devices when fish come within their range, hence providing the fish location.
+As such, acoustic tags do not need to be returned, but there is no garuantee that the tagged fish will swim around the receivers.
 
-The Pangeo community is dedicated to fostering an ecosystem of interoperable, scalable, open source tools for interactive data analysis in the field of big data geoscience. Leveraging the Pangeo ecosystem provides an opportunity to address the challenges faced in biologging. Pangeo-fish utilises various Pangeo components, including a user-friendly interface such as JupyterLab, a robust data model such as Xarray, kerchunk and zarr, and a scalable computing system such as Dask.
+![Example of an acoustic tag (on the left) and a DST (on the right). See the centimeter scale for size reference.\label{fig:tag}](archival_tag.png){ width=35% }
 
-By using libraries such as intake, kerchunk and fsspec, data loading processes are streamlined. In addition, Xarray and Dask facilitate computations, while visualisation tools such as hvplot and Jupyter enable interactive visualisation of results. The Pangeo software stack provides researchers with the necessary tools to access data and compute high-resolution fish tracks in a scalable and interactive manner, while giving biologists the flexibility to choose their preferred platform for analysis execution, data access and computing system, whether on a traditional HPC system, in the public cloud or on a laptop.
+\autoref{fig:tag} shows an example of an acoustic tag as well as a DTS.
 
-# Mathematics
+The estimation of fish positions depends on the likelihood of the observed data from the DTS's logs, such as temperature at specific depths, alongside the reference geoscience data such as satellite observations and ocean dynamic models.
+Some approaches can enhance the accuracy of the model's predictions by using additional information, such as telemetric detection data from the acoustic tags mentioned above [@a_combination_tag_2023].
+The use of oceanic models with high spatial and temporal resolutions can significantly improve the accuracy of reconstructed fish tracks.
+However, higher resolutions involves more data, that requires significant computing power and storage capacity.
+The [Pangeo community](https://www.pangeo.io/) handles these challenges, by fostering an ecosystem of interoperable, scalable, open source tools for interactive data analysis in the field of big data marine and geoscience. Therefore, the Pangeo ecosystem represents a powerful mean through which biologists can analyze more easily their biologging data and improve fish geolocation modelling.
+Not only their results would eventually guide policy makers to manage fish stock in a more sustainable way, they could also be used to forecast potential movement changes due to the ongoing climate change.
 
-Our approach follows the methods established [@woillez_hmm-based_2016]. It incorporates the use of a Hidden Markov Model (HMM) to quantify uncertainties and derive the posterior probability of the sequence of states (fish positions).
+<!-- , as stated by the [International Council for the Exploration of the Sea](https://www.ices.dk/about-ICES/Pages/default.aspx). -->
 
-Here, $P(Y_t|X_t)$ express the observation likelihood, $P(X_t|X_{t-1})$ as the state prediction, where $t$ is the time, $X_t$ the hidden states and $Y_t$ the observations a time $t$.
+Unfortunately, the research community lacks of adaptable, scale and open source implementations of geolocation models.
+**pangeo-fish** is a Python package that fills this gap.
+As its name suggest, the software has been designed to be used within the Pangeo ecosystem on several aspects, therefore accounting for both the users' needs (user-friendly API and meaningful result visualization) and the computational challenges.
+In particular, **pangeo-fish** has a robust data model based on [Xarray](https://docs.xarray.dev/en/latest/index.html) and scales computation with [Dask](https://docs.dask.org/en/stable/).
 
-The hidden staes $X_t$ corresponds to fish positions.
+<!-- and [Jupyter Notebooks](https://jupyter.org/) -->
 
-# Citations
+Data loading processes are furthermore streamlined by libraries like `intake`, `kerchunk` or `fsspec`, and the previously mentioned `xarray` data model enables interactive visualization of the results thanks to tools such as the `hvplot` library and the JupyterLab environment.
+Similarly, `pangeo-fish`'s I/O operations are automatically distributed with the combination of Dask and [Zarr](https://zarr.dev/).
+The Pangeo software stack provides researchers with the necessary tools to access reference data and perform intensive computations in a scalable and interactive manner;
+`pangeo-fish` gives biologists a user-friendly tool for inferring fish locations from biologging data, hence filling the gap between their expertise and the Pangeo's environment capabilities.
 
-Citations to entries in paper.bib should be in
-[rMarkdown](http://rmarkdown.rstudio.com/authoring_bibliographies_and_citations.html)
-format.
+# Geolocation Model
 
-If you want to cite a software repository URL (e.g. something on GitHub without a preferred
-citation) then you can do it with the example BibTeX entry below for @fidgit.
+**pangeo-fish** implements a method well established in the fish trajectory reconstruction literature [@woillez_hmm-based_2016; @pontual_seabass_migration_2023; @a_combination_tag_2023; @100008].
+It consists of a Hidden Markov Model (HMM).
 
-For a quick reference, the following citation commands can be used:
+![Illustration of the Hidden Markov Model. The hidden states $Xt$ describe the fish's positions, and the emission probabilities $P(Y_t|X_t)$ correspond to the likelihood of observing the fish at time $t$.\label{fig:hmm}](hmm.png){ width=50% }
 
-- `@author:2001` -> "Author et al. (2001)"
-- `[@author:2001]` -> "(Author et al., 2001)"
-- `[@author1:2001; @author2:2001]` -> "(Author1 et al., 2001; Author2 et al., 2002)"
+As illustrated in \autoref{fig:hmm}, the latent (or _hidden_) states $X_t$ of the HMM infer the (daily) fish's positions, and the observation process relates the sensor records with the oceanic data.
+The transition matrix between the hidden states is modelled by a Brownian motion parametrized by $\sigma$.
+As such, fitting the geolocation model for a tag's records aims to determine the value of $\sigma$ that maximizes the likelihood of the state sequence (i.e., the fish's trajectory)
+given the observations.
+The optimal likelihood value reflects the level of residual inconsistency between the tag observed (recorded) and reference data.
 
-# Figures
+# Key Features of pangeo-fish
 
-Figures can be included like this:
-![Caption for example figure.\label{fig:example}](figure.png)
-and referenced from text using \autoref{fig:example}.
+**pangeo-fish** is a Python software that handles the entire pipeline for reconstructing fish trajectories given sensor records and a reference data, and visualizing the results.
+The key features of **pangeo-fish** are its trivial API that follows each stage of the pipeline, and its scalibility abilities, which includes parallel computation and streamlined remote data fetching.
 
-Figure sizes can be customized by adding an optional second parameter:
-![Caption for example figure.](figure.png){ width=20% }
+## Pre-processing
+
+The framework starts by loading the records of a tagged fish:
+
+```python
+from pangeo_fish.helpers import load_tag
+tag, tag_log, time_slice = load_tag(tag_root, tag_name, storage_options)
+```
+
+Then, the user selects the reference model (depending on, for example, the studied area or the resolution of the model):
+
+```python
+from pangeo_fish.helpers import load_model
+reference_model = load_model(uri, tag_log, time_slice, ...)
+```
+
+In the previous instruction, the oceanic model is reduced to fit the scope of the tag (in time and space) with `load_model()`.
+
+The next step involves complex operations, which are however made easily accessible for the user in a few instructions.
+The operations consists of computing the difference between the reference and biologging data, regridding the consequent result (to avoid spatial distortions) to finally compute
+the emission probabilities given the initial (and optionally the final) position(s) of the fish and the regridded dataset:
+
+```python
+from pangeo_fish.helpers import compute_diff, regrid_dataset, compute_emission_pdf
+diff = compute_diff(reference_model, tag_log, relative_depth_threshold, ...)[0]
+reshaped = regrid_dataset(diff, nside, min_vertices, ...)[0]
+emission_pdf = compute_emission_pdf(differences, tag["tagging_events"].ds, ...)[0]
+```
+
+## Accounting for telemetric detections
+
+Before normalizing the emission probabilities, the user can include another distribution, based on the possible detections of the fish by the acoustic receivers:
+
+```python
+form pangeo_fish.helpers import compute_acoustic_pdf, combine_pdfs
+acoustic_pdf = compute_acoustic_pdf(emission_pdf, tag, receiver_buffer, ...)
+combined_pdf = combine_pdfs([emission_pdf, acoustic_pdf], ...)
+```
+
+## Model Optimization
+
+Finally, the normalized distributions are fitted to find the optimal $\sigma$, and the fish's positions can be extracted (**pangeo-fish** features several modes for reconstructing trajectories):
+
+```python
+from pangeo_fish.helpers import optimize_pdf, predict_positions
+parameters = optimize_pdf(combined_pdf, maximum_speed, save_parameters=True, ...)
+states, trajectories = predict_positions(path_to_previous_results, track_modes, ...)
+```
+
+## Result Analysis and Visualization
+
+Every result of the step described above can be easily visualized for analysis with **pangeo-fish**.
+For instance, the user can plot an interactive visualization of the trajectories:
+
+```python
+from pangeo_fish.helpers import plot_trajectories
+plot = plot_trajectories(path_to_previous_results, track_modes, save_html=True)
+```
+
+A video of the evolution of the state and the emission distributions alongside of each other can also be rendered:
+
+```python
+from pangeo_fish.helpers import open_distributions, render_distributions
+data = open_distributions(path_to_previous_results, storage_options, ...)
+render_distributions(data, "results/", extension="mp4", remove_frames=True, ...)
+```
+
+As for the tags' data, the time series of the DST's logs can be easily visualized with:
+
+```python
+from pangeo_fish.helpers import plot_tag
+plot = plot_tag(tag, tag_log, save_html=True, ...)
+```
+
+# Conclusion
+
+**pangeo-fish** is a Python package that implements a geolocation model, based on a Hidden Markov Model, for estimating fish positions from biologging and oceanic data.
+Designed to work with the Pangeo ecosystem, it aims to support the biologists with their research, by handling backend processes — such as data loading or parallel computation — while exposing a user-friendly interface to manage their biologging data and run the geolocation model.
 
 # Acknowledgements
 
-T Odaka, JM Delouis and J Magin thanks to the support by CNES Appel a projet R&T R-S23/DU-0002-025-01.
-T Odaka, JM Delouis and M Woillez thanks to the support by the TAOS project funded by the IFREMER via the AMII OCEAN 2100 programme.
+T Odaka, JM Delouis and J Magin are supported by the CNES Appel, a projet R&T R-S23/DU-0002-025-01.
+T Odaka, JM Delouis and M Woillez are supported by the TAOS project funded by the IFREMER via the AMII OCEAN 2100 programme.
+Q Mazouni, M Woillez, A Fouilloux and T Odaka are supported by Global Fish Tracking System (GFTS), a Destination Earth use case procured and funded by ESA (SA Contract No. 4000140320/23/I-NS, DESTINATION EARTH USE CASES - DESP USE CASES - ROUND (YEAR 2023))
 
 # References
