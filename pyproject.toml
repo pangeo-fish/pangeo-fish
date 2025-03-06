@@ -22,6 +22,10 @@ dependencies = [
     "movingpandas",
     "xarray-healpy",
     "cf_xarray",
+    "pint-xarray",
+    "intake",
+    "s3fs",
+    "fsspec",
     "healpix-convolution",
     "xdggs",
     "imageio[ffmpeg]"
