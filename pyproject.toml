@@ -77,6 +77,7 @@ ignore = [
     "E402", # module level import not at top of file
     "E501", # line too long - let black worry about that
     "E731", # do not assign a lambda expression, use a def
+    "UP038", # use type union instead of tuple of types - type union is slower
 ]
 select = [
     "F",  # Pyflakes
