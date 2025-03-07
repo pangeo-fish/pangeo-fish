@@ -50,7 +50,7 @@ bibliography: paper.bib
 Geo-referenced data plays an important role in understanding and conserving natural resources, particularly when investigating biological phenomena such as fish migration and habitat uses.
 Biologging, the practice of attaching small devices (called _tags_) to animals for recording behavior, physiology, and environmental data, proves to be invaluable in this field.
 
-As fish can not be tracked directly using GPS devices, geolocation models have emerged to estimate fish positions by correlating individual series of physical measurements — e.g. temperature and pressure records — with geophysical reference fields - oceanic temperature and bathymetry - derived from satellite observations and hydrodynamical model outputs. The quality of geophysical reference fields is therefore of paramount importance, which depends on the spatio-temporal resolution at which the physical processes are considered and modeled.
+As fish can not be tracked directly using tracking devices such as GPS receivers, geolocation models have emerged to estimate fish positions by correlating individual series of physical measurements — e.g. temperature and pressure records — with geophysical reference fields - oceanic temperature and bathymetry - derived from satellite observations and hydrodynamical model outputs. The quality of geophysical reference fields is therefore of paramount importance, which depends on the spatio-temporal resolution at which the physical processes are considered and modeled.
 However, higher resolutions involves more data, that requires significant computing power and storage capacity.
 
 To address this challenge, we developed a Python package for fish tracking estimation, named **pangeo-fish**.
@@ -173,6 +173,7 @@ The framework starts by loading the archival records of a tagged fish:
 
 ```python
 from pangeo_fish.helpers import load_tag
+
 tag, tag_log, time_slice = load_tag(tag_root, tag_name, storage_options)
 ```
 
@@ -180,6 +181,7 @@ Then, the user selects the reference model (depending on, for example, the studi
 
 ```python
 from pangeo_fish.helpers import load_model
+
 reference_model = load_model(uri, tag_log, time_slice, ...)
 ```
 
@@ -190,6 +192,7 @@ The operations consists of computing the difference between the archival tag and
 
 ```python
 from pangeo_fish.helpers import compute_diff, regrid_dataset, compute_emission_pdf
+
 diff = compute_diff(reference_model, tag_log, relative_depth_threshold, ...)[0]
 reshaped = regrid_dataset(diff, nside, min_vertices, ...)[0]
 emission_pdf = compute_emission_pdf(differences, tag["tagging_events"].ds, ...)[0]
@@ -200,7 +203,8 @@ emission_pdf = compute_emission_pdf(differences, tag["tagging_events"].ds, ...)[
 Before normalizing the emission probabilities, the user can include another distribution, based on the possible fish detections by acoustic receivers:
 
 ```python
-form pangeo_fish.helpers import compute_acoustic_pdf, combine_pdfs
+from pangeo_fish.helpers import compute_acoustic_pdf, combine_pdfs
+
 acoustic_pdf = compute_acoustic_pdf(emission_pdf, tag, receiver_buffer, ...)
 combined_pdf = combine_pdfs([emission_pdf, acoustic_pdf], ...)
 ```
@@ -211,6 +215,7 @@ Finally, the normalized distributions are fitted to find the optimal $\sigma$, a
 
 ```python
 from pangeo_fish.helpers import optimize_pdf, predict_positions
+
 parameters = optimize_pdf(combined_pdf, maximum_speed, save_parameters=True, ...)
 states, trajectories = predict_positions(path_to_previous_results, track_modes, ...)
 ```
@@ -222,6 +227,7 @@ For instance, the time series of the archival tag's can be easily visualized wit
 
 ```python
 from pangeo_fish.helpers import plot_tag
+
 plot = plot_tag(tag, tag_log, save_html=True, ...)
 ```
 
