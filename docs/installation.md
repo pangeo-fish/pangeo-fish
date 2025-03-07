@@ -15,7 +15,7 @@ If you are only interested in using `pangeo-fish` locally (i.e, without accessin
 To do so, clone the `pangeo-fish`'s repository and navigate to it:
 
 ```console
-git clone https://github.com/IAOCEA/pangeo-fish.git
+git clone https://github.com/pangeo-fish/pangeo-fish.git
 cd pangeo-fish
 ```
 
