@@ -52,6 +52,7 @@ Biologging, the practice of attaching small devices (called _tags_) to animals f
 
 As fish can not be tracked directly using GPS devices, geolocation models have emerged to estimate fish positions by correlating individual series of physical measurements — e.g. temperature and pressure records — with geophysical reference fields - oceanic temperature and bathymetry - derived from satellite observations and hydrodynamical model outputs. The quality of geophysical reference fields is therefore of paramount importance, which depends on the spatio-temporal resolution at which the physical processes are considered and modeled.
 However, higher resolutions involves more data, that requires significant computing power and storage capacity.
+
 To address this challenge, we developed a Python package for fish tracking estimation, named **pangeo-fish**.
 It is based on the [Pangeo](https://www.pangeo.io/) ecosystem, which offers a unique interoperable, scalable, open source tools for interactive data analysis in the field of big data marine and geoscience.
 
@@ -70,32 +71,37 @@ However, unlike terrestrial animals, marine mammals or large sharks (which regul
 For studying fish movements, the two widely used electronic tagging technologies are acoustic telemetry and archival tags. Acoustic telemetry involves a tag that emits an acoustic signal containing a unique ID and possibly sensor data.
 This signal can be detected by an acoustic receiver when the tagged animal is within range, and the detection data is retrieved from the receiver.
 As such, acoustic tags do not need to be recovered, but there is no guarantee that the tagged fish will swim around the receivers network.
+
 In contrast, archival tags store sensor measurements at set intervals in their memory.
-To access the logged data, these tags must either be recovered (which mostly depends on fishers and the local population living along the coast) or transmit their information via satellite. The data from archival tags can offer detailed insights into vertical movement patterns [@heerah2017coupling], environmental preferences [@righton2010thermal, @skagerrak_tagging], and can be used to reconstruct migration paths through geolocation modeling.
+To access the logged data, these tags must either be recovered (which mostly depends on fishers and the local population living along the coast) or transmit their information via satellite. The data from archival tags can offer detailed insights into vertical movement patterns [@heerah2017coupling], environmental preferences [@righton2010thermal; @skagerrak_tagging], and can be used to reconstruct migration paths through geolocation modeling.
 
 Over the past two decades, several geolocation methods have been developed to track fish movements.
-The first approach compares tag records with field observations of variables like light intensity and temperature, assuming fixed swimming speeds [@metcalfe1997tracking, hunter2003geolocation].
-A more advanced method uses state-space models (SSMs), which are flexible statistical tools that estimate the likelihood of unknown states, such as fish location and behavior [@royer2005state, @patterson2017statistical].
+The first approach compares tag records with field observations of variables like light intensity and temperature, assuming fixed swimming speeds [@metcalfe1997tracking; hunter2003geolocation].
+A more advanced method uses state-space models (SSMs), which are flexible statistical tools that estimate the likelihood of unknown states, such as fish location and behavior [@royer2005state; @patterson2017statistical].
 SSMs can account for uncertainties in both tag records and field observations.
+
 Hidden Markov Models (HMMs) are a specific type of SSM used for geolocation.
-HMMs represent fish locations as discrete states within a spatial grid and consist of two sub-models: the process model, which predicts movement between grid cells, and the observation model, which predicts the likelihood of observations based on the state. The estimation process involves iterative "time updates" and "data updates" to refine the fish's location over time, culminating in a "forward filter" and a "backward filter" to incorporate all available data [@pedersen2008geolocation, @woillez_hmm-based_2016].
+HMMs represent fish locations as discrete states within a spatial grid and consist of two sub-models: the process model, which predicts movement between grid cells, and the observation model, which predicts the likelihood of observations based on the state. The estimation process involves iterative "time updates" and "data updates" to refine the fish's location over time, culminating in a "forward filter" and a "backward filter" to incorporate all available data [@pedersen2008geolocation; @woillez_hmm-based_2016].
 
 ![Example of an acoustic tag (on the left) and a DST (on the right). See the centimeter scale for size reference.\label{fig:tag}](archival_tag.png){ width=35% }
 
 In practice, estimating fish positions relies on the likelihood of observed data from archival tag logs, such as temperature at specific depths, combined with reference geoscience data like satellite observations and oceanic temperature from hydrodynamic models. The quality of these geophysical reference fields is crucial and depends on the spatio-temporal resolution at which physical processes are modeled. A first approach to enhance the accuracy of geolocation model predictions involved using additional information.
 Acoustic tags provide location data when tagged animals are within range of a receiver, while archival tags offer continuous time series of logged sensor measurements, from which trajectories can be inferred.
-These technologies provide complementary information on fish movement patterns, helping to overcome the limitations of each method. Fish trajectories can be reconstructed from logged depth and temperature histories using an existing geolocation modeling approach, adapted to include the likelihood of the acoustic detections [@a_combination_tag_2023, @100008].
+These technologies provide complementary information on fish movement patterns, helping to overcome the limitations of each method. Fish trajectories can be reconstructed from logged depth and temperature histories using an existing geolocation modeling approach, adapted to include the likelihood of the acoustic detections [@a_combination_tag_2023; @100008].
 A second approach involved the use of more accurate hydrodynamic models with high spatial and temporal resolutions.
 However, higher resolutions involves more data, that requires significant computing power and storage capacity.
 
 The Pangeo community handles these challenges, by fostering an ecosystem of interoperable, scalable, open source tools for interactive data analysis in the field of big data marine and geoscience.
-Therefore, the Pangeo ecosystem represents a powerful mean through which ecologists can analyze more easily their archival tag data and improve the accuracy of geolocation model predictions, which will help to better understand fish ecology, essential fish habitats, migration pathways, all the information needed for the sustainable management of a fishery resource [@de2019new, @pontual_seabass_migration_2023].
+Therefore, the Pangeo ecosystem represents a powerful mean through which ecologists can analyze more easily their archival tag data and improve the accuracy of geolocation model predictions, which will help to better understand fish ecology, essential fish habitats, migration pathways, all the information needed for the sustainable management of a fishery resource [@de2019new; @pontual_seabass_migration_2023].
 
 Unfortunately, the research community lacks of adaptable, scale and open source implementations of geolocation models.
 **pangeo-fish** is a Python package that fills this gap.
+
 As its name suggest, the software has been designed to be used within the Pangeo ecosystem on several aspects, therefore accounting for both the users' needs (user-friendly API and meaningful result visualization) and the computational challenges.
 In particular, **pangeo-fish** has a robust data model based on [Xarray](https://docs.xarray.dev/en/latest/index.html) and scales computation with [Dask](https://docs.dask.org/en/stable/).
+
 Data loading processes are furthermore streamlined by libraries like `intake`, `kerchunk` or `fsspec`, and the previously mentioned `xarray` data model enables interactive visualization of the results thanks to tools such as the `hvplot` library and the JupyterLab environment.
+
 Similarly, `pangeo-fish`'s I/O operations are automatically distributed with the combination of Dask and [Zarr](https://zarr.dev/).
 The Pangeo software stack provides researchers with the necessary tools to access reference data and perform intensive computations in a scalable and interactive manner.
 `pangeo-fish` gives ecologists a user-friendly tool for inferring fish locations from archival tag data, hence filling the gap between their expertise and the Pangeo's environment capabilities.
@@ -143,7 +149,7 @@ The Pangeo software stack provides researchers with the necessary tools to acces
 **pangeo-fish** implements a method well established in the fish trajectory reconstruction literature [pedersen2008geolocation, @woillez_hmm-based_2016, a_combination_tag_2023].
 It consists of a Hidden Markov Model introduced above.
 
-![Illustration of the Hidden Markov Model. The hidden states $Xt$ describe the fish's positions, and the emission probabilities $P(Y_t|X_t)$ correspond to the likelihood of observing the fish at time $t$.\label{fig:hmm}](hmm2.png){ width=50% }
+![Illustration of the Hidden Markov Model. The hidden states $Xt$ describe the fish's positions, and the emission probabilities $P(Y_t|X_t)$ correspond to the likelihood of observing the fish at time $t$.\label{fig:hmm}](hmm2.png){ width=75% }
 
 As illustrated in \autoref{fig:hmm}, the latent (or _hidden_) states $X_t$ of the HMM infer the (daily or hourly) fish's positions, and the observation process relates the sensor records with the oceanic data.
 The transition matrix between the hidden states is modeled by a Brownian motion parametrized by $\sigma$.
@@ -212,7 +218,7 @@ states, trajectories = predict_positions(path_to_previous_results, track_modes, 
 ## Result analysis and visualization
 
 Every result of the step described above can be easily visualized for analysis with **pangeo-fish**.
-For instance, the time series of the archival tags can be easily visualized with:
+For instance, the time series of the archival tag's can be easily visualized with:
 
 ```python
 from pangeo_fish.helpers import plot_tag
