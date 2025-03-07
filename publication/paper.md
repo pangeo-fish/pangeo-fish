@@ -81,7 +81,7 @@ A more advanced method uses state-space models (SSMs), which are flexible statis
 SSMs can account for uncertainties in both tag records and field observations.
 
 Hidden Markov Models (HMMs) are a specific type of SSM which can be adapted to be suitable for geolocation.
-HMMs represent fish locations as discrete states within a spatial grid and consist of two sub-models: the process model, which predicts movement between grid cells, and the observation model, which predicts the likelihood of observations based on the state. The estimation process involves iterative "time updates" and "data updates" to refine the fish's location over time, culminating in a "forward filter" and a "backward filter" to incorporate all available data [@pedersen2008geolocation; @woillez_hmm-based_2016].
+The resulting class of HMMs represents fish locations as discrete states within a spatial grid and consist of two sub-models: the process model, which predicts movement between grid cells, and the observation model, which predicts the likelihood of observations based on the state. The estimation process involves iterative "time updates" and "data updates" to refine the fish's location over time, culminating in a "forward filter" and a "backward filter" to incorporate all available data [@pedersen2008geolocation; @woillez_hmm-based_2016].
 
 ![Example of an acoustic tag (on the left) and a DST (on the right). See the centimeter scale for size reference.\label{fig:tag}](archival_tag.png){ width=35% }
 
