@@ -229,6 +229,7 @@ The user can also plot an interactive visualization of the trajectories:
 
 ```python
 from pangeo_fish.helpers import plot_trajectories
+
 plot = plot_trajectories(path_to_previous_results, track_modes, save_html=True)
 ```
 
