@@ -152,7 +152,7 @@ It consists of a Hidden Markov Model introduced above.
 ![Illustration of the Hidden Markov Model. The hidden states $Xt$ describe the fish's positions, and the emission probabilities $P(Y_t|X_t)$ correspond to the likelihood of observing the fish at time $t$.\label{fig:hmm}](hmm2.png){ width=75% }
 
 As illustrated in \autoref{fig:hmm}, the latent (or _hidden_) states $X_t$ of the HMM infer the (daily or hourly) fish's positions, and the observation process relates the sensor records with the environmental reference data.
-The transition matrix between the hidden states is modeled by a Brownian motion parametrized by $\sigma$.
+The transition matrix between the hidden states is modeled as a Brownian motion parametrized by the standard deviation $\sigma$.
 As such, fitting the geolocation model for a tag's records aims to both estimate the value of $\sigma$ that maximizes the likelihood of the hidden states sequence (i.e., the fish's trajectory) given the observations, and a reconstruction of the sequence of hidden states from observed positions, e.g. the most probable track (the Viterbi algorithm), the mean and the modal tracks.
 The optimal likelihood value reflects the level of residual inconsistency between the observed (recorded) tag data and the reference data.
 
