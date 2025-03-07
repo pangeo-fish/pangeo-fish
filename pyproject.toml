@@ -33,7 +33,7 @@ dependencies = [
 dynamic = ["version"]
 
 [project.urls]
-"Homepage" = "https://github.com/iaocea/pangeo-fish"
+"Homepage" = "https://github.com/pangeo-fish/pangeo-fish"
 
 [project.scripts]
 pangeo-fish = "pangeo_fish.cli:main"
