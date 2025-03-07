@@ -146,7 +146,7 @@ The Pangeo software stack provides researchers with the necessary tools to acces
 
 # Geolocation Model
 
-**pangeo-fish** implements a method well established in the fish trajectory reconstruction literature [pedersen2008geolocation, @woillez_hmm-based_2016, a_combination_tag_2023].
+**pangeo-fish** implements a method well established in the fish trajectory reconstruction literature [@pedersen2008geolocation, @woillez_hmm-based_2016, @a_combination_tag_2023].
 It consists of a Hidden Markov Model introduced above.
 
 ![Illustration of the Hidden Markov Model. The hidden states $Xt$ describe the fish's positions, and the emission probabilities $P(Y_t|X_t)$ correspond to the likelihood of observing the fish at time $t$.\label{fig:hmm}](hmm2.png){ width=75% }
