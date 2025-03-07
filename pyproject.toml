@@ -22,12 +22,18 @@ dependencies = [
     "movingpandas",
     "xarray-healpy",
     "cf_xarray",
+    "pint-xarray",
+    "intake",
+    "s3fs",
+    "fsspec",
     "healpix-convolution",
+    "xdggs",
+    "imageio[ffmpeg]"
 ]
 dynamic = ["version"]
 
 [project.urls]
-"Homepage" = "https://github.com/iaocea/pangeo-fish"
+"Homepage" = "https://github.com/pangeo-fish/pangeo-fish"
 
 [project.scripts]
 pangeo-fish = "pangeo_fish.cli:main"
@@ -77,6 +83,7 @@ ignore = [
     "E402", # module level import not at top of file
     "E501", # line too long - let black worry about that
     "E731", # do not assign a lambda expression, use a def
+    "UP038", # use type union instead of tuple of types - type union is slower
 ]
 select = [
     "F",  # Pyflakes
@@ -97,3 +104,10 @@ known-third-party = []
 [tool.ruff.lint.flake8-tidy-imports]
 # Disallow all relative imports.
 ban-relative-imports = "all"
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "error:::pangeo_fish.*",
+    "ignore:Missing optional dependencies. To use the trajectory smoother classes please install Stone Soup:UserWarning:movingpandas",
+    "ignore:Specifying VariableLengthTuple:DeprecationWarning:traitlets",
+]
