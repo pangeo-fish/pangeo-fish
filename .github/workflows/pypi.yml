@@ -8,7 +8,7 @@ on:
 jobs:
   build-artifacts:
     runs-on: ubuntu-latest
-    if: github.repository == 'IAOCEA/pangeo-fish'
+    if: github.repository == 'pangeo-fish/pangeo-fish'
     steps:
       - uses: actions/checkout@v4
         with:

@@ -5,7 +5,7 @@
 Since the package has not been released yet, it has to be installed from source:
 
 ```sh
-git clone https://github.com/iaocea/pangeo-fish.git
+git clone https://github.com/pangeo-fish/pangeo-fish.git
 cd pangeo-fish
 ```
 
