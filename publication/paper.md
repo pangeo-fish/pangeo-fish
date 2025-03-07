@@ -165,7 +165,7 @@ The optimal likelihood value reflects the level of residual inconsistency betwee
 # Key Features of pangeo-fish
 
 **pangeo-fish** is a Python software that handles the entire pipeline for reconstructing fish trajectories given sensor records and a reference data, and visualizing the results.
-The key features of **pangeo-fish** are its trivial API that follows each stage of the pipeline, and its scalability abilities, which includes parallel computation and streamlined remote data fetching.
+The key features of **pangeo-fish** are its simple API that follows each stage of the pipeline, and its scalability, which includes parallel computation and streamlined remote data fetching.
 
 ## Pre-processing
 
