@@ -236,6 +236,7 @@ As for the state and emission distributions, a video of their evolution (alongsi
 
 ```python
 from pangeo_fish.helpers import open_distributions, render_distributions
+
 data = open_distributions(path_to_previous_results, storage_options, ...)
 render_distributions(data, "results/", extension="mp4", remove_frames=True, ...)
 ```
