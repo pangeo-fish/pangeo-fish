@@ -56,5 +56,3 @@ Pangeo-Fish is distributed under the [BSD 3-Clause License](https://github.com/p
 ---
 
 🌐 **Join us to advance open, scalable science through biologging data analysis!**
-
-
