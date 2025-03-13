@@ -26,7 +26,7 @@ Or set up the development environment:
 ```bash
 git clone https://github.com/pangeo-fish/pangeo-fish.git
 cd pangeo-fish
-conda env create -f environment.yml
+conda env create -n pangeo-fish -f environment.yml
 conda activate pangeo-fish
 jupyter lab
 ```
