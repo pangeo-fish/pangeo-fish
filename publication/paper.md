@@ -83,7 +83,7 @@ The data from archival tags can offer detailed insights into vertical movement p
 
 ![Example of an acoustic tag (on the left) and a DST (on the right). See the centimeter scale for size reference.\label{fig:tag}](archival_tag.png){ width=35% }
 
-\autoref{fig:tag} shows an example of an acoustic tag as well as a DTS.
+\autoref{fig:tag} shows an example of an acoustic tag as well as a DST.
 
 Over the past two decades, several geolocation methods have been developed to track fish movements.
 The first approach compares tag records with field observations of variables like light intensity and temperature, assuming fixed swimming speeds [@metcalfe1997tracking; @hunter2003geolocation].
