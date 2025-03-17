@@ -76,7 +76,7 @@ In contrast, archival tags store sensor measurements at set intervals in their m
 To access the logged data, these tags must either be recovered (which mostly depends on fishers and the local population living along the coast) or transmit their information via satellite. The data from archival tags can offer detailed insights into vertical movement patterns [@heerah2017coupling], environmental preferences [@righton2010thermal; @skagerrak_tagging], and can be used to reconstruct migration paths through geolocation modeling.
 
 Over the past two decades, several geolocation methods have been developed to track fish movements.
-The first approach compares tag records with field observations of variables like light intensity and temperature, assuming fixed swimming speeds [@metcalfe1997tracking; hunter2003geolocation].
+The first approach compares tag records with field observations of variables like light intensity and temperature, assuming fixed swimming speeds [@metcalfe1997tracking; @hunter2003geolocation].
 A more advanced method uses state-space models (SSMs), which are flexible statistical tools that estimate the likelihood of unknown states, such as fish location and behavior [@royer2005state; @patterson2017statistical].
 SSMs can account for uncertainties in both tag records and field observations.
 
