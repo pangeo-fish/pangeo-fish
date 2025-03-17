@@ -50,7 +50,8 @@ bibliography: paper.bib
 Geo-referenced data plays an important role in understanding and conserving natural resources, particularly when investigating biological phenomena such as fish migration and habitat uses.
 Biologging, the practice of attaching small devices (called _tags_) to animals for recording behavior, physiology, and environmental data, proves to be invaluable in this field.
 
-As fish can not be tracked directly using tracking devices such as GPS receivers, geolocation models have emerged to estimate fish positions by correlating individual series of physical measurements — e.g. temperature and pressure records — with geophysical reference fields - oceanic temperature and bathymetry - derived from satellite observations and hydrodynamical model outputs. The quality of geophysical reference fields is therefore of paramount importance, which depends on the spatio-temporal resolution at which the physical processes are considered and modeled.
+As fish can not be tracked directly using tracking devices such as GPS receivers, geolocation models have emerged to estimate fish positions by correlating individual series of physical measurements — e.g. temperature and pressure records — with geophysical reference fields — oceanic temperature and bathymetry — derived from satellite observations and hydrodynamical model outputs.
+The quality of geophysical reference fields is therefore of paramount importance, which depends on the spatio-temporal resolution at which the physical processes are considered and modeled.
 However, higher resolutions involves more data, that requires significant computing power and storage capacity.
 
 To address this challenge, we developed a Python package for fish tracking estimation, named **pangeo-fish**.
@@ -61,19 +62,28 @@ These fish geolocation models are critical for better understanding fish movemen
 
 # Statement of need
 
-Bio-logging consists in attaching onto (or sometimes inserting into) an animal an
+Biologging consists in attaching onto (or sometimes inserting into) an animal an
 electronic device that will record in its memory physical and/or geochemical parameters as a function of time so that scientists can reconstruct the activity of the animal, the characteristics of the environment it travels in and the interactions between the two.
-These tools can provide a wealth of information on the behaviors and movements of free-swimming marine animals, including diving and activity patterns, habitat selection, swimming behavior, mating behavior, energy use, interaction with environment.
-However, unlike terrestrial animals, marine mammals or large sharks (which regularly return to the surface), whose positions can be directly estimated using ARGOS or GPS technologies, tracking fish underwater is challenging.
+These tools can provide a wealth of information on the behaviors and movements of free-swimming marine animals, including diving and activity patterns, habitat selection, swimming behavior, mating behavior, energy use and interaction with environment.
 
 ![Promotion of the FISH-INTEL tagging campaign.\label{fig:fishintel}](fishintel.png){ width=35% }
 
-For studying fish movements, the two widely used electronic tagging technologies are acoustic telemetry and archival tags. Acoustic telemetry involves a tag that emits an acoustic signal containing a unique ID and possibly sensor data.
+However, unlike terrestrial animals, marine mammals or large sharks (which regularly return to the surface), whose positions can be directly estimated using ARGOS or GPS technologies, tracking fish underwater is challenging.
+To address this issue, various tagging experiments have been conducted on a variety of fish species [@spanish_tagging; @skagerrak_tagging], and methods have been proposed for approximating the fish locations, referred to as geolocation models [@pontual_seabass_migration_2023; @woillez_hmm-based_2016].
+
+For studying fish movements, the two widely used electronic tagging technologies are acoustic telemetry and Data Storage Tags (DST, or archival tags).
+Acoustic telemetry involves a tag that emits an acoustic signal containing a unique ID and possibly sensor data.
 This signal can be detected by an acoustic receiver when the tagged animal is within range, and the detection data is retrieved from the receiver.
 As such, acoustic tags do not need to be recovered, but there is no guarantee that the tagged fish will swim around the receivers network.
 
 In contrast, archival tags store sensor measurements at set intervals in their memory.
-To access the logged data, these tags must either be recovered (which mostly depends on fishers and the local population living along the coast) or transmit their information via satellite. The data from archival tags can offer detailed insights into vertical movement patterns [@heerah2017coupling], environmental preferences [@righton2010thermal; @skagerrak_tagging], and can be used to reconstruct migration paths through geolocation modeling.
+To access the logged data, these tags must either be recovered (which mostly depends on fishers and the local population living along the coast) or transmit their information via satellite.
+In the former case, tagging campaigns usually promote and possibly reward tag or fish captures (see for instance, the advertisement from the [FISH-INTEL](https://www.france-energies-marines.org/en/projects/fish-intel/) campaign on \autoref{fig:fishintel}).
+The data from archival tags can offer detailed insights into vertical movement patterns [@heerah2017coupling] or environmental preferences [@righton2010thermal; @skagerrak_tagging], and can be used to reconstruct migration paths through geolocation modeling.
+
+![Example of an acoustic tag (on the left) and a DST (on the right). See the centimeter scale for size reference.\label{fig:tag}](archival_tag.png){ width=35% }
+
+\autoref{fig:tag} shows an example of an acoustic tag as well as a DTS.
 
 Over the past two decades, several geolocation methods have been developed to track fish movements.
 The first approach compares tag records with field observations of variables like light intensity and temperature, assuming fixed swimming speeds [@metcalfe1997tracking; @hunter2003geolocation].
@@ -83,11 +93,12 @@ SSMs can account for uncertainties in both tag records and field observations.
 Hidden Markov Models (HMMs) are a specific type of SSM which can be adapted to be suitable for geolocation.
 The resulting class of HMMs represents fish locations as discrete states within a spatial grid and consist of two sub-models: the process model, which predicts movement between grid cells, and the observation model, which predicts the likelihood of observations based on the state. The estimation process involves iterative "time updates" and "data updates" to refine the fish's location over time, culminating in a "forward filter" and a "backward filter" to incorporate all available data [@pedersen2008geolocation; @woillez_hmm-based_2016].
 
-![Example of an acoustic tag (on the left) and a DST (on the right). See the centimeter scale for size reference.\label{fig:tag}](archival_tag.png){ width=35% }
-
-In practice, estimating fish positions relies on the likelihood of observed data from archival tag logs, such as temperature at specific depths, combined with reference geoscience data like satellite observations and oceanic temperature from hydrodynamic models. The quality of these geophysical reference fields is crucial and depends on the spatio-temporal resolution at which physical processes are modeled. A first approach to enhance the accuracy of geolocation model predictions involved using additional information.
+In practice, estimating fish positions relies on the likelihood of observed data from archival tag logs, such as temperature at specific depths, combined with reference geoscience data like satellite observations and oceanic temperature from hydrodynamic models.
+The quality of these geophysical reference fields is crucial and depends on the spatio-temporal resolution at which physical processes are modeled.
+A first approach to enhance the accuracy of geolocation model predictions involved using additional information.
 Acoustic tags provide location data when tagged animals are within range of a receiver, while archival tags offer continuous time series of logged sensor measurements, from which trajectories can be inferred.
-These technologies provide complementary information on fish movement patterns, helping to overcome the limitations of each method. Fish trajectories can be reconstructed from logged depth and temperature histories using an existing geolocation modeling approach, adapted to include the likelihood of the acoustic detections [@a_combination_tag_2023; @100008].
+These technologies provide complementary information on fish movement patterns, helping to overcome the limitations of each method.
+Fish trajectories can be reconstructed from logged depth and temperature histories using an existing geolocation modeling approach, adapted to include the likelihood of the acoustic detections [@a_combination_tag_2023; @100008].
 A second approach involved the use of more accurate hydrodynamic models with high spatial and temporal resolutions.
 However, higher resolutions involves more data, that requires significant computing power and storage capacity.
 
