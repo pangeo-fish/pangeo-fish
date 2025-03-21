@@ -52,4 +52,6 @@ def reshape_by_bins(ds, *, dim, bins, other_dim="obs"):
         processed.drop_vars("time")
         .rename_dims({"time_bins": "time"})
         .rename_vars({"time_bins": "time"})
+        .assign_coords({dim: bins[dim]})
+        .drop_vars("time_bins", errors="ignore")
     )

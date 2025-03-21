@@ -453,7 +453,6 @@ def compute_diff(
             .pipe(bounds_to_bins, bounds_dim="bounds")
             .get("time_bins")
         ),
-        bin_dim="bincount",
         other_dim="obs",
     ).chunk({"time": chunk_time})
     attrs = tag_log.attrs | {"relative_depth_threshold": relative_depth_threshold}
