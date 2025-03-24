@@ -57,3 +57,7 @@ ipython kernel install --name "pangeo-fish" --user.
 Besides, you can refer to [this documentation on how to use pangeo on HPC](https://gitlab.ifremer.fr/diam/pangeo_on_HPC).
 
 All of those steps should create a Python environment able to run the different Jupyter notebooks available.
+
+## Help and Troubleshooting
+
+In case of errors or difficulties upon installing `pangeo-fish`, you can report the issue [here](https://github.com/pangeo-fish/pangeo-fish/issues).
