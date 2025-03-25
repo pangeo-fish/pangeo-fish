@@ -22,7 +22,7 @@ dependencies:
   - intake-xarray
   - zstandard
   # units, bounds, and cf-conventions
-  - cf_xarray
+  - cf_xarray>=0.10.4
   - pint-xarray
   # general computing
   - flox
