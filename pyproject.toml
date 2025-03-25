@@ -11,7 +11,7 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
 ]
 dependencies = [
-  "xarray>=2024.11.0,<2025.3.0",
+  "xarray>=2024.11.0",
   "pandas",
   "numpy",
   "scipy",
