@@ -21,7 +21,7 @@ dependencies = [
   "sparse",
   "healpy",
   "movingpandas",
-  "xarray-healpy",
+  "xhealpixify",
   "cf_xarray",
   "pint-xarray",
   "intake",

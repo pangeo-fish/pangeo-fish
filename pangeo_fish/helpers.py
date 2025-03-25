@@ -23,7 +23,7 @@ import xdggs  # noqa: F401
 from matplotlib.figure import Figure
 from toolz.dicttoolz import valfilter
 from toolz.functoolz import curry  # to change
-from xarray_healpy import HealpyGridInfo, HealpyRegridder
+from xhealpixify import HealpyGridInfo, HealpyRegridder
 
 import pangeo_fish.distributions as distrib
 from pangeo_fish.acoustic import emission_probability
