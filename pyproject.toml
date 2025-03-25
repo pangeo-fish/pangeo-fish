@@ -22,7 +22,7 @@ dependencies = [
   "healpy",
   "movingpandas",
   "xhealpixify",
-  "cf_xarray",
+  "cf_xarray>=0.10.4",
   "pint-xarray",
   "intake",
   "s3fs",
