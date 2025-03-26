@@ -25,6 +25,7 @@ from toolz.dicttoolz import valfilter
 from toolz.functoolz import curry  # to change
 from xhealpixify import HealpyGridInfo, HealpyRegridder
 
+import pangeo_fish
 import pangeo_fish.distributions as distrib
 from pangeo_fish.acoustic import emission_probability
 from pangeo_fish.cf import bounds_to_bins
@@ -455,7 +456,10 @@ def compute_diff(
         ),
         other_dim="obs",
     ).chunk({"time": chunk_time})
-    attrs = tag_log.attrs | {"relative_depth_threshold": relative_depth_threshold}
+    attrs = tag_log.attrs | {
+        "relative_depth_threshold": relative_depth_threshold,
+        "version_number": pangeo_fish.__version__,
+    }
     diff = (
         diff_z(reference_model, reshaped_tag, depth_threshold=relative_depth_threshold)
         .assign_attrs(attrs)
@@ -581,7 +585,9 @@ def regrid_dataset(
 
     # adds the attributes found in `ds` as well as `min_vertices`
     attrs = ds.attrs.copy()
-    attrs.update({"min_vertices": min_vertices})
+    attrs.update(
+        {"min_vertices": min_vertices, "version_number": pangeo_fish.__version__}
+    )
     reshaped = reshaped.assign_attrs(attrs)
 
     if save:
@@ -713,7 +719,13 @@ def compute_emission_pdf(
         )
     )  # type: xr.Dataset
     attrs = diff_ds.attrs.copy()
-    attrs.update({"differences_std": differences_std, "recapture_std": recapture_std})
+    attrs.update(
+        {
+            "differences_std": differences_std,
+            "recapture_std": recapture_std,
+            "version_number": pangeo_fish.__version__,
+        }
+    )
     emission_pdf = emission_pdf.assign_attrs(attrs)
     emission_pdf = emission_pdf.chunk({"time": chunk_time} | {d: -1 for d in dims})
 
@@ -801,7 +813,12 @@ def compute_acoustic_pdf(
         dims=dims,
     )
     attrs = emission_ds.attrs.copy()
-    attrs.update({"receiver_buffer": str(receiver_buffer)})
+    attrs.update(
+        {
+            "receiver_buffer": str(receiver_buffer),
+            "version_number": pangeo_fish.__version__,
+        }
+    )
     acoustic_pdf = acoustic_pdf.assign_attrs(attrs)
 
     if save:
@@ -896,6 +913,7 @@ def combine_pdfs(
         combined.attrs.update(ds.attrs)
         if combined.coords.get("cell_ids", None) is not None:
             combined["cell_ids"].attrs.update(ds["cell_ids"].attrs)
+    ds.attrs.update({"version_number": pangeo_fish.__version__})
 
     figure = False
     if plot:
@@ -1027,6 +1045,7 @@ def optimize_pdf(
     )
     optimized = optimizer.fit(ds)
     params = optimized.to_dict()  # type: dict
+    params["version_number"] = pangeo_fish.__version__
     params = _update_params_dict(factory=predictor_factory, params=params)
 
     if save_parameters:
@@ -1129,7 +1148,9 @@ def predict_positions(
 
     states = optimized.predict_proba(emission)
     states = (
-        states.to_dataset().chunk(chunks).assign_attrs(emission.attrs)
+        states.to_dataset()
+        .chunk(chunks)
+        .assign_attrs(emission.attrs | {"version_number": pangeo_fish.__version__})
     )  # type: xr.Dataset
 
     if save:
