@@ -72,7 +72,21 @@ __all__ = [
 
 
 def _get_package_versions():
-    return {"package_versions": {k: version(k) for k in ["pangeo-fish", "xhealpixify"]}}
+    # reference for the chosen key
+    # https://cfconventions.org/Data/cf-conventions/cf-conventions-1.12/cf-conventions.html#description-of-file-contents
+    return {
+        "comment": ", ".join(
+            [
+                f"{package} == {version(package)}"
+                for package in [
+                    "pangeo-fish",
+                    "healpix-convolution",
+                    "xarray",
+                    "xhealpixify",
+                ]
+            ]
+        )
+    }
 
 
 def _add_package_versions(ds: xr.Dataset):
@@ -192,8 +206,9 @@ def load_tag(*, tag_root: str, tag_name: str, storage_options: dict = None, **kw
     if not tag_root.startswith("s3://"):
         storage_options = {}
     tag = open_tag(tag_root, tag_name, storage_options)
+    tag.attrs.update({"tag_name": tag_name})
     time_slice = to_time_slice(tag["tagging_events/time"])
-    tag_log = tag["dst"].ds.sel(time=time_slice).assign_attrs({"tag_name": tag_name})
+    tag_log = tag["dst"].ds.sel(time=time_slice).assign_attrs(tag.attrs)
     return tag, tag_log, time_slice
 
 
@@ -469,7 +484,7 @@ def compute_diff(
         | _get_package_versions()
         | {
             "relative_depth_threshold": relative_depth_threshold,
-            "field_info": reference_model.attrs,
+            "history": reference_model.attrs,
         }
     )
     diff = (
@@ -1153,7 +1168,9 @@ def predict_positions(
     states = (
         states.to_dataset()
         .chunk(chunks)
-        .assign_attrs(emission.attrs | _get_package_versions())
+        .assign_attrs(
+            emission.attrs | _get_package_versions() | {"sigma": params["sigma"]}
+        )
     )  # type: xr.Dataset
 
     if save:
