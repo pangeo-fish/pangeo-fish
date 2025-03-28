@@ -3,6 +3,7 @@ import os
 import re
 import sys
 import warnings
+from importlib.metadata import version
 from pathlib import Path
 
 import fsspec
@@ -68,6 +69,28 @@ __all__ = [
     "render_frames",
     "render_distributions",
 ]
+
+
+def _get_package_versions():
+    # reference for the chosen key
+    # https://cfconventions.org/Data/cf-conventions/cf-conventions-1.12/cf-conventions.html#description-of-file-contents
+    return {
+        "comment": ", ".join(
+            [
+                f"{package} == {version(package)}"
+                for package in [
+                    "pangeo-fish",
+                    "healpix-convolution",
+                    "xarray",
+                    "xhealpixify",
+                ]
+            ]
+        )
+    }
+
+
+def _add_package_versions(ds: xr.Dataset):
+    return ds.assign_attrs(ds.attrs | _get_package_versions())
 
 
 def _plot_in_figure(ds: xr.Dataset, **plot_kwargs) -> Figure:
@@ -183,8 +206,9 @@ def load_tag(*, tag_root: str, tag_name: str, storage_options: dict = None, **kw
     if not tag_root.startswith("s3://"):
         storage_options = {}
     tag = open_tag(tag_root, tag_name, storage_options)
+    tag.attrs.update({"tag_name": tag_name})
     time_slice = to_time_slice(tag["tagging_events/time"])
-    tag_log = tag["dst"].ds.sel(time=time_slice).assign_attrs({"tag_name": tag_name})
+    tag_log = tag["dst"].ds.sel(time=time_slice).assign_attrs(tag.attrs)
     return tag, tag_log, time_slice
 
 
@@ -455,7 +479,14 @@ def compute_diff(
         ),
         other_dim="obs",
     ).chunk({"time": chunk_time})
-    attrs = tag_log.attrs | {"relative_depth_threshold": relative_depth_threshold}
+    attrs = (
+        tag_log.attrs
+        | _get_package_versions()
+        | {
+            "relative_depth_threshold": relative_depth_threshold,
+            "history": reference_model.attrs,
+        }
+    )
     diff = (
         diff_z(reference_model, reshaped_tag, depth_threshold=relative_depth_threshold)
         .assign_attrs(attrs)
@@ -581,7 +612,7 @@ def regrid_dataset(
 
     # adds the attributes found in `ds` as well as `min_vertices`
     attrs = ds.attrs.copy()
-    attrs.update({"min_vertices": min_vertices})
+    attrs.update(_get_package_versions() | {"min_vertices": min_vertices})
     reshaped = reshaped.assign_attrs(attrs)
 
     if save:
@@ -712,7 +743,7 @@ def compute_emission_pdf(
             )
         )
     )  # type: xr.Dataset
-    attrs = diff_ds.attrs.copy()
+    attrs = diff_ds.attrs.copy() | _get_package_versions()
     attrs.update({"differences_std": differences_std, "recapture_std": recapture_std})
     emission_pdf = emission_pdf.assign_attrs(attrs)
     emission_pdf = emission_pdf.chunk({"time": chunk_time} | {d: -1 for d in dims})
@@ -800,8 +831,12 @@ def compute_acoustic_pdf(
         chunk_time=chunk_time,
         dims=dims,
     )
-    attrs = emission_ds.attrs.copy()
-    attrs.update({"receiver_buffer": str(receiver_buffer)})
+    attrs = emission_ds.attrs.copy() | _get_package_versions()
+    attrs.update(
+        {
+            "receiver_buffer": str(receiver_buffer),
+        }
+    )
     acoustic_pdf = acoustic_pdf.assign_attrs(attrs)
 
     if save:
@@ -896,6 +931,7 @@ def combine_pdfs(
         combined.attrs.update(ds.attrs)
         if combined.coords.get("cell_ids", None) is not None:
             combined["cell_ids"].attrs.update(ds["cell_ids"].attrs)
+    ds.attrs.update(_get_package_versions())
 
     figure = False
     if plot:
@@ -1028,6 +1064,7 @@ def optimize_pdf(
     optimized = optimizer.fit(ds)
     params = optimized.to_dict()  # type: dict
     params = _update_params_dict(factory=predictor_factory, params=params)
+    params.update(_get_package_versions())
 
     if save_parameters:
         try:
@@ -1129,7 +1166,11 @@ def predict_positions(
 
     states = optimized.predict_proba(emission)
     states = (
-        states.to_dataset().chunk(chunks).assign_attrs(emission.attrs)
+        states.to_dataset()
+        .chunk(chunks)
+        .assign_attrs(
+            emission.attrs | _get_package_versions() | {"sigma": params["sigma"]}
+        )
     )  # type: xr.Dataset
 
     if save:
