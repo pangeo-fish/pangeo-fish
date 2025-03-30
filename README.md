@@ -1,3 +1,4 @@
+[![DOI](https://zenodo.org/badge/653040548.svg)](https://doi.org/10.5281/zenodo.15110142)
 [![CI](https://github.com/pangeo-fish/pangeo-fish/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/pangeo-fish/pangeo-fish/actions/workflows/ci.yml)
 [![docs](https://readthedocs.org/projects/pangeo-fish/badge/?version=latest)](https://pangeo-fish.readthedocs.io/en/latest/)
 [![PyPI version](https://img.shields.io/pypi/v/pangeo-fish.svg)](https://pypi.org/project/pangeo-fish)
