@@ -28,7 +28,7 @@ authors:
   - family-names: "Odaka"
     given-names: "Tina"
     orcid: "https://orcid.org/0000-0002-1500-0156"
-version: 2025.03.0
+version: 2025.03.3
 date-released: "2025-03-07"
 license: GPL-3.0
 repository-code: "https://github.com/pangeo-fish/pangeo-fish"
