@@ -2,7 +2,6 @@ cff-version: 1.2.0
 message: "If you use this software, please cite it using these metadata."
 title: pangeo-fish
 abstract: "Pangeo-Fish is an open, community-driven project designed to leverage the power of the Pangeo ecosystem specifically for fish biologging data analysis and related oceanographic research. The project facilitates scalable, reproducible, and collaborative research by integrating biologging data with environmental datasets using cloud-native technologies."
-message: "If you use this software, please cite it as below."
 type: software
 authors:
   - family-names: "Magin"
