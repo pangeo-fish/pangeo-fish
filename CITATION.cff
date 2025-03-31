@@ -1,7 +1,7 @@
 cff-version: 1.2.0
+message: "If you use this software, please cite it using these metadata."
 title: pangeo-fish
 abstract: "Pangeo-Fish is an open, community-driven project designed to leverage the power of the Pangeo ecosystem specifically for fish biologging data analysis and related oceanographic research. The project facilitates scalable, reproducible, and collaborative research by integrating biologging data with environmental datasets using cloud-native technologies."
-message: "If you use this software, please cite it as below."
 type: software
 authors:
   - family-names: "Magin"
@@ -19,7 +19,6 @@ authors:
   - family-names: "Woillez"
     given-names: "Mathieu"
     orcid: "https://orcid.org/0000-0002-1032-2105"
-    affiliation:
   - family-names: "Fouilloux"
     given-names: "Anne"
     orcid: "https://orcid.org/0000-0002-1784-2920"
@@ -29,6 +28,9 @@ authors:
   - family-names: "Odaka"
     given-names: "Tina"
     orcid: "https://orcid.org/0000-0002-1500-0156"
+version: 2025.03.3
+date-released: "2025-03-31"
+license: GPL-3.0
 repository-code: "https://github.com/pangeo-fish/pangeo-fish"
 url: "https://pangeo-fish.readthedocs.io"
 keywords:
@@ -38,6 +40,6 @@ keywords:
   - Xarray
   - Zarr
   - Dask
-license: GPL-3.0
-version: 2025.03.0
-date-released: "2025-03-07"
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.15110143
