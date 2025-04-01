@@ -1,7 +1,0 @@
-gh-scoped-creds
-isort
-jupyter-keepalive
-jupyterhub==4.1.6
-kbatch==0.5.0a2
-kbatch-papermill==0.1.0a1
-pangeo-fish
