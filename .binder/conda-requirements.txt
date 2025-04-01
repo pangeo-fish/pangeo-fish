@@ -1,0 +1,19 @@
+# packages to be installed with conda
+# requirements.txt format
+# to install with pip, use requirements.txt
+altair
+cdshealpix
+copernicusmarine
+dask-image
+eccodes>=2.35.0
+fastparquet
+h3ronpy
+healpy
+imageio-ffmpeg
+jq
+movingpandas
+papermill
+pixi
+rclone
+rich
+zstandard
