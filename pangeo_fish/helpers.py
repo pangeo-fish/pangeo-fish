@@ -947,6 +947,81 @@ def combine_pdfs(
     return combined, figure
 
 
+def normalize_pdf(
+    *,
+    ds: xr.Dataset,
+    chunks: dict,
+    dims=None,
+    plot=False,
+    **kwargs,
+):
+    """Normalize a probability distributions (pdf).
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        Dataset of emission probabilities. It must have a variable ``pdf``.
+    chunks : mapping
+        How to chunk the data
+    dims : mapping, optional
+        Spatial dimensions to transpose the combined dataset. Relevant in case of a 2D, such as ["x", "y"] or ["y", "x"]
+    plot : bool, default: False
+        Whether to plot the sum of the distributions along the time dimension.
+
+
+    Returns
+    -------
+    combined : xarray.Dataset
+        The combined pdf
+    figure : plt.Figure, or None if ``plot=False``
+    """
+    spatial_dims = [dim for dim in ds.dims if dim != "time"]
+    time_mask = ds["pdf"].count(dim=spatial_dims) == 0
+
+    num_times = time_mask.sum().to_numpy().item()  # type: int
+    if num_times != 0:
+        warnings.warn(
+            f'The variable "pdf" in `ds` sums to 0 for {num_times} times.', UserWarning
+        )
+
+    normalized = ds.pipe(combine_emission_pdf).chunk(chunks)
+
+    # optional spatial transposition
+    if (dims is not None) and ("cells" not in dims):
+        # TODO: still not enough...
+        if not all([d in normalized.dims for d in dims]):
+            raise ValueError(
+                f'Not all the dimensions provided (dims="{dims}") were found in the emission distribution.'
+            )
+        if "time" in dims:
+            warnings.warn(
+                '"time" was found in "dims". Spatial dimensions are expected.',
+                UserWarning,
+            )
+            normalized = normalized.transpose(*dims)
+        else:
+            normalized = normalized.transpose("time", *dims)
+
+    # metadata preservation
+    normalized.attrs.update(ds.attrs)
+    if normalized.coords.get("cell_ids", None) is not None:
+        normalized["cell_ids"].attrs.update(ds["cell_ids"].attrs)
+    normalized.attrs.update(_get_package_versions())
+
+    figure = False
+    if plot:
+        try:
+            figure = _plot_in_figure(normalized["pdf"].sum(dims), ylim=(0, 2))
+            [ax] = figure.get_axes()
+            ax.set_title("Sum of the probabilities")
+        except Exception:
+            warnings.warn(
+                "An error occurred when plotting the normalized dataset.",
+                RuntimeWarning,
+            )
+    return normalized, figure
+
+
 def _get_predictor_factory(ds: xr.Dataset, truncate: float, dims: list[str]):
     if dims == ["x", "y"]:
         predictor = curry(Gaussian2DCartesian, truncate=truncate)
