@@ -4,6 +4,9 @@
 [![PyPI version](https://img.shields.io/pypi/v/pangeo-fish.svg)](https://pypi.org/project/pangeo-fish)
 [![Downloads](https://pepy.tech/badge/pangeo-fish)](https://pepy.tech/project/pangeo-fish)
 [![codestyle](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/python/black)
+[![License](https://img.shields.io/github/license/pangeo-fish/pangeo-fish)](https://github.com/pangeo-fish/pangeo-fish/blob/main/LICENSE)
+[![Last Commit](https://img.shields.io/github/last-commit/pangeo-fish/pangeo-fish)](https://github.com/pangeo-fish/pangeo-fish/commits/main)
+[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/pangeo-fish/pangeo-fish/HEAD)
 
 # Pangeo-Fish 🐟
 
