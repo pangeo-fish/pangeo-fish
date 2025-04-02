@@ -701,7 +701,9 @@ def compute_emission_pdf(
     final_position = events_ds.sel(event_name="fish_death")
 
     if dims == ["x", "y"]:
-        cov = distrib.create_covariances(initial_std, coord_names=["latitude", "longitude"])
+        cov = distrib.create_covariances(
+            initial_std, coord_names=["latitude", "longitude"]
+        )
         initial_probability = distrib.normal_at(
             grid,
             pos=initial_position,
