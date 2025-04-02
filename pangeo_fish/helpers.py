@@ -638,6 +638,7 @@ def compute_emission_pdf(
     diff_ds: xr.Dataset,
     events_ds: xr.Dataset,
     differences_std: float,
+    initial_std: float,
     recapture_std: float,
     chunk_time: int = 24,
     dims: list[str] = ["cells"],
@@ -658,6 +659,8 @@ def compute_emission_pdf(
         Hint: given a tag model, it corresponds to ``tag["tagging_events"].ds``
     differences_std : float
         Standard deviation that is applied to the data (passed to ``scipy.stats.norm.pdf``). It'd express the estimated certainty of the field of difference
+    initial_std: float
+        Covariance for the initial event. It should reflect the certainty of the initial release area
     recapture_std : float
         Covariance for the recapture event. It should reflect the certainty of the final recapture area
     dims : list of str, default: ["cells"]
@@ -698,7 +701,7 @@ def compute_emission_pdf(
     final_position = events_ds.sel(event_name="fish_death")
 
     if dims == ["x", "y"]:
-        cov = distrib.create_covariances(1e-6, coord_names=["latitude", "longitude"])
+        cov = distrib.create_covariances(initial_std, coord_names=["latitude", "longitude"])
         initial_probability = distrib.normal_at(
             grid,
             pos=initial_position,
@@ -708,7 +711,7 @@ def compute_emission_pdf(
         )
     else:
         initial_probability = distrib.healpix.normal_at(
-            grid, pos=initial_position, sigma=1e-5
+            grid, pos=initial_position, sigma=initial_std
         )
 
     if final_position[["longitude", "latitude"]].to_dataarray().isnull().all():
