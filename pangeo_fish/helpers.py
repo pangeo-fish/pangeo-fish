@@ -750,7 +750,13 @@ def compute_emission_pdf(
         )
     )  # type: xr.Dataset
     attrs = diff_ds.attrs.copy() | _get_package_versions()
-    attrs.update({"differences_std": differences_std, "recapture_std": recapture_std})
+    attrs.update(
+        {
+            "differences_std": differences_std,
+            "recapture_std": recapture_std,
+            "initial_std": initial_std,
+        }
+    )
     emission_pdf = emission_pdf.assign_attrs(attrs)
     emission_pdf = emission_pdf.chunk({"time": chunk_time} | {d: -1 for d in dims})
 
