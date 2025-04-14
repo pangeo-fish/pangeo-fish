@@ -3,17 +3,16 @@ from dataclasses import asdict, dataclass, field, replace
 import movingpandas as mpd
 import numpy as np
 from tlz.functoolz import compose_left, curry, pipe
-from tlz.itertoolz import first
 
 from pangeo_fish import tracks, utils
-from pangeo_fish.hmm.decode import mean_track, modal_track, viterbi, viterbi2
-from pangeo_fish.hmm.filter import forward, forward_backward, score
+from pangeo_fish.hmm.decode import mean_track, modal_track
+from pangeo_fish.hmm.filter import forward_backward, score
 from pangeo_fish.hmm.prediction import Predictor
 
 
 @dataclass
 class EagerEstimator:
-    """Estimator to train and predict gaussian random walk hidden markov models
+    """Estimator to train and predict gaussian random walk hidden markov models.
 
     This estimator performs all calculations eagerly and assumes all data can fit into memory.
 
@@ -22,15 +21,15 @@ class EagerEstimator:
     predictor_factory : callable
         Factory for the predictor class. It expects the parameter ("sigma") as a keyword
         argument and returns the predictor instance.
-    sigma : float, optional
-        The primary model parameter: the standard deviation of the distance
+    sigmas : array of float, optional
+        Primary parameters of the model, which are the different standard deviations of the distance
         per time unit traveled by the fish, in the same unit as the grid coordinates.
     """
 
     predictor_factory: callable
-    sigma: float | None = None
+    sigmas: list[float] | None = None
 
-    predictor: Predictor | None = field(default=None, init=False)
+    predictors: list[Predictor] | None = field(default=None, init=False)
 
     def to_dict(self):
         exclude = {"predictor_factory"}
@@ -38,17 +37,37 @@ class EagerEstimator:
         return {k: v for k, v in asdict(self).items() if k not in exclude}
 
     def set_params(self, **params):
-        """Set the parameters on a new instance
+        """Set the parameters on a new instance.
 
         Parameters
         ----------
         **params
             Mapping of parameter name to new value.
+
+        Returns
+        -------
+        estimator : Estimator
+            A new instance with the set parameters.
         """
         return replace(self, **params)
 
+    def _get_predictors(self) -> list[Predictor]:
+        """Return a list of predictors with their sigma values set in the same order of the ``sigmas`` attribute.
+
+        Returns
+        -------
+        predictors : list[Predictor]
+            Predictor instances created by the factory.
+        """
+        if (self.sigmas is None) or (
+            not all([sigma is not None for sigma in self.sigmas])
+        ):
+            raise ValueError("All or some sigma are not set.")
+
+        return [self.predictor_factory(sigma=sigma) for sigma in self.sigmas]
+
     def _score(self, X, *, spatial_dims=None, temporal_dims=None):
-        if self.sigma is None:
+        if self.sigmas is None:
             raise ValueError("unset sigma, cannot run the filter")
 
         if spatial_dims is None:
@@ -60,42 +79,47 @@ class EagerEstimator:
 
         X_ = X.transpose(*dims)
 
-        predictor: Predictor
-        if self.predictor is None:
-            predictor = self.predictor_factory(sigma=self.sigma)
-            self.predictor = predictor
+        predictors: list[Predictor]
+        if self.predictors is None:
+            predictors = self._get_predictors()
+            self.predictors = predictors
         else:
-            predictor = self.predictor
+            predictors = self.predictors
 
         value = score(
             emission=X_["pdf"].data,
             mask=X_["mask"].data,
             initial_probability=X_["initial"].data,
-            predictor=predictor,
+            predictor_indices=X_["predictor_index"].data,
+            predictors=predictors,
         )
 
         return value if not np.isnan(value) else np.inf
 
-    def _forward_algorithm(self, X, *, spatial_dims=None, temporal_dims=None):
-        if self.sigma is None:
-            raise ValueError("unset sigma, cannot run the filter")
+    # TODO: unused?
+    # def _forward_algorithm(self, X, *, spatial_dims=None, temporal_dims=None):
+    #     if self.sigmas is None:
+    #         raise ValueError("unset sigma, cannot run the filter")
 
-        if spatial_dims is None:
-            spatial_dims = utils._detect_spatial_dims(X)
-        if temporal_dims is None:
-            temporal_dims = utils._detect_temporal_dims(X)
+    #     if spatial_dims is None:
+    #         spatial_dims = utils._detect_spatial_dims(X)
+    #     if temporal_dims is None:
+    #         temporal_dims = utils._detect_temporal_dims(X)
 
-        predictor = self.predictor_factory(sigma=self.sigma)
-        filtered = forward(
-            emission=X["pdf"].data,
-            mask=X["mask"].data,
-            initial_probability=X["initial"].data,
-            predictor=predictor,
-        )
-        return X["pdf"].copy(data=filtered)
+    #     #TODO: tranposition missing?
+
+    #     predictors = self._get_predictors()
+    #     filtered = forward(
+    #         emission=X["pdf"].data,
+    #         mask=X["mask"].data,
+    #         initial_probability=X["initial"].data,
+    #         predictor_indices=X["predictor_index"].data,
+    #         predictors=predictors,
+    #     )
+    #     return X["pdf"].copy(data=filtered)
 
     def _forward_backward_algorithm(self, X, *, spatial_dims=None, temporal_dims=None):
-        if self.sigma is None:
+        if self.sigmas is None:
             raise ValueError("unset sigma, cannot run the filter")
 
         if spatial_dims is None:
@@ -106,18 +130,25 @@ class EagerEstimator:
         dims = temporal_dims + spatial_dims
         X_ = X.transpose(*dims)
 
-        predictor = self.predictor_factory(sigma=self.sigma)
+        predictors: list[Predictor]
+        if self.predictors is None:
+            predictors = self._get_predictors()
+            self.predictors = predictors
+        else:
+            predictors = self.predictors
+
         filtered = forward_backward(
             emission=X_["pdf"].data,
             mask=X_["mask"].data,
             initial_probability=X_["initial"].data,
-            predictor=predictor,
+            predictor_indices=X_["predictor_index"].data,
+            predictors=predictors,
         )
 
         return X["pdf"].copy(data=filtered)
 
     def predict_proba(self, X, *, spatial_dims=None, temporal_dims=None):
-        """Predict the state probabilities
+        """Predict the state probabilities.
 
         This is done by applying the forward-backward algorithm to the data.
 
@@ -129,6 +160,7 @@ class EagerEstimator:
             - ``initial``, the initial probability map
             - ``pdf``, the emission probabilities
             - ``mask``, a mask to select ocean pixels
+            - ``predictor_index``, the indices to select the predictor for each time step
 
             Due to the convolution method we use today, we can't pass np.nan, thus we send ``x.fillna(0)``, but drop the values whihch are less than 0 and put them back to np.nan when we return the value.
         spatial_dims : list of hashable, optional
@@ -150,9 +182,9 @@ class EagerEstimator:
         return state.rename("states")
 
     def score(self, X, *, spatial_dims=None, temporal_dims=None):
-        """Score the fit of the selected model to the data
+        """Score the fit of the selected model to the data.
 
-        Apply the forward-backward algorithm to the given data, then return the
+        It applies the forward-backward algorithm to the given data, then return the
         negative logarithm of the normalization factors.
 
         Parameters
@@ -163,6 +195,7 @@ class EagerEstimator:
             - ``pdf``, the emission probabilities
             - ``mask``, a mask to select ocean pixels
             - ``initial``, the initial probability map
+            - ``predictor_index``, the indices to select the predictor for each time step
 
         spatial_dims : list of hashable, optional
             The spatial dimensions of the dataset.
@@ -183,7 +216,7 @@ class EagerEstimator:
         X,
         states=None,
         *,
-        mode="viterbi",
+        mode="mean",
         spatial_dims=None,
         temporal_dims=None,
         progress=False,
@@ -206,12 +239,11 @@ class EagerEstimator:
 
             - ``states``: the state probabilities
 
-        mode : str or list of str, default: "viterbi"
+        mode : str or list of str, default: "mean"
             The decoding method. Possible values are:
 
             - ``"mean"``: use the centroid of the state probabilities as decoded state.
             - ``"mode"``: use the maximum of the state probabilities as decoded state.
-            - ``"viterbi"``: use the Viterbi algorithm to determine the most probable states.
 
             If a list of methods is given, decode using all methods in sequence.
 
@@ -239,8 +271,9 @@ class EagerEstimator:
         decoders = {
             "mean": compose_left(maybe_compute_states, mean_track),
             "mode": compose_left(maybe_compute_states, modal_track),
-            "viterbi": compose_left(first, curry(viterbi, sigma=self.sigma)),
-            "viterbi2": compose_left(first, curry(viterbi2, sigma=self.sigma)),
+            # TODO: not supported with multiple sigma
+            # "viterbi": compose_left(first, curry(viterbi, sigma=self.sigma)),
+            # "viterbi2": compose_left(first, curry(viterbi2, sigma=self.sigma)),
         }
 
         if not isinstance(mode, list):
