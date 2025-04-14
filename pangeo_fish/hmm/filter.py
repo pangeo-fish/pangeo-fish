@@ -6,19 +6,19 @@ import numpy as np
 import zarr  # noqa: F401
 
 
-def score(emission, predictor, initial_probability, mask=None):
-    """Score of a single pass (forwards) of the spatial HMM filter
+def score(emission, predictors, predictor_indices, initial_probability, mask=None):
+    """Score of a single pass (forwards) of the spatial HMM filter.
 
     Parameters
     ----------
     emission : array-like
-        probability density function of the observations (emission probabilities)
-    predictor: Predictor
-        Algorithm for predicting the next time step.
+        probability density function of the observations (emission probabilities).
+    predictors: array of Predictor
+        The different algorithms for predicting the next time steps.
+    predictor_indices: array of int
+        Indices for selecting which predictor to use for each time step.
     initial_probability : array-like
-        The probability of the first hidden state
-    final_probability : array-like, optional
-        The probability of the last hidden state
+        The probability of the first hidden state.
     mask : array-like, optional
         A mask to apply after each step. No shadowing yet.
 
@@ -42,19 +42,19 @@ def score(emission, predictor, initial_probability, mask=None):
     normalizations.append(np.sum(initial * dask.compute(emission[0, ...])[0]))
     previous = initial
 
-    for index in range(1, n_max):
-        prediction = predictor.predict(previous, mask=mask)
-        updated = prediction * dask.compute(emission[index, ...])[0]
+    for time_index, predictor_index in zip(range(1, n_max), predictor_indices):
+        prediction = predictors[predictor_index].predict(previous, mask=mask)
+        updated = prediction * dask.compute(emission[time_index, ...])[0]
 
         normalization_factor = np.sum(updated)
         if normalization_factor == 0:
             warnings.warn(
-                f"Empty product of the prediction with the true distribution at step {index+1}.",
+                f"Empty product of the prediction with the true distribution at step {time_index+1}.",
                 RuntimeWarning,
             )
             return 1e6
         normalizations.append(normalization_factor)
-        normalized = updated / normalizations[index]
+        normalized = updated / normalizations[time_index]
 
         previous = normalized
 
@@ -63,17 +63,19 @@ def score(emission, predictor, initial_probability, mask=None):
     return -np.sum(np.log(normalizations_))
 
 
-def forward(emission, predictor, initial_probability, mask=None):
-    """Single pass (forwards) of the spatial HMM filter
+def forward(emission, predictors, predictor_indices, initial_probability, mask=None):
+    """Single pass (forwards) of the spatial HMM filter.
 
     Parameters
     ----------
     emission : array-like
-        probability density function of the observations (emission probabilities)
-    predictor: Predictor
-        Algorithm for predicting the next time step.
+        probability density function of the observations (emission probabilities).
+    predictors: array of Predictor
+        The different algorithms for predicting the next time steps.
+    predictor_indices: array of int
+        Indices for selecting which predictor to use for each time step.
     initial_probability : array-like
-        The probability of the first hidden state
+        The probability of the first hidden state.
     mask : array-like, optional
         A mask to apply after each step. No shadowing yet.
 
@@ -90,11 +92,13 @@ def forward(emission, predictor, initial_probability, mask=None):
     predictions.append(initial_probability)
     states.append(initial_probability)
 
-    for index in range(1, n_max):
-        prediction = predictor.predict(states[index - 1], mask=mask)
+    for time_index, predictor_index in zip(range(1, n_max), predictor_indices):
+        prediction = predictors[predictor_index].predict(
+            states[time_index - 1], mask=mask
+        )
         predictions.append(prediction)
 
-        updated = prediction * emission[index, ...]
+        updated = prediction * emission[time_index, ...]
 
         normalized = updated / np.sum(updated)
         states.append(normalized)
@@ -102,19 +106,19 @@ def forward(emission, predictor, initial_probability, mask=None):
     return np.stack(predictions, axis=0), np.stack(states, axis=0)
 
 
-def backward(states, predictions, predictor, mask=None):
+def backward(states, predictions, predictors, predictor_indices, mask=None):
     n_max = states.shape[0]
     eps = 2.204e-16**20
 
     smoothed = [states[-1, ...]]
     backward_predictions = [states[-1, ...]]
-    for index in range(1, n_max):
-        ratio = smoothed[index - 1] / (predictions[-index, ...] + eps)
-        backward_prediction = predictor.predict(ratio, mask=None)
+    for time_index, predictor_index in zip(range(1, n_max), predictor_indices):
+        ratio = smoothed[time_index - 1] / (predictions[-time_index, ...] + eps)
+        backward_prediction = predictors[predictor_index].predict(ratio, mask=None)
         normalized = backward_prediction / np.sum(backward_prediction)
         backward_predictions.append(normalized)
 
-        updated = normalized * states[-index - 1, ...]
+        updated = normalized * states[-time_index - 1, ...]
         updated_normalized = updated / np.sum(updated)
 
         smoothed.append(updated_normalized)
@@ -124,19 +128,21 @@ def backward(states, predictions, predictor, mask=None):
     )
 
 
-def forward_backward(emission, predictor, initial_probability, mask=None):
-    """Double pass (forwards and backwards) of the spatial HMM filter
+def forward_backward(
+    emission, predictors, predictor_indices, initial_probability, mask=None
+):
+    """Double pass (forwards and backwards) of the spatial HMM filter.
 
     Parameters
     ----------
     emission : array-like
-        probability density function of the observations (emission probabilities)
-    predictor: Predictor
-        Algorithm for predicting the next time step.
+        probability density function of the observations (emission probabilities).
+    predictors: array of Predictor
+        The different algorithms for predicting the next time steps.
+    predictor_indices: array of int
+        Indices for selecting which predictor to use for each time step.
     initial_probability : array-like
-        The probability of the first hidden state
-    final_probability : array-like, optional
-        The probability of the last hidden state
+        The probability of the first hidden state.
     mask : array-like, optional
         A mask to apply after each step. No shadowing yet.
 
@@ -148,14 +154,16 @@ def forward_backward(emission, predictor, initial_probability, mask=None):
 
     forward_predictions, forward_states = forward(
         emission=emission,
-        predictor=predictor,
+        predictors=predictors,
+        predictor_indices=predictor_indices,
         initial_probability=initial_probability,
         mask=mask,
     )
     backwards_predictions, backwards_states = backward(
         states=forward_states,
         predictions=forward_predictions,
-        predictor=predictor,
+        predictors=predictors,
+        predictor_indices=predictor_indices,
         mask=mask,
     )
     return backwards_states
