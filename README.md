@@ -67,7 +67,7 @@ Pangeo-Fish is distributed under the [BSD 3-Clause License](https://github.com/p
 
 🌐 **Join us to advance open, scalable science through biologging data analysis!**
 
-##  Acknowledgements
+## Acknowledgements
 
 - T Odaka, JM Delouis and J Magin are supported by the CNES Appel, a projet R&T R-S23/DU-0002-025-01.
 - T Odaka, JM Delouis and M Woillez are supported by the TAOS project funded by the IFREMER via the AMII OCEAN 2100 programme.
