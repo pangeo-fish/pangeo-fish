@@ -24,7 +24,7 @@ repos:
       - id: blackdoc-autoupdate-black
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.11.0
+    rev: v0.11.5
     hooks:
       - id: ruff
         args: ["--fix", "--show-fixes"]
@@ -57,6 +57,6 @@ repos:
         args: ["--no-schema"]
 
   - repo: https://github.com/abravalheri/validate-pyproject
-    rev: v0.24
+    rev: v0.24.1
     hooks:
       - id: validate-pyproject
