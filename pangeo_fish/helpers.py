@@ -1140,7 +1140,7 @@ def optimize_pdf(
     params : dict
         A dictionary containing the optimization results (mainly, the sigma value of the Brownian movement model).
     emission : xr.Dataset
-        The original input dataset with additional metadata. In case of multi-sigma optimization, it also adds the variable "sigma".
+        The original input dataset with additional metadata.
     """
 
     predictor_index = "predictor_index"
@@ -1176,19 +1176,21 @@ def optimize_pdf(
     params.update(_get_package_versions())
 
     ds = ds.assign_attrs(
-        ds.attrs | {"max_sigma": max_sigma, "sigmas": params["sigmas"]}
+        ds.attrs
+        | {
+            "max_sigma": max_sigma,
+            "sigmas": params["sigmas"],
+            "predictor_factory": params["predictor_factory"],
+        }
     )
 
-    # adds sigma time indices in `params` and stamps `ds` with a variable `sigma` in case of multi-sigma
+    # adds sigma time indices in `params` in case of multi-sigma minimization
     if predictor_index in ds:
         sigma_indices = [
             list(group_indices)
             for group_indices in ds.groupby(predictor_index).groups.values()
         ]
-        sigma_var = _compute_sigma_var(sigma_indices, params["sigmas"])
-
         params["sigma_indices"] = sigma_indices
-        ds = ds.assign(sigma=("time", sigma_var))
 
     if save_parameters:
         try:

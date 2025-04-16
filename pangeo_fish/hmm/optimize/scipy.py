@@ -168,6 +168,9 @@ class EagerBoundsSearch:
         EagerBoundsSearch.fit_multivariate_parameter
         """
 
+        if group_name not in X:
+            raise ValueError(f'The dataset must have an entry "{group_name}".')
+
         estimators = []
 
         # for i in range(len(time_slice_indices) - 1):
