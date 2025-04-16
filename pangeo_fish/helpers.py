@@ -1180,7 +1180,7 @@ def optimize_pdf(
     )
 
     # adds sigma time indices in `params` and stamps `ds` with a variable `sigma` in case of multi-sigma
-    if "predictor_index" in ds:
+    if predictor_index in ds:
         sigma_indices = [
             list(group_indices)
             for group_indices in ds.groupby(predictor_index).groups.values()
