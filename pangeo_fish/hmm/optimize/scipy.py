@@ -137,7 +137,7 @@ class EagerBoundsSearch:
 
     def fit_multivariate_parameter(self, X: xr.Dataset):
         """
-        .. warnings::
+        .. warning::
             Not implemented yet.
         """
         raise NotImplementedError()
