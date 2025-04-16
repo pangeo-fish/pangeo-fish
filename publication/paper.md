@@ -47,8 +47,8 @@ bibliography: paper.bib
 
 # Summary
 
-<!-- Geo-referenced data plays an important role in understanding and conserving natural resources, particularly when investigating biological phenomena such as fish migration and habitat uses.
-Biologging, the practice of attaching small devices (called _tags_) to animals for recording behavior, physiology, and environmental data, proves to be invaluable in this field. -->
+Geo-referenced data plays an important role in understanding and conserving natural resources, particularly when investigating biological phenomena such as fish migration and habitat uses.
+Biologging, the practice of attaching small devices (called _tags_) to animals for recording behavior, physiology, and environmental data, proves to be invaluable in this field.
 
 As fish can not be tracked directly using tracking devices such as GPS receivers, geolocation models have emerged to estimate fish positions by correlating individual series of physical measurements — e.g. temperature and pressure records — with geophysical reference fields — oceanic temperature and bathymetry — derived from satellite observations and hydrodynamical model outputs.
 
