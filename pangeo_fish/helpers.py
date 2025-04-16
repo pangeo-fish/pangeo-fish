@@ -1,4 +1,5 @@
 import inspect
+import json
 import os
 import re
 import sys
@@ -15,7 +16,6 @@ import matplotlib.pyplot as plt
 # import hvplot.xarray
 import movingpandas  # noqa: F401
 import numpy as np
-import pandas as pd
 import pint
 import s3fs
 import tqdm
@@ -1079,6 +1079,18 @@ def _get_max_sigma(
     return max_sigma.item()
 
 
+def _compute_sigma_var(indices: list[list[int]], values: list[float]):
+    """Return a numpy array composed of the values in ``values`` according to the indices in ``indices``."""
+    # TODO: input checking...
+    var_size = sum([len(sub_list) for sub_list in indices])
+    var_list = [None for _ in range(var_size)]
+    for i, v in enumerate(values):
+        for index in indices[i]:
+            var_list[index] = v
+    assert all([s is not None for s in var_list])
+    return np.array(var_list)
+
+
 def optimize_pdf(
     *,
     ds: xr.Dataset,
@@ -1094,6 +1106,9 @@ def optimize_pdf(
     **kwargs,
 ) -> dict:
     """Optimize a temporal probability distribution.
+
+    .. note::
+        To minimize multiple sigma parameters, define the predictors' indices in ``ds["predictor_index"]``.
 
     Parameters
     ----------
@@ -1123,8 +1138,12 @@ def optimize_pdf(
     Returns
     -------
     params : dict
-        A dictionary containing the optimization results (mainly, the sigma value of the Brownian movement model)
+        A dictionary containing the optimization results (mainly, the sigma value of the Brownian movement model).
+    emission : xr.Dataset
+        The original input dataset with additional metadata.
     """
+
+    predictor_index = "predictor_index"
 
     # it is important to compute before re-indexing? Yes.
     ds = ds.compute()
@@ -1140,18 +1159,38 @@ def optimize_pdf(
     )
     predictor_factory = _get_predictor_factory(ds=ds, truncate=truncate, dims=dims)
 
-    estimator = EagerEstimator(sigma=None, predictor_factory=predictor_factory)
-    ds.attrs["max_sigma"] = max_sigma  # limitation of the helper
+    estimator = EagerEstimator(sigmas=None, predictor_factory=predictor_factory)
 
     optimizer = EagerBoundsSearch(
         estimator,
-        (1e-4, ds.attrs["max_sigma"]),
+        (1e-4, max_sigma),
         optimizer_kwargs={"disp": 3, "xtol": tolerance},
     )
-    optimized = optimizer.fit(ds)
+    optimized = (
+        optimizer.fit_multiple_single_parameters(ds, predictor_index)
+        if predictor_index in ds
+        else optimizer.fit_single_parameter(ds)
+    )
     params = optimized.to_dict()  # type: dict
     params = _update_params_dict(factory=predictor_factory, params=params)
     params.update(_get_package_versions())
+
+    ds = ds.assign_attrs(
+        ds.attrs
+        | {
+            "max_sigma": max_sigma,
+            "sigmas": params["sigmas"],
+            "predictor_factory": params["predictor_factory"],
+        }
+    )
+
+    # adds sigma time indices in `params` in case of multi-sigma minimization
+    if predictor_index in ds:
+        sigma_indices = [
+            list(group_indices)
+            for group_indices in ds.groupby(predictor_index).groups.values()
+        ]
+        params["sigma_indices"] = sigma_indices
 
     if save_parameters:
         try:
@@ -1161,15 +1200,20 @@ def optimize_pdf(
                 str_path_to_json = str(path_to_json)
             else:
                 str_path_to_json = _s3_path_to_str(path_to_json)
-            pd.DataFrame.from_dict(params, orient="index").to_json(
-                str_path_to_json, storage_options=storage_options
-            )
+
+            with fsspec.open(
+                str_path_to_json,
+                "w",
+                **{} if not target_root.startswith("s3://") else storage_options,
+            ) as file:
+                json.dump(params, file)
+
         except Exception:
             warnings.warn(
                 f'An error occurred when attempting to export the results under "{path_to_json}".',
                 RuntimeWarning,
             )
-    return params
+    return params, ds
 
 
 def predict_positions(
@@ -1187,6 +1231,9 @@ def predict_positions(
 
     .. warning::
         ``target_root`` must not end with "/".
+
+    .. note::
+        If the estimator to load has multiple sigma values, their indices are expected to be defined in the entry "predictor_index" (``emission["predictor_index"]``).
 
     Parameters
     ----------
@@ -1206,7 +1253,7 @@ def predict_positions(
     Returns
     -------
     states : xarray.Dataset
-        A geolocation model, i.e., positional temporal probabilities
+        The positional temporal probabilities. In case of multi-sigma optimization, it also adds the variable "sigma".
     trajectories : movingpandas.TrajectoryCollection
         The tracks decoded from `states`
 
@@ -1214,6 +1261,8 @@ def predict_positions(
     --------
     pangeo_fish.hmm.estimator.EagerEstimator.decode
     """
+
+    predictor_index = "predictor_index"
 
     # loads the normalized .zarr array
     emission = xr.open_dataset(
@@ -1228,9 +1277,68 @@ def predict_positions(
     if "cells" in emission.dims:
         emission = to_healpix(emission)
 
-    params = pd.read_json(
-        f"{target_root}/parameters.json", storage_options=storage_options
-    ).to_dict()[0]
+    with fsspec.open(
+        f"{target_root}/parameters.json",
+        "r",
+        **{} if not target_root.startswith("s3://") else storage_options,
+    ) as file:
+        params = json.load(file)
+
+    ## deals with the different possible data sources of the "predictor_index" integer values
+    # one parameter
+    if len(params["sigmas"]) == 1:
+        emission = emission.assign(
+            predictor_index=("time", np.zeros(emission["time"].size).astype(np.int32))
+        )
+        warnings.warn(
+            'A "predictor_index" entry (filled with 0) is added to the loaded `emission` dataset.',
+            RuntimeWarning,
+        )
+    # more than one parameter
+    else:
+        # in the input dataset
+        if predictor_index in emission:
+            index_data_type = emission[predictor_index].dtype
+            if index_data_type != np.int32:
+                emission[predictor_index] = emission[predictor_index].astype(np.int32)
+                warnings.warn(
+                    f'Entry "predictor_index" in the loaded `emission` dataset is cast to `np.int32` (found "{index_data_type}").',
+                    RuntimeWarning,
+                )
+        # last attempt before raising an error: restore the sigma variable from the dictionary of parameters
+        elif "sigma_indices" in params:
+
+            def _compute_predictor_indices(indices: list[list[int]]):
+                # TODO: input checking...
+                size = sum([len(sub_list) for sub_list in indices])
+                acc = [None for _ in range(size)]
+
+                for i in range(len(indices)):
+                    for index in indices[i]:
+                        acc[index] = i
+
+                assert all([s is not None for s in acc])
+                return np.array(acc).astype(np.int32)
+
+            try:
+                emission = emission.assign(
+                    predictor_index=(
+                        "time",
+                        _compute_predictor_indices(params["sigma_indices"]),
+                    )
+                )
+                warnings.warn(
+                    'Entry "predictor_index" not found in the emission dataset: predictors\' indices were restored from the dictionary `params`.',
+                    RuntimeWarning,
+                )
+            except Exception:
+                raise ValueError(
+                    'Entry "predictor_index" is missing in the emission dataset and predictors\' indices could not be restored from the dictionary `params`.'
+                )
+        else:
+            raise ValueError(
+                'The time indices for each sigma value is not defined in the `emission` (entry "predictor_index" is missing) and no indices found in the dictionary `params` (entry "sigma_indices" is missing).'
+            )
 
     # do not account for the other kwargs...
     # not very robust yet...
@@ -1248,17 +1356,35 @@ def predict_positions(
         raise RuntimeError("Could not infer predictor's class from the `.json` file.")
 
     optimized = EagerEstimator(
-        sigma=params["sigma"], predictor_factory=predictor_factory
+        sigmas=params["sigmas"], predictor_factory=predictor_factory
     )
 
-    states = optimized.predict_proba(emission)
+    states = optimized.predict_proba(emission)  # type: xr.DataArray
     states = (
         states.to_dataset()
         .chunk(chunks)
         .assign_attrs(
-            emission.attrs | _get_package_versions() | {"sigma": params["sigma"]}
+            emission.attrs | _get_package_versions() | {"sigmas": params["sigmas"]}
         )
     )  # type: xr.Dataset
+
+    # adds the variable `sigma` to `states`
+    if len(params["sigmas"]) > 1:
+        # from the indices in emission
+        if predictor_index in emission:
+            sigma_indices = [
+                list(group_indices)
+                for group_indices in emission.groupby(predictor_index).groups.values()
+            ]
+        elif "sigma_indices" in params:
+            sigma_indices = _compute_predictor_indices(params["sigma_indices"])
+        else:
+            raise RuntimeError(
+                "Failed to add the variable `sigma` to `states` (it should never happen.)"
+            )
+
+        sigma_var = _compute_sigma_var(sigma_indices, params["sigmas"])
+        states = states.assign(sigma=("time", sigma_var))
 
     if save:
         _save_zarr(states, f"{target_root}/states.zarr", storage_options)
@@ -1367,6 +1493,7 @@ def open_distributions(
     pangeo_fish.helpers.plot_distributions and pangeo_fish.helpers.render_distributions.
     """
 
+    # TODO: what if both combined and emission have a sigma variable?
     emission = (
         xr.open_dataset(
             f"{target_root}/combined.zarr",
@@ -1376,7 +1503,8 @@ def open_distributions(
             storage_options=storage_options,
         )
         .rename_vars({"pdf": "emission"})
-        .drop_vars(["final", "initial"], errors="ignore")
+        .get(["emission", "mask"])
+        # .drop_vars(["final", "initial", "predictor_index"], errors="ignore")
     )
     states = xr.open_dataset(
         f"{target_root}/states.zarr",

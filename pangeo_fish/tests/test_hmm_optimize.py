@@ -27,7 +27,7 @@ class TestEagerBoundsSearch:
         ),
     )
     def test_init(self, bounds):
-        estimator = EagerEstimator(sigma=None, predictor_factory=Predictor)
+        estimator = EagerEstimator(sigmas=None, predictor_factory=Predictor)
         optimizer = optimize.EagerBoundsSearch(estimator, bounds)
 
         assert isinstance(optimizer, optimize.EagerBoundsSearch)

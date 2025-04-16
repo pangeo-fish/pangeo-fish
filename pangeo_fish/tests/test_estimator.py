@@ -11,9 +11,9 @@ from pangeo_fish.hmm.prediction import Gaussian1DHealpix
 
 
 @pytest.fixture
-def sample_dataset():
+def sample_dataset() -> xr.Dataset:
     """
-    Create a sample xarray dataset with random probabilities, initial/final states, and a mask.
+    Create a sample xarray dataset with random probabilities, initial/final states, a mask and a predictor_index filled of 0.
     """
     num_time_steps = 10
     start_time = pd.Timestamp("2022-06-13T12:00:00")
@@ -35,6 +35,8 @@ def sample_dataset():
     pdf = rng.random(size=(num_time_steps, cell_ids.size))
     pdf /= pdf.sum(axis=1, keepdims=True)
 
+    indices = np.zeros(num_time_steps).astype(np.int32)
+
     ds = xr.Dataset(
         coords={"cell_ids": ("cells", cell_ids), "time": ("time", time)},
         data_vars={
@@ -42,6 +44,7 @@ def sample_dataset():
             "initial": ("cells", initial),
             "final": ("cells", final),
             "mask": ("cells", mask),
+            "predictor_index": ("time", indices),
         },
     )
     return ds.dggs.decode(
@@ -65,13 +68,17 @@ def predictor_factory(sample_dataset):
     )
 
 
+# def _add_predictor_index(ds: xr.Dataset):
+#     return ds.assign(predictor_index=("time", np.zeros(ds["time"].size).astype(np.int32)))
+
+
 @pytest.mark.parametrize("sigma", [0.0004, 0.0002])
 def test_eager_estimator_score(sample_dataset, predictor_factory, sigma):
     """
     Test that the score method returns a float and meets expected criteria for given sigma values.
     """
-    estimator = EagerEstimator(predictor_factory=predictor_factory, sigma=None)
-    score = estimator.set_params(sigma=sigma).score(sample_dataset)
+    estimator = EagerEstimator(predictor_factory=predictor_factory, sigmas=None)
+    score = estimator.set_params(sigmas=[sigma]).score(sample_dataset)
     assert isinstance(score, float), "Score should be a float."
     assert (
         score >= sample_dataset.sizes["time"]
@@ -83,7 +90,7 @@ def test_eager_estimator_predict_proba(sample_dataset, predictor_factory, sigma)
     """
     Test that `predict_proba` computes positive state probabilities summing to 1 for each time step.
     """
-    estimator = EagerEstimator(predictor_factory=predictor_factory, sigma=sigma)
+    estimator = EagerEstimator(predictor_factory=predictor_factory, sigmas=[sigma])
     state_probabilities = estimator.predict_proba(sample_dataset)
     print(state_probabilities[9])
     assert (
@@ -100,7 +107,7 @@ def test_eager_bounds_search(sample_dataset, predictor_factory, bounds, toleranc
     """
     Test that the EagerBoundsSearch optimizer instance is created correctly with given bounds and tolerance.
     """
-    estimator = EagerEstimator(sigma=None, predictor_factory=predictor_factory)
+    estimator = EagerEstimator(sigmas=None, predictor_factory=predictor_factory)
     optimizer = EagerBoundsSearch(
         estimator, bounds, optimizer_kwargs={"disp": 3, "xtol": tolerance}
     )
@@ -110,19 +117,21 @@ def test_eager_bounds_search(sample_dataset, predictor_factory, bounds, toleranc
 @pytest.mark.parametrize("tolerance", [1e-3, 1e-4])
 def test_fit_sigma(sample_dataset, predictor_factory, tolerance):
     """
-    Test that the `fit` method of EagerBoundsSearch finds a valid sigma without NaN values.
+    Test that the `fit_single_parameter` method of EagerBoundsSearch finds a valid sigma without NaN values.
     """
-    estimator = EagerEstimator(sigma=None, predictor_factory=predictor_factory)
+    estimator = EagerEstimator(sigmas=None, predictor_factory=predictor_factory)
     optimizer = EagerBoundsSearch(
         estimator,
         (1e-4, 0.0004905038455501491),
         optimizer_kwargs={"disp": 3, "xtol": tolerance},
     )
-    optimized = optimizer.fit(sample_dataset)
+    optimized = optimizer.fit_single_parameter(sample_dataset)
     print("Type of optimized:", type(optimized))
-    if hasattr(optimized, "sigma"):
-        result = optimized.sigma
-        if isinstance(result, np.ndarray | float | int):
+    if hasattr(optimized, "sigmas"):
+        result = optimized.sigmas
+        if isinstance(result, np.ndarray | list):
             assert not np.isnan(result).any(), "Optimized sigma is nan"
         else:
-            raise ValueError("Optimized result is not in the expected format ")
+            raise ValueError(
+                f"Optimized result is not in the expected format (found {type(result)})."
+            )

@@ -21,6 +21,8 @@
 
    hmm.prediction.Gaussian2DCartesian.predict
 
+   hmm.optimize.scipy.EagerBoundsSearch.fit_single_parameter
+   hmm.optimize.scipy.EagerBoundsSearch.fit_multiple_single_parameters
+   hmm.optimize.scipy.EagerBoundsSearch.fit_multivariate_parameter
    hmm.optimize.scipy.GridSearch.fit
-   hmm.optimize.scipy.EagerBoundsSearch.fit
    hmm.optimize.scipy.TargetBoundsSearch.fit
