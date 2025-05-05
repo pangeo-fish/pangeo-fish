@@ -14,6 +14,7 @@ High-level Functions
    reshape_to_2d
    load_tag
    update_stations
+   compute_detection_time_intervals
    plot_tag
    load_model
    compute_diff
@@ -23,6 +24,7 @@ High-level Functions
    compute_acoustic_pdf
    combine_pdfs
    normalize_pdf
+   stamp_parameter_indices
    optimize_pdf
    predict_positions
    plot_trajectories

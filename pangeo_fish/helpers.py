@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 # import hvplot.xarray
 import movingpandas  # noqa: F401
 import numpy as np
+import pandas as pd
 import pint
 import s3fs
 import tqdm
@@ -45,7 +46,7 @@ from pangeo_fish.io import (
 )
 from pangeo_fish.pdf import combine_emission_pdf, normal
 from pangeo_fish.tags import adapt_model_time, reshape_by_bins, to_time_slice
-from pangeo_fish.utils import temporal_resolution
+from pangeo_fish.utils import haversine_distance, temporal_resolution
 from pangeo_fish.visualization import filter_by_states, plot_map, render_frame
 
 __all__ = [
@@ -53,6 +54,7 @@ __all__ = [
     "reshape_to_2d",
     "load_tag",
     "update_stations",
+    "compute_detection_time_intervals",
     "plot_tag",
     "load_model",
     "compute_diff",
@@ -62,6 +64,7 @@ __all__ = [
     "compute_acoustic_pdf",
     "combine_pdfs",
     "normalize_pdf",
+    "stamp_parameter_indices",
     "optimize_pdf",
     "predict_positions",
     "plot_trajectories",
@@ -258,6 +261,102 @@ def update_stations(
     else:
         tag["stations"] = ds
     return tag
+
+
+def _find_time_intervals(df: pd.DataFrame, min_time: pd.Timedelta, min_dist: float):
+    def _is_far_enough(
+        lon1: float, lat1: float, lon2: float, lat2: float, min_dist: float
+    ):
+        dist = haversine_distance(lon1, lon2, lat1, lat2)
+        return dist > min_dist
+
+    if not all([k in df.columns for k in ["id", "longitude", "latitude"]]):
+        raise ValueError(
+            'The dataframe must have the columns "id", "longitude" and "latitude".'
+        )
+
+    time_delta = pd.Timedelta(0)
+    first_row = df.iloc[0]
+    last_time = first_row.name  # type: pd.Timestamp
+    last_point = (
+        first_row.longitude,
+        first_row.latitude,
+    )  # type: tuple[np.float64, np.float64]
+
+    times = [last_time]
+
+    for curr_time, row in df.iloc[1:].iterrows():
+        time_delta += curr_time - last_time
+
+        if _is_far_enough(*last_point, row.longitude, row.latitude, min_dist):
+            times.append(last_time)
+            times.append(curr_time)
+            time_delta = pd.Timedelta(0)
+
+            last_point = (row.longitude, row.latitude)
+        if time_delta > min_time:
+            times.append(curr_time)
+            time_delta = pd.Timedelta(0)
+
+            last_point = (row.longitude, row.latitude)
+
+        last_time = curr_time
+    return times
+
+
+def compute_detection_time_intervals(
+    *,
+    tag: xr.DataTree,
+    min_time: pd.Timedelta = pd.Timedelta("4days"),
+    min_dist: float = 17.0,
+    **kwargs,
+):
+    """
+    Compute the time intervals based on the acoustic detections of a fish tag.
+
+    Parameters
+    ----------
+    tag : xarray.DataTree
+        The fish tag, assumed to have an entry "acoustic".
+    min_time : pandas.Timedelta, optional
+        Minimum time length for the intervals (defaults to ``pd.Timedelta("4days")``).
+    min_dist : float, default: 17.0
+        Minimum distance between the detections to set apart different intervals, in kilometers.
+
+    Returns
+    -------
+    array of pandas.Timestamps
+        The list of timestamps that delimit the detections.
+    """
+
+    def _mapper(string: str):
+        keys = ["id", "longitude", "latitude"]
+        for k in keys:
+            if k in string:
+                return k
+        return string
+
+    # input checking of the acoustic detections
+    if "acoustic" not in tag:
+        raise ValueError("No acoustic detection found in tag.")
+    if tag["acoustic"].ds.to_dataframe().empty:
+        raise ValueError("The acoustic detection data found in tag is empty.")
+
+    # input checking of the intervals' minima
+    if min_dist <= 0.0:
+        raise ValueError(
+            f'The minimum distance must be strictly positive (received: "{min_dist}").'
+        )
+    if min_time <= pd.Timedelta(0):
+        raise ValueError(
+            f'The minimum interval time must be strictly positive (received: "{min_time}").'
+        )
+
+    detection_times_df = (
+        tag["acoustic"].ds.to_dataframe().rename(mapper=_mapper, axis=1)
+    )
+    interval_times = _find_time_intervals(detection_times_df, min_time, min_dist)
+    return interval_times
 
 
 def plot_tag(
@@ -467,7 +566,7 @@ def compute_diff(
     diff : xarray.Dataset
         The difference between the biologging and field data
     figure : plt.Figure or None
-        The plot of `diff`, or None if plot=False
+        The plot of `diff`, or ``None`` if ``plot=False``
     """
 
     reshaped_tag = reshape_by_bins(
@@ -590,7 +689,7 @@ def regrid_dataset(
     reshaped : xarray.Dataset
         HEALPix version of `ds`
     figure : plt.Figure or None
-        The plot of `reshaped`, or None if plot=False
+        The plot of `reshaped`, or ``None`` if ``plot=False``
     """
 
     grid = HealpyGridInfo(level=int(np.log2(nside)), rot=rot)
@@ -1034,6 +1133,82 @@ def normalize_pdf(
     return normalized, figure
 
 
+def _time_indices_in_ds(ds: xr.Dataset, times: list[pd.Timestamp]):
+    """Return the time indices in ``ds`` that split ``ds`` according to the list of timestamps ``times``."""
+    indices = []
+    # adds the time indices
+    ds = ds.assign_coords(time_index=("time", np.arange(ds.sizes["time"])))
+
+    for time in times:
+        index = ds.sel(time=time, method="nearest")["time_index"].to_numpy().item()
+        indices.append(index)
+    return indices
+
+
+def stamp_parameter_indices(
+    *,
+    pdf: xr.Dataset,
+    times: list[pd.Timestamp],
+    index_key: str = "predictor_index",
+    **kwargs,
+):
+    """
+    Add a index-like integer variable to a dataset based on a list of times.
+
+    Parameters
+    ----------
+    pdf : xarray.Dataset
+        The dataset to add the variable to. It must have a time index.
+    times : array of pandas.Timestamp
+        The list of timestamps to assign the index-like values.
+    index_key : str, default: "predictor_index"
+        Name of the variable to add.
+
+    Returns
+    -------
+    xarray.Dataset
+        The dataset `pdf` with the new variable whose name is the value of `index_key`.
+
+    Notes
+    -----
+    The time indices in `pdf` are selected with the method "nearest".
+
+    Examples
+    --------
+    >>> import pandas as pd
+    >>> import xarray as xr
+    >>> import numpy as np
+    >>> ds = xr.Dataset(
+    ...     {"temperature": ("time", np.arange(10))},
+    ...     coords={
+    ...         "time": xr.date_range("2000-01-01 12:00:00", freq="60 s", periods=10)
+    ...     },
+    ... )
+    >>> print(stamp_parameter_indices(ds, [pd.Timestamp("2000-01-01 12:05:00")]))
+    <xarray.Dataset> Size: 200B
+    Dimensions:          (time: 10)
+    Coordinates:
+    * time             (time) datetime64[ns] 80B 2000-01-01T12:00:00 ... 2000-0...
+    Data variables:
+        temperature      (time) int64 80B 0 1 2 3 4 5 6 7 8 9
+        predictor_index  (time) int32 40B 0 0 0 0 0 0 1 1 1 1
+    """
+
+    time_indices = _time_indices_in_ds(pdf, times)
+    acc = []
+    padded_time_indices = time_indices + [pdf.sizes["time"] - 1]
+
+    for i in range(len(padded_time_indices)):
+        if i == 0:
+            tmp = [i] * (padded_time_indices[i] + 1)
+        else:
+            tmp = [i] * (padded_time_indices[i] - padded_time_indices[i - 1])
+        acc.append(tmp)
+
+    indices = sum(acc, start=[])
+    return pdf.assign(**{index_key: ("time", np.array(indices).astype(np.int32))})
+
+
 def _get_predictor_factory(ds: xr.Dataset, truncate: float, dims: list[str]):
     if dims == ["x", "y"]:
         predictor = curry(Gaussian2DCartesian, truncate=truncate)
@@ -1139,7 +1314,7 @@ def optimize_pdf(
     -------
     params : dict
         A dictionary containing the optimization results (mainly, the sigma value of the Brownian movement model).
-    emission : xr.Dataset
+    emission : xarray.Dataset
         The original input dataset with additional metadata.
     """
 
@@ -1490,7 +1665,7 @@ def open_distributions(
 
     See Also
     --------
-    pangeo_fish.helpers.plot_distributions and pangeo_fish.helpers.render_distributions.
+    pangeo_fish.helpers.plot_distributions, pangeo_fish.helpers.render_distributions
     """
 
     # TODO: what if both combined and emission have a sigma variable?
@@ -1545,7 +1720,7 @@ def plot_distributions(*, data: xr.Dataset, bbox=None, **kwargs):
 
     See Also
     --------
-    pangeo_fish.helpers.open_distributions.
+    pangeo_fish.helpers.open_distributions
     """
 
     # TODO: adding coastlines reverts the xlim / ylim arguments
@@ -1666,7 +1841,7 @@ def render_distributions(
 
     See Also
     --------
-    pangeo_fish.helpers.open_distributions.
+    pangeo_fish.helpers.open_distributions
     """
 
     # os.path.split(.) removes the "/"!

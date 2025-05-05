@@ -1,3 +1,5 @@
+from math import atan2, cos, radians, sin, sqrt
+
 import cf_xarray  # noqa: F401
 import more_itertools
 import xarray as xr
@@ -105,3 +107,42 @@ def progress_status(sequence):
             progress.update(task_id, advance=0, label=item)
             yield item
             progress.update(task_id, advance=1, label=item)
+
+
+def haversine_distance(
+    lon1: float, lon2: float, lat1: float, lat2: float, radius: float = 6371.0
+):
+    """
+    Compute the Haversine distance between two points assuming the Earth is a perfect sphere.
+    Implementation from https://stackoverflow.com/a/71412448.
+
+    Parameters
+    ----------
+    - lon1 : float
+        Longitude of the first point in degrees.
+    - lat1 : float
+        Latitude of the first point in degrees.
+    - lon2 : float
+        Longitude of the second point in degrees.
+    - lat2 : float
+        Latitude of the second point in degrees.
+    - radius : float, default: 6731.0
+        Radius of the Earth in kilometers.
+
+    Returns
+    -------
+    float
+        The Haversine distance in kilometers.
+    """
+    # source from: https://stackoverflow.com/a/71412448
+    lat1 = radians(lat1)
+    lon1 = radians(lon1)
+
+    lat2 = radians(lat2)
+    lon2 = radians(lon2)
+
+    dlon = lon2 - lon1
+    dlat = lat2 - lat1
+    a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
+    c = 2 * atan2(sqrt(a), sqrt(1 - a))
+    return radius * c
