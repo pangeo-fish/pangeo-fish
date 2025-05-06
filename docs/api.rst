@@ -90,6 +90,7 @@ Tag/time Operations
    tags.reshape_by_bins
    cf.bounds_to_bins
    dataset_utils.broadcast_variables
+   utils.reindex_ds
 
 
 Visualization

@@ -2,6 +2,7 @@ from math import atan2, cos, radians, sin, sqrt
 
 import cf_xarray  # noqa: F401
 import more_itertools
+import numpy as np
 import xarray as xr
 from rich.progress import (
     BarColumn,
@@ -10,6 +11,16 @@ from rich.progress import (
     TextColumn,
     TimeRemainingColumn,
 )
+
+__all__ = [
+    "clear_attrs",
+    "postprocess_depth",
+    "normalize",
+    "temporal_resolution",
+    "progress_status",
+    "haversine_distance",
+    "reindex_ds",
+]
 
 
 def clear_attrs(obj, variables=None):
@@ -146,3 +157,39 @@ def haversine_distance(
     a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
     c = 2 * atan2(sqrt(a), sqrt(1 - a))
     return radius * c
+
+
+def reindex_ds(ds: xr.Dataset, key: str):
+    """
+    Reindex a dataset by using an existing variable or coordinate as a new dimension to index into time.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        A dataset with a "time" dimension and an existing coordinate or variable `key`.
+    key : str
+        The name of the coordinate or variable in `ds` that contains the mapping. **It must align with time.**
+
+    Returns
+    -------
+    xarray.Dataset
+        `ds` reindexed with `key`.
+
+    Notes
+    -----
+    Since the reindexing replaces the "time" index (found in the original `ds`), time-based selections won't be possible on the returned dataset.
+    """
+
+    if key not in ds:
+        raise ValueError(f'"{key}" not found in dataset.')
+
+    data = ds[key]
+
+    if data.dims != ("time",):
+        raise ValueError(f"\"{key}\" must be aligned with the 'time' dimension.")
+
+    indexer = xr.DataArray(
+        np.arange(ds.sizes["time"]), dims=key, coords={key: (key, data.values)}
+    )
+
+    return ds.isel(time=indexer).set_index({key: key})
