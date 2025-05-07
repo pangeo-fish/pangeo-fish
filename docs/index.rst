@@ -6,5 +6,5 @@ Welcome to pangeo-fish's documentation!
 
     installation
     format
-    notebook
+    notebooks
     api
