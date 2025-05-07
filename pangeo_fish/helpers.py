@@ -1443,10 +1443,10 @@ def predict_positions(
     emission = xr.open_dataset(
         f"{target_root}/combined.zarr",
         engine="zarr",
-        chunks=chunks,
+        chunks={},
         inline_array=True,
         storage_options=storage_options,
-    )
+    ).chunk(chunks)
     emission = emission.compute()
 
     if "cells" in emission.dims:
@@ -1668,7 +1668,6 @@ def open_distributions(
     pangeo_fish.helpers.plot_distributions, pangeo_fish.helpers.render_distributions
     """
 
-    # TODO: what if both combined and emission have a sigma variable?
     emission = (
         xr.open_dataset(
             f"{target_root}/combined.zarr",
