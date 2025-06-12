@@ -13,7 +13,7 @@ dependencies:
   - pint-xarray
   # general computing
   - flox
-  - xarray
+  - xarray<=2025.04.0
   - more-itertools
   - cytoolz
   - toolz
@@ -21,7 +21,7 @@ dependencies:
   - opt_einsum
   - sparse
   # geographic manipulations
-  - movingpandas
+  - movingpandas<=0.21.3
   - geopandas
   - cartopy
   - healpy
