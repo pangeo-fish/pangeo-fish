@@ -20,7 +20,7 @@ dependencies = [
   "opt_einsum",
   "sparse",
   "healpy",
-  "movingpandas",
+  "movingpandas==0.21.3",
   "xhealpixify",
   "cf_xarray>=0.10.4",
   "pint-xarray",
