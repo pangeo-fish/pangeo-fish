@@ -549,7 +549,7 @@ def open_diff_dataset(*, target_root: str, storage_options: dict, **kwargs):
 def regrid_dataset(
     *,
     ds: xr.Dataset,
-    ref_lvl: int,
+    refinement_level: int,
     min_vertices=1,
     dims: list[str] = ["cells"],
     plot=False,
@@ -564,8 +564,8 @@ def regrid_dataset(
     ----------
     ds : xarray.Dataset
         The DST data
-    ref_lvl : int
-        Reference level, resolution of the HEALPix grid
+    refinement_level : int
+        Refinement level, resolution of the HEALPix grid
     min_vertices : int, default: 1
         Minimum number of vertices for a valid transcription
     dims : list of str, default: ["cells"]
@@ -589,7 +589,7 @@ def regrid_dataset(
         The plot of `reshaped`, or None if plot=False
     """
 
-    grid = HealpyGridInfo(level=ref_lvl)
+    grid = HealpyGridInfo(level=refinement_level)
     target_grid = grid.target_grid(ds).pipe(center_longitude, 0)
     regridder = HealpyRegridder(
         ds[["longitude", "latitude", "ocean_mask"]],
