@@ -362,13 +362,12 @@ def _open_parquet_model(parquet_url: str):
         The dataset found
     """
 
-    target_opts = {"anon": False}
     remote_opts = {"anon": False}
     reference_ds = xr.open_dataset(
         parquet_url,
         engine="kerchunk",
         chunks={},
-        storage_options={"target_options": target_opts, "remote_options": remote_opts},
+        storage_options={"remote_options": remote_opts},
     )
     reference_ds.coords["depth"].values[0] = 0.0
     return reference_ds
@@ -550,9 +549,8 @@ def open_diff_dataset(*, target_root: str, storage_options: dict, **kwargs):
 def regrid_dataset(
     *,
     ds: xr.Dataset,
-    nside: int,
+    refinement_level: int,
     min_vertices=1,
-    rot={"lat": 0, "lon": 0},
     dims: list[str] = ["cells"],
     plot=False,
     save=False,
@@ -566,12 +564,10 @@ def regrid_dataset(
     ----------
     ds : xarray.Dataset
         The DST data
-    nside : int
-        Tesolution of the HEALPix grid
+    refinement_level : int
+        Refinement level, resolution of the HEALPix grid
     min_vertices : int, default: 1
         Minimum number of vertices for a valid transcription
-    rot : mapping of str to tuple of float, default: {"lat": 0, "lon": 0}
-        Mapping of angles to rotate the HEALPix grid. It must contain the keys "lon" and "lat"
     dims : list of str, default: ["cells"]
         The list of the dimensions. Either ``["x", "y"]`` or ``["cells"]``.
     plot : bool, default: False
@@ -593,7 +589,7 @@ def regrid_dataset(
         The plot of `reshaped`, or None if plot=False
     """
 
-    grid = HealpyGridInfo(level=int(np.log2(nside)), rot=rot)
+    grid = HealpyGridInfo(level=refinement_level)
     target_grid = grid.target_grid(ds).pipe(center_longitude, 0)
     regridder = HealpyRegridder(
         ds[["longitude", "latitude", "ocean_mask"]],
