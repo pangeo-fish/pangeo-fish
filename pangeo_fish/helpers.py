@@ -362,7 +362,6 @@ def _open_parquet_model(parquet_url: str, remote_options=None):
         The dataset found
     """
 
-
     if remote_options is None:
         remote_options = {"anon": False}
     reference_ds = xr.open_dataset(
@@ -1221,7 +1220,7 @@ def predict_positions(
         inline_array=True,
         storage_options=storage_options,
     )
-    emission = emission.drop_indexes('cells')
+    emission = emission.drop_indexes("cells")
     emission = emission.compute()
 
     if "cells" in emission.dims:
