@@ -408,7 +408,7 @@ def load_model(
         model = _open_copernicus_model(
             uri, chunks={"time": 8, "lat": -1, "lon": -1, "depth": -1}
         )
-    elif uri.rstrip("/").endswith(".parq") or uri.rstrip("/").endswith(".parquet"):
+    elif uri.rstrip("/").endswith((".parq", ".parquet", ".json")):
         reference_ds = _open_parquet_model(uri, remote_options=remote_options)
         model = prepare_dataset(reference_ds)
     else:
