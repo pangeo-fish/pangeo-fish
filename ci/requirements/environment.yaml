@@ -10,6 +10,7 @@ dependencies:
   - zstandard
   # units, bounds, and cf-conventions
   - cf_xarray>=0.10.4
+  - duckdb
   - pint-xarray
   # general computing
   - flox

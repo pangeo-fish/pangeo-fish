@@ -348,7 +348,7 @@ def _open_copernicus_model(yaml_url: str, chunks: dict = None):
     return model
 
 
-def _open_parquet_model(parquet_url: str):
+def _open_parquet_model(parquet_url: str, remote_options=None):
     """Open a ``.parq`` dataset assembled with ``virtualzarr``.
 
     Parameters
@@ -362,12 +362,13 @@ def _open_parquet_model(parquet_url: str):
         The dataset found
     """
 
-    remote_opts = {"anon": False}
+    if remote_options is None:
+        remote_options = {"anon": False}
     reference_ds = xr.open_dataset(
         parquet_url,
         engine="kerchunk",
         chunks={},
-        storage_options={"remote_options": remote_opts},
+        storage_options={"remote_options": remote_options},
     )
     reference_ds.coords["depth"].values[0] = 0.0
     return reference_ds
@@ -380,14 +381,14 @@ def load_model(
     time_slice: slice,
     bbox: dict[str, tuple[float, float]],
     chunk_time=24,
-    **kwargs,
+    remote_options=None,
 ) -> xr.Dataset:
     """Load and prepare a reference model.
 
     Parameters
     ----------
     uri : str
-        Path to the data. either an intake catalog (thus ending with ``.yaml``) or a parquet array (thus ending with ``.parq/``)
+        Path to the data. either an intake catalog (thus ending with ``.yaml``) or a parquet array (thus ending with ``.parq``)
     tag_log : xarray.Dataset
         The DST data
     time_slice : slice
@@ -407,11 +408,11 @@ def load_model(
         model = _open_copernicus_model(
             uri, chunks={"time": 8, "lat": -1, "lon": -1, "depth": -1}
         )
-    elif uri.endswith(".parq") or uri.endswith(".parq/"):
-        reference_ds = _open_parquet_model(uri)
+    elif uri.rstrip("/").endswith((".parq", ".parquet", ".json")):
+        reference_ds = _open_parquet_model(uri, remote_options=remote_options)
         model = prepare_dataset(reference_ds)
     else:
-        raise ValueError('Only intake catalogs and "parqued" data can be loaded.')
+        raise ValueError('Only intake catalogs and "parquet" data can be loaded.')
 
     reference_model = (
         model.sel(time=adapt_model_time(time_slice))
@@ -1219,6 +1220,7 @@ def predict_positions(
         inline_array=True,
         storage_options=storage_options,
     )
+    emission = emission.drop_indexes("cells")
     emission = emission.compute()
 
     if "cells" in emission.dims:
