@@ -1220,7 +1220,7 @@ def predict_positions(
         inline_array=True,
         storage_options=storage_options,
     )
-    emission = emission.drop_indexes("cells")
+
     emission = emission.compute()
 
     if "cells" in emission.dims:
