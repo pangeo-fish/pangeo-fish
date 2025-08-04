@@ -494,6 +494,7 @@ def compute_diff(
         .assign(
             {
                 "H0": reference_model["H0"],
+                "XE": reference_model["XE"],
                 "ocean_mask": reference_model["H0"].notnull(),
             }
         )
