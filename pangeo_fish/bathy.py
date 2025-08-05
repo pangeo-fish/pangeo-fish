@@ -14,6 +14,8 @@ from pangeo_fish.tags import adapt_model_time, reshape_by_bins, to_time_slice
 
 import xdggs
 import matplotlib.pyplot as plt
+import warnings
+warnings.filterwarnings("ignore", category=RuntimeWarning) 
 
 
 def compute_healpix_histogram_region(
@@ -123,11 +125,17 @@ def compute_healpix_histogram_region(
     )
 
     ds_out = xr.Dataset(
-        {"emodnet_pixel_hist": (("cells", "depth_bins"), h_im)},
+        {"bathy_pixel_hist": (("cells", "depth_bins"), h_im)},
         coords={"cell_ids": var_cell_ids}
     )
     ds_out["depth_bins"] = np.arange(nb_depth_bins)
-
+    cell_ids = ds_out.cell_ids.values
+    lon, lat = hp.pix2ang(nside, cell_ids, nest=True, lonlat=True)
+    
+    
+    ds_out = ds_out.assign_coords(
+        {"latitude": ("cells", lat), "longitude": ("cells", lon)}
+    )
     return ds_out
 
 
@@ -165,6 +173,21 @@ def compute_fish_histogram(reshaped_tag, depth_min=0, depth_max=200, bins=210):
         name="fish_hist"
     )
 
+def verify_grid_alignment(ds, reference_model):
+    """
+    Verify the alignment of two grids
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        Histogram dataset.
+    reference_model : xarray.Dataset
+        reference for grid comparison.
+    """  
+
+
+
+
 
 def compute_pdf_bathy_batch_numpy(ds_chunk, reshaped_tag, copernicus_chunk):
     """
@@ -180,7 +203,7 @@ def compute_pdf_bathy_batch_numpy(ds_chunk, reshaped_tag, copernicus_chunk):
     copernicus_chunk : xarray.Dataset
         Modeled XE data for the same cells.
     """
-    hist = ds_chunk["emodnet_pixel_hist"].data
+    hist = ds_chunk["bathy_pixel_hist"].data
     pressure = reshaped_tag["pressure"].data
     XE = copernicus_chunk["XE"].data
 
@@ -220,7 +243,7 @@ def compute_pdf_bathy_batch_numpy(ds_chunk, reshaped_tag, copernicus_chunk):
     )
 
 
-def batch_compute_pdf_bathy(ds_lr, reshaped_tag, copernicus_model, batch_size=50000):
+def batch_compute_pdf_bathy(ds_lr, reshaped_tag, target_root: str, batch_size=50000,):
     """
     Dividing calculation into batch.
 
@@ -229,23 +252,47 @@ def batch_compute_pdf_bathy(ds_lr, reshaped_tag, copernicus_model, batch_size=50
     ds_lr : xarray.Dataset
         Full EMODnet histogram dataset.
     reshaped_tag : xarray.Dataset
-        FISH reshaped pressure tag.
-    copernicus_model : xarray.Dataset
-        Model output dataset (XE variable).
+        Fish reshaped pressure tag.
     batch_size : int
         Number of cells processed per batch.
     """
     n_cells = ds_lr.sizes["cells"]
     pdf_chunks = []
+    
+    #Here we make sure we are working on the same grids
+    reference = xr.open_dataset(
+        f"{target_root}/diff-regridded.zarr",
+        engine="zarr",
+        chunks={},
+        inline_array=True,
+        storage_options=None,
+    )
 
+
+    common_ids = np.intersect1d(reference.cell_ids.values, ds_lr.cell_ids.values)
+
+    ds_histo_coords = ds_lr.assign_coords(cell_ids=("cells", ds_lr.cell_ids.values))
+    ds_histo_coords = ds_histo_coords.set_index(cells="cell_ids")
+
+    histogram_ds_subset_model = ds_histo_coords.sel(cells=common_ids)
+
+    reference = reference.assign_coords(cells=("cell_ids", reference["cell_ids"].data))
+
+    reference = reference.swap_dims({"cell_ids": "cells"})
+
+    # then we loop on smaller dataset in order to avoid RAM increasing to much
     for start in range(0, n_cells, batch_size):
         end = min(start + batch_size, n_cells)
         print(f"Batch cells {start}–{end}")
 
-        ds_chunk = ds_lr.isel(cells=slice(start, end))
-        copernicus_chunk = copernicus_model.isel(cells=slice(start, end))
+        ds_chunk = histogram_ds_subset_model.isel(cells=slice(start, end))
+        copernicus_chunk = reference.isel(cells=slice(start, end))
 
         pdf_chunk = compute_pdf_bathy_batch_numpy(ds_chunk, reshaped_tag, copernicus_chunk)
         pdf_chunks.append(pdf_chunk)
+    
+    concat_pdf = xr.concat(pdf_chunks, dim="cells")
+    pdf_da_func = concat_pdf.to_dataset(name="pdf_bathy")
+    pdf_da_func = pdf_da_func.rename_vars({'cells': 'cell_ids'})
 
-    return xr.concat(pdf_chunks, dim="cells")
+    return pdf_da_func
