@@ -381,24 +381,6 @@ def compute_fish_histogram_bin_size(
     )
 
 
-<<<<<<< HEAD
-
->>>>>>> 9c497c0 (all files with bathy.py change with bins selection)
-def verify_grid_alignment(ds, reference_model):
-    """
-    Verify the alignment of two grids
-
-    Parameters
-    ----------
-    ds : xarray.Dataset
-        Histogram dataset.
-    reference_model : xarray.Dataset
-        reference for grid comparison.
-    """
-=======
->>>>>>> b366ec6 (coquille)
-
-
 def compute_pdf_bathy_batch_numpy(ds_chunk, reshaped_tag, copernicus_chunk):
     """
     Generate PDF taking max depth of fish per time range in order to exclude non-possible
