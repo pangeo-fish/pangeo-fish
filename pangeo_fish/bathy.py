@@ -385,7 +385,7 @@ def compute_fish_histogram_bin_size(
     )
 
 
-    
+
 >>>>>>> 9c497c0 (all files with bathy.py change with bins selection)
 def verify_grid_alignment(ds, reference_model):
     """

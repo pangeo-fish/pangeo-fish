@@ -493,9 +493,9 @@ def compute_diff(
         .assign_attrs(attrs)
         .assign(
             {
-                #"H0": reference_model["H0"],
+                # "H0": reference_model["H0"],
                 "XE": reference_model["XE"],
-                #"ocean_mask": reference_model["H0"].notnull(),
+                # "ocean_mask": reference_model["H0"].notnull(),
             }
         )
     )  # type: xr.Dataset
