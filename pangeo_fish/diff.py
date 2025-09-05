@@ -14,9 +14,9 @@ _diff_z_signatures = [
 
 @numba.guvectorize(_diff_z_signatures, "(z),(z),(),(o),(o),()->()", nopython=True)
 def _diff_z(model_temp, model_depth, bottom, tag_temp, tag_depth, depth_thresh, result):
-    if depth_thresh != 0 and bottom < np.max(tag_depth) * depth_thresh:
-        result[0] = np.nan
-        return
+    # if depth_thresh != 0 and bottom < np.max(tag_depth) * depth_thresh:
+    #     result[0] = np.nan
+    #     return
 
     diff_temp = np.full_like(tag_depth, fill_value=np.nan)
     mask = ~np.isnan(model_depth) & ~np.isnan(model_temp)
