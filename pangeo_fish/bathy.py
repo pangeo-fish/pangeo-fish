@@ -1,29 +1,26 @@
+import warnings
+
+import dask.array as da
+import healpy as hp
+import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
-import healpy as hp
-import dask.array as da
+import xdggs
 from dask import delayed
 from distributed import LocalCluster
 from tqdm import tqdm
 
-from pangeo_fish.helpers import load_model, compute_diff
-from pangeo_fish.io import open_tag
 from pangeo_fish.cf import bounds_to_bins
 from pangeo_fish.diff import diff_z
+from pangeo_fish.helpers import compute_diff, load_model
+from pangeo_fish.io import open_tag
 from pangeo_fish.tags import adapt_model_time, reshape_by_bins, to_time_slice
 
-import xdggs
-import matplotlib.pyplot as plt
-import warnings
-warnings.filterwarnings("ignore", category=RuntimeWarning) 
+warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 
 def compute_healpix_histogram_region(
-    ds,
-    nside,
-    nb_depth_bins,
-    chunk_size=500,
-    depth_offset=0
+    ds, nside, nb_depth_bins, chunk_size=500, depth_offset=0
 ):
     """
     Compute HEALPix histogram only over the geographic region covered by `ds`,
@@ -78,7 +75,11 @@ def compute_healpix_histogram_region(
         j = min(i + chunk_size, nlat)
 
         elev = ds.elevation[i:j, :].load().values.flatten()
-        st = ds.stdev[i:j, :].load().values.flatten() if "stdev" in ds else np.full_like(elev, 1.0)
+        st = (
+            ds.stdev[i:j, :].load().values.flatten()
+            if "stdev" in ds
+            else np.full_like(elev, 1.0)
+        )
 
         valid = ~np.isnan(elev)
         if not valid.any():
@@ -90,7 +91,10 @@ def compute_healpix_histogram_region(
         lon_v = np.tile(lons, j - i)[valid]
 
         hidx = hp.ang2pix(nside, lon_v, lat_v, lonlat=True, nest=nest)
-        depth_idx = np.clip(-elev_v - depth_offset, -10, nb_depth_bins - 0.01).astype(np.int64) + 10
+        depth_idx = (
+            np.clip(-elev_v - depth_offset, -10, nb_depth_bins - 0.01).astype(np.int64)
+            + 10
+        )
 
         mask_zone = np.isin(hidx, used_cells)
         hidx = hidx[mask_zone]
@@ -99,21 +103,21 @@ def compute_healpix_histogram_region(
 
         sum_w = np.zeros_like(st_v)
         for dj in range(-2, 3):
-            sum_w += np.exp(-dj**2 / (2 * st_v**2))
+            sum_w += np.exp(-(dj**2) / (2 * st_v**2))
         inv_sum = 1.0 / sum_w
 
         uniq, inv = np.unique(hidx, return_inverse=True)
         hist_local = np.zeros((uniq.size, bins), dtype=np.float64)
 
         for dj in range(-2, 3):
-            w = np.exp(-dj**2 / (2 * st_v**2)) * inv_sum
+            w = np.exp(-(dj**2) / (2 * st_v**2)) * inv_sum
             idx_shifted = np.clip(depth_idx + dj, 0, bins - 1)
             np.add.at(hist_local, (inv, idx_shifted), w)
 
         for u_idx, cell in enumerate(uniq):
             hist[cell_to_idx[cell], :] += hist_local[u_idx, :]
 
-    with np.errstate(invalid='ignore'):
+    with np.errstate(invalid="ignore"):
         hist /= hist.sum(axis=1, keepdims=True)
     h_im = 1 - np.cumsum(hist[:, :nb_depth_bins], axis=1)
 
@@ -121,18 +125,17 @@ def compute_healpix_histogram_region(
         used_cells,
         dims="cells",
         name="cell_ids",
-        attrs={"grid_name": "healpix", "nside": nside, "nest": nest}
+        attrs={"grid_name": "healpix", "nside": nside, "nest": nest},
     )
 
     ds_out = xr.Dataset(
         {"bathy_pixel_hist": (("cells", "depth_bins"), h_im)},
-        coords={"cell_ids": var_cell_ids}
+        coords={"cell_ids": var_cell_ids},
     )
     ds_out["depth_bins"] = np.arange(nb_depth_bins)
     cell_ids = ds_out.cell_ids.values
     lon, lat = hp.pix2ang(nside, cell_ids, nest=True, lonlat=True)
-    
-    
+
     ds_out = ds_out.assign_coords(
         {"latitude": ("cells", lat), "longitude": ("cells", lon)}
     )
@@ -142,7 +145,7 @@ def compute_healpix_histogram_region(
 def compute_fish_histogram(reshaped_tag, depth_min=0, depth_max=200, bins=210):
     """
     Compute vertical histogram from fish pressure profiles.
-    
+
     Parameters
     ----------
     reshaped_tag : xarray.Dataset
@@ -159,9 +162,7 @@ def compute_fish_histogram(reshaped_tag, depth_min=0, depth_max=200, bins=210):
     pressure = reshaped_tag.pressure.values  # (time, depth)
 
     hist2d = np.apply_along_axis(
-        lambda x: np.histogram(x, bins=bin_edges)[0],
-        axis=1,
-        arr=pressure
+        lambda x: np.histogram(x, bins=bin_edges)[0], axis=1, arr=pressure
     )
     hist2d = hist2d / hist2d.sum(axis=1, keepdims=True)
     fish_pdf = 1 - np.cumsum(hist2d, axis=1)
@@ -170,8 +171,9 @@ def compute_fish_histogram(reshaped_tag, depth_min=0, depth_max=200, bins=210):
         fish_pdf,
         dims=["time", "depth_bins"],
         coords={"time": reshaped_tag.time.values, "depth_bins": bin_centers},
-        name="fish_hist"
+        name="fish_hist",
     )
+
 
 def verify_grid_alignment(ds, reference_model):
     """
@@ -183,15 +185,12 @@ def verify_grid_alignment(ds, reference_model):
         Histogram dataset.
     reference_model : xarray.Dataset
         reference for grid comparison.
-    """  
-
-
-
+    """
 
 
 def compute_pdf_bathy_batch_numpy(ds_chunk, reshaped_tag, copernicus_chunk):
     """
-    Generate PDF taking max depth of fish per time range in order to exclude non-possible 
+    Generate PDF taking max depth of fish per time range in order to exclude non-possible
     pixel (bathymetry limitation).
 
     Parameters
@@ -238,12 +237,17 @@ def compute_pdf_bathy_batch_numpy(ds_chunk, reshaped_tag, copernicus_chunk):
         dims=["time", "cells"],
         coords={
             "time": reshaped_tag["pressure"].coords["time"],
-            "cells": ds_chunk["cells"]
+            "cells": ds_chunk["cells"],
         },
     )
 
 
-def batch_compute_pdf_bathy(ds_lr, reshaped_tag, target_root: str, batch_size=50000,):
+def batch_compute_pdf_bathy(
+    ds_lr,
+    reshaped_tag,
+    target_root: str,
+    batch_size=50000,
+):
     """
     Dividing calculation into batch.
 
@@ -258,8 +262,8 @@ def batch_compute_pdf_bathy(ds_lr, reshaped_tag, target_root: str, batch_size=50
     """
     n_cells = ds_lr.sizes["cells"]
     pdf_chunks = []
-    
-    #Here we make sure we are working on the same grids
+
+    # Here we make sure we are working on the same grids
     reference = xr.open_dataset(
         f"{target_root}/diff-regridded.zarr",
         engine="zarr",
@@ -267,7 +271,6 @@ def batch_compute_pdf_bathy(ds_lr, reshaped_tag, target_root: str, batch_size=50
         inline_array=True,
         storage_options=None,
     )
-
 
     common_ids = np.intersect1d(reference.cell_ids.values, ds_lr.cell_ids.values)
 
@@ -288,11 +291,13 @@ def batch_compute_pdf_bathy(ds_lr, reshaped_tag, target_root: str, batch_size=50
         ds_chunk = histogram_ds_subset_model.isel(cells=slice(start, end))
         copernicus_chunk = reference.isel(cells=slice(start, end))
 
-        pdf_chunk = compute_pdf_bathy_batch_numpy(ds_chunk, reshaped_tag, copernicus_chunk)
+        pdf_chunk = compute_pdf_bathy_batch_numpy(
+            ds_chunk, reshaped_tag, copernicus_chunk
+        )
         pdf_chunks.append(pdf_chunk)
-    
+
     concat_pdf = xr.concat(pdf_chunks, dim="cells")
     pdf_da_func = concat_pdf.to_dataset(name="pdf_bathy")
-    pdf_da_func = pdf_da_func.rename_vars({'cells': 'cell_ids'})
+    pdf_da_func = pdf_da_func.rename_vars({"cells": "cell_ids"})
 
     return pdf_da_func
