@@ -22,6 +22,7 @@ dependencies:
   - pandas
   - numpy
   - more-itertools
+  - jupyterlab
   - scipy
   - numba
   - opt-einsum
