@@ -1,34 +1,26 @@
 channels:
   - conda-forge
-  - nodefaults
 dependencies:
-  # development
-  - python=3.12
-  - jupyterlab
-  # plotting
-  - cmocean
-  - holoviews
-  - hvplot
-  - geoviews
+  - pytest
+  - pytest-cov
   # I/O
-  - python-dotenv
   - fsspec
   - h5netcdf
   - intake-xarray
   - zstandard
   # units, bounds, and cf-conventions
   - cf_xarray>=0.10.4
+  - duckdb
   - pint-xarray
   # general computing
-  - coiled
   - flox
-  - xarray=2025.3.1
+  - xarray<2025.04.0
   - more-itertools
   - cytoolz
   - toolz
   - scipy
   - opt_einsum
-  - sparse=0.15
+  - sparse
   # geographic manipulations
   - movingpandas<=0.21.3
   - geopandas
@@ -38,23 +30,12 @@ dependencies:
   - astropy
   # video processing
   - ffmpeg
+  - xmovie
   # distributed computing
   - dask
   # code formatting
   - rich
   - rich-click
-  # fixes...
-  - aiohttp=3.9.5
-  - zarr=2.18.4
-  - intake-xarray=0.7.0
-  - aiobotocore=2.19.0
-  - eccodes>=2.35.0
-  - altair
-  - cdshealpix
-  - copernicusmarine
-  - dask-image
-  - jupyterlab
-  - ipywidgets
   - pip
   - pip:
       - cdshealpix
