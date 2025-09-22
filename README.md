@@ -39,7 +39,7 @@ jupyter lab
 ### For first-time users
 
 If this is your first time using **Pangeo-Fish**, we recommend setting up the full development environment to ensure all dependencies (including [JupyterLab](https://jupyterlab.readthedocs.io/en/stable/)) are correctly installed.
-Once JupyterLab has started, open the notebook  
+Once JupyterLab has started, open the notebook
 [notebooks/pangeo-fish.ipynb](https://github.com/pangeo-fish/pangeo-fish/blob/main/notebooks/pangeo-fish.ipynb)
 
 to follow the step-by-step tutorial. This is the recommended starting point for new users.
