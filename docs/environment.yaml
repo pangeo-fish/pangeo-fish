@@ -1,40 +1,60 @@
 channels:
   - conda-forge
+  - nodefaults
 dependencies:
+  # development
   - python=3.12
-  # docs' requirements
-  - sphinx
-  - nbsphinx
-  - pandoc
-  - sphinx-book-theme
-  - sphinx-copybutton
-  - myst-parser
-  - sphinx-remove-toctrees
-  # for importing pangeo-fish
-  - flox
-  - dask
-  - rich
-  - cartopy
-  - cmocean
-  - hvplot
-  - cartopy
-  - xarray
-  - pandas
-  - numpy
-  - more-itertools
   - jupyterlab
-  - scipy
-  - numba
-  - opt-einsum
-  - sparse
-  - healpy
-  - movingpandas
-  - cf-xarray
+  # plotting
+  - cmocean
+  - holoviews
+  - hvplot
+  - geoviews
+  # I/O
+  - python-dotenv
+  - fsspec
+  - h5netcdf
+  - intake-xarray
+  - zstandard
+  # units, bounds, and cf-conventions
+  - cf_xarray>=0.10.4
   - pint-xarray
-  - pint
-  - intake
-  - s3fs
-  - zarr=2.18.2
+  # general computing
+  - coiled
+  - flox
+  - xarray=2025.3.1
+  - more-itertools
+  - cytoolz
+  - toolz
+  - scipy
+  - opt_einsum
+  - sparse=0.15
+  # geographic manipulations
+  - movingpandas<=0.21.3
+  - geopandas
+  - cartopy
+  - healpy
+  - scikit-learn
+  - astropy
+  # video processing
+  - ffmpeg
+  # distributed computing
+  - dask
+  # code formatting
+  - rich
+  - rich-click
+  # fixes...
+  - aiohttp=3.9.5
+  - zarr=2.18.4
+  - intake-xarray=0.7.0
+  - aiobotocore=2.19.0
+  - eccodes>=2.35.0
+  - altair
+  - cdshealpix
+  - copernicusmarine
+  - dask-image
+  - jupyterlab
+  - ipywidgets
   - pip
   - pip:
       - nbsphinx_link>=1.3.1
