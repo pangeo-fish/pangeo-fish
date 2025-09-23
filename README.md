@@ -31,7 +31,7 @@ Or set up the development environment:
 ```bash
 git clone https://github.com/pangeo-fish/pangeo-fish.git
 cd pangeo-fish
-conda env create -n pangeo-fish -f ci/requirements/environment.yaml
+conda env create -n pangeo-fish -f docs/environment.yaml
 conda activate pangeo-fish
 jupyter lab
 ```
