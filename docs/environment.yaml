@@ -46,6 +46,7 @@ dependencies:
   # fixes...
   - aiohttp=3.9.5
   - zarr=2.18.4
+  - kerchunk=0.2.7
   - intake-xarray=0.7.0
   - aiobotocore=2.19.0
   - eccodes>=2.35.0
