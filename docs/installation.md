@@ -8,7 +8,7 @@ For Windows users, we recommend WSL (2.0).
 
 For more information, please refer to this page: [pangeo on Windows](https://gitlab.ifremer.fr/diam/Pangeo-on-Windows).
 
-## For local use
+## For first use
 
 If you are only interested in using `pangeo-fish` locally (i.e, without accessing remote data nor HPC resources), then all is needed is to create you create a virtual environment and install the package as well as its depedencies.
 
@@ -19,10 +19,21 @@ git clone https://github.com/pangeo-fish/pangeo-fish.git
 cd pangeo-fish
 ```
 
-Then, create a conda/mamba environment with the following command:
+Then, create a conda or micromamba environment with the following command:
+Still, we recommend using micromamba since it’s faster. Use **either** of the following commands:
 
 ```console
-micromamba create -n pangeo-fish -f ci/requirements/environment.yaml
+# Using conda
+conda env create -n pangeo-fish -f docs/environment.yaml
+
+# Or using micromamba
+micromamba create -n pangeo-fish -f docs/environment.yaml
+```
+
+And then just activate the environment
+
+```console
+conda/micromamba activate pangeo-fish
 ```
 
 This will create your environment with all the required libraries to make `pangeo-fish` work.
@@ -51,10 +62,10 @@ Install the `dask-hpcconfig` package and set the environnement as a Jupyter kern
 
 ```console
 pip install dask-hpcconfig
-ipython kernel install --name "pangeo-fish" --user.
+ipython kernel install --name "pangeo-fish" --user
 ```
 
-Besides, you can refer to [this documentation on how to use pangeo on HPC](https://gitlab.ifremer.fr/diam/pangeo_on_HPC).
+Besides, you can refer to [this documentation on how to use pangeo on HPC](https://dask-hpcconfig.readthedocs.io/en/latest/).
 
 All of those steps should create a Python environment able to run the different Jupyter notebooks available.
 
