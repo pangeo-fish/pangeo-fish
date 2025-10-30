@@ -4,7 +4,8 @@ import dask
 import dask.array as da
 import numpy as np
 import zarr  # noqa: F401
-from tqdm import tqdm 
+from tqdm import tqdm
+
 
 def score(emission, predictor, initial_probability, mask=None):
     """Score of a single pass (forwards) of the spatial HMM filter

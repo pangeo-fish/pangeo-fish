@@ -112,12 +112,14 @@ class Foscat1DHealpix(Predictor):
 
     def __post_init__(self):
         import foscat.SphericalStencil as sc
-    
+
         self.kernel_size = 33
-        nside = 2 ** self.grid_info.level
-    
-        self.stencil = sc.SphericalStencil(nside, int(self.kernel_size), cell_ids=self.cell_ids)
-    
+        nside = 2**self.grid_info.level
+
+        self.stencil = sc.SphericalStencil(
+            nside, int(self.kernel_size), cell_ids=self.cell_ids
+        )
+
         sigma_opt = (self.sigma / np.sqrt(np.pi)) * nside
         xx, yy = np.meshgrid(
             np.arange(self.kernel_size) - self.kernel_size // 2,
@@ -126,8 +128,7 @@ class Foscat1DHealpix(Predictor):
         W = np.exp(-(xx**2 + yy**2) / (sigma_opt**2))
         W = W / W.sum()
 
-        self.W_tensor = self.stencil.to_tensor(W).reshape(1, 1, self.kernel_size ** 2)
-
+        self.W_tensor = self.stencil.to_tensor(W).reshape(1, 1, self.kernel_size**2)
 
     def _ensure_bcp(self, arr: np.ndarray):
         """
@@ -158,7 +159,9 @@ class Foscat1DHealpix(Predictor):
         B, C, P = out.shape
         if kind == "1d":
             # renvoyer (P,)
-            return out.reshape(P,)
+            return out.reshape(
+                P,
+            )
         if kind == "2d_bp":
             # origine (B, P)
             return out.reshape(orig_shape[0], orig_shape[1])
@@ -166,14 +169,14 @@ class Foscat1DHealpix(Predictor):
             return out.reshape(1, P)
         # 3d : conserver
         return out
-    def predict(self, X,mask=None):
-        
+
+    def predict(self, X, mask=None):
+
         bcp, original_info = self._ensure_bcp(X)
         im_t = self.stencil.to_tensor(bcp)
-        
+
         out_t = self.stencil.Convol_torch(im_t, self.W_tensor)
         out_np = self.stencil.to_numpy(out_t)
-        
+
         filtered = self._restore_shape(out_np, original_info)
         return filtered
-
