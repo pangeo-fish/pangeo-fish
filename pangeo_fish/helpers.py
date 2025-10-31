@@ -33,7 +33,11 @@ from pangeo_fish.diff import diff_z
 from pangeo_fish.grid import center_longitude
 from pangeo_fish.hmm.estimator import EagerEstimator
 from pangeo_fish.hmm.optimize import EagerBoundsSearch
-from pangeo_fish.hmm.prediction import Gaussian1DHealpix, Gaussian2DCartesian, Foscat1DHealpix
+from pangeo_fish.hmm.prediction import (
+    Foscat1DHealpix,
+    Gaussian1DHealpix,
+    Gaussian2DCartesian,
+)
 from pangeo_fish.io import (
     open_copernicus_catalog,
     open_tag,
@@ -1031,7 +1035,9 @@ def normalize_pdf(
     return normalized, figure
 
 
-def _get_predictor_factory(ds: xr.Dataset, truncate: float, dims: list[str], conv_method: str):
+def _get_predictor_factory(
+    ds: xr.Dataset, truncate: float, dims: list[str], conv_method: str
+):
     if dims == ["x", "y"]:
         predictor = curry(Gaussian2DCartesian, truncate=truncate)
     elif dims == ["cells"]:
@@ -1047,15 +1053,18 @@ def _get_predictor_factory(ds: xr.Dataset, truncate: float, dims: list[str], con
             )
         elif conv_method == "FoscatConv":
             predictor = curry(
-                Foscat1DHealpix, 
+                Foscat1DHealpix,
                 cell_ids=ds["cell_ids"].data,
                 grid_info=ds.dggs.grid_info,
             )
         else:
-            raise ValueError(f'Unknown helper "{conv_method}". Expected "HealpixConv" or "FoscatConv".')
+            raise ValueError(
+                f'Unknown helper "{conv_method}". Expected "HealpixConv" or "FoscatConv".'
+            )
     else:
         raise ValueError(f'Unknown dims "{dims}".')
     return predictor
+
 
 def _get_max_sigma(
     ds: xr.Dataset,
@@ -1079,7 +1088,7 @@ def _get_max_sigma(
         max_grid_displacement = (
             maximum_speed_ * timedelta * adjustment_factor / grid_resolution
         )
-    max_sigma = max_grid_displacement.pint.to("dimensionless").pint.magnitude 
+    max_sigma = max_grid_displacement.pint.to("dimensionless").pint.magnitude
 
     return max_sigma.item()
 
@@ -1132,7 +1141,6 @@ def optimize_pdf(
         A dictionary containing the optimization results (mainly, the sigma value of the Brownian movement model)
     """
 
-    
     ds = ds.compute()
 
     if "cells" in ds.dims:
@@ -1255,7 +1263,7 @@ def predict_positions(
         )
     elif "Foscat1DHealpix" in cls_name:
         predictor_factory = _get_predictor_factory(
-            emission, truncate=truncate,conv_method="FoscatConv", dims=["cells"]
+            emission, truncate=truncate, conv_method="FoscatConv", dims=["cells"]
         )
     else:
         raise RuntimeError("Could not infer predictor's class from the `.json` file.")
