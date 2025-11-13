@@ -63,6 +63,7 @@ __all__ = [
     "combine_pdfs",
     "normalize_pdf",
     "optimize_pdf",
+    "optimize_pdf_final_pos",
     "predict_positions",
     "plot_trajectories",
     "open_distributions",
@@ -493,8 +494,9 @@ def compute_diff(
         .assign_attrs(attrs)
         .assign(
             {
-                "H0": reference_model["H0"],
-                "ocean_mask": reference_model["H0"].notnull(),
+                # "H0": reference_model["H0"],
+                "XE": reference_model["XE"],
+                # "ocean_mask": reference_model["H0"].notnull(),
             }
         )
     )  # type: xr.Dataset
@@ -1071,7 +1073,9 @@ def _get_max_sigma(
         max_grid_displacement = (
             maximum_speed_ * timedelta * adjustment_factor / grid_resolution
         )
-    max_sigma = max_grid_displacement.pint.to("dimensionless").pint.magnitude / truncate
+    max_sigma = max_grid_displacement.pint.to(
+        "dimensionless"
+    ).pint.magnitude  # / truncate
 
     return max_sigma.item()
 
@@ -1139,13 +1143,85 @@ def optimize_pdf(
 
     estimator = EagerEstimator(sigma=None, predictor_factory=predictor_factory)
     ds.attrs["max_sigma"] = max_sigma  # limitation of the helper
+    print(max_sigma)
+    optimizer = EagerBoundsSearch(
+        estimator,
+        (1e-8, ds.attrs["max_sigma"]),
+        optimizer_kwargs={"disp": 3, "xtol": tolerance},
+    )
+
+    optimized = optimizer.fit(ds)
+    params = optimized.to_dict()  # type: dict
+    params = _update_params_dict(factory=predictor_factory, params=params)
+    params.update(_get_package_versions())
+
+    if save_parameters:
+        try:
+            path_to_json = Path(target_root) / "parameters.json"
+            if storage_options is None:
+                path_to_json.parent.mkdir(parents=True, exist_ok=True)
+                str_path_to_json = str(path_to_json)
+            else:
+                str_path_to_json = _s3_path_to_str(path_to_json)
+            pd.DataFrame.from_dict(params, orient="index").to_json(
+                str_path_to_json, storage_options=storage_options
+            )
+        except Exception:
+            warnings.warn(
+                f'An error occurred when attempting to export the results under "{path_to_json}".',
+                RuntimeWarning,
+            )
+    return params
+
+
+def optimize_pdf_final_pos(
+    *,
+    ds: xr.Dataset,
+    earth_radius: pint.Quantity,
+    adjustment_factor: float,
+    truncate: float,
+    maximum_speed: pint.Quantity,
+    tolerance: float,
+    dims: list[str] = ["cells"],
+    save_parameters=False,
+    storage_options: dict = None,
+    target_root=".",
+    **kwargs,
+) -> dict:
+    """Optimize a temporal probability distribution.
+
+    Returns
+    -------
+    params : dict
+        A dictionary containing the optimization results (mainly, the sigma value of the Brownian movement model)
+    """
+
+    # it is important to compute before re-indexing? Yes.
+    ds = ds.compute()
+
+    if "cells" in ds.dims:
+        ds = to_healpix(ds)
+        as_radians = True
+    else:
+        as_radians = False
+
+    max_sigma = _get_max_sigma(
+        ds, earth_radius, adjustment_factor, truncate, maximum_speed, as_radians
+    )
+    predictor_factory = _get_predictor_factory(ds=ds, truncate=truncate, dims=dims)
+
+    estimator = EagerEstimator(sigma=None, predictor_factory=predictor_factory)
+
+    ds.attrs["max_sigma"] = max_sigma  # limitation of the helper
+    print(max_sigma)
 
     optimizer = EagerBoundsSearch(
         estimator,
-        (1e-4, ds.attrs["max_sigma"]),
+        (1e-9, ds.attrs["max_sigma"]),
         optimizer_kwargs={"disp": 3, "xtol": tolerance},
     )
-    optimized = optimizer.fit(ds)
+
+    optimized = optimizer.fit_final_pos(ds)
     params = optimized.to_dict()  # type: dict
     params = _update_params_dict(factory=predictor_factory, params=params)
     params.update(_get_package_versions())
@@ -1171,6 +1247,7 @@ def optimize_pdf(
 
 def predict_positions(
     *,
+    ds: xr.Dataset,
     target_root: str,
     storage_options: dict,
     chunks: dict,
@@ -1212,16 +1289,8 @@ def predict_positions(
     pangeo_fish.hmm.estimator.EagerEstimator.decode
     """
 
-    # loads the normalized .zarr array
-    emission = xr.open_dataset(
-        f"{target_root}/combined.zarr",
-        engine="zarr",
-        chunks=chunks,
-        inline_array=True,
-        storage_options=storage_options,
-    )
-
-    emission = emission.compute()
+    emission = ds
+    emission = emission.persist()
 
     if "cells" in emission.dims:
         emission = to_healpix(emission)

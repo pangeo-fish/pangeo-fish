@@ -119,6 +119,33 @@ class EagerBoundsSearch:
 
         return self.estimator.set_params(sigma=result.item())
 
+    def fit_final_pos(self, X):
+        """Optimize sigma so that predicted final state matches the observed final value."""
+
+        def f(sigma, X):
+            result = self.estimator.set_params(sigma=sigma).score_final_pos(X)
+
+            # on suppose que score() met à disposition un dict final_info
+            final_info = getattr(self.estimator, "last_info", None)
+            if final_info is not None:
+                state_val = float(final_info["state_value"])
+                final_val = float(final_info["final_value"])
+                diff = abs(final_val - state_val)
+                print(
+                    f"sigma {sigma} | final_value={final_val:.6f} | state_value={state_val:.6f} | diff={diff:.3e}"
+                )
+                return diff
+
+            if not hasattr(result, "compute"):
+                return float(result)
+            return float(result.compute())
+
+        lower, upper = self.param_bounds
+        result = scipy.optimize.fminbound(
+            f, lower, upper, args=(X,), **self.optimizer_kwargs
+        )
+        return self.estimator.set_params(sigma=result.item())
+
 
 class TargetBoundsSearch:
     """

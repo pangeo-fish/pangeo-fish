@@ -7,7 +7,7 @@ from tlz.itertoolz import first
 
 from pangeo_fish import tracks, utils
 from pangeo_fish.hmm.decode import mean_track, modal_track, viterbi, viterbi2
-from pangeo_fish.hmm.filter import forward, forward_backward, score
+from pangeo_fish.hmm.filter import forward, forward_backward, score, score_final_pos
 from pangeo_fish.hmm.prediction import Predictor
 
 
@@ -76,6 +76,36 @@ class EagerEstimator:
 
         return value if not np.isnan(value) else np.inf
 
+    def _score_final_pos(self, X, *, spatial_dims=None, temporal_dims=None):
+        if self.sigma is None:
+            raise ValueError("unset sigma, cannot run the filter")
+
+        if spatial_dims is None:
+            spatial_dims = utils._detect_spatial_dims(X)
+        if temporal_dims is None:
+            temporal_dims = utils._detect_temporal_dims(X)
+
+        dims = temporal_dims + spatial_dims
+
+        X_ = X.transpose(*dims)
+
+        predictor: Predictor
+        if self.predictor is None:
+            predictor = self.predictor_factory(sigma=self.sigma)
+            self.predictor = predictor
+        else:
+            predictor = self.predictor
+
+        value = score_final_pos(
+            emission=X_["pdf"].data,
+            mask=X_["mask"].data,
+            initial_probability=X_["initial"].data,
+            final_probability=X_["final"].data,
+            predictor=predictor,
+        )
+
+        return value if not np.isnan(value) else np.inf
+
     def _forward_algorithm(self, X, *, spatial_dims=None, temporal_dims=None):
         if self.sigma is None:
             raise ValueError("unset sigma, cannot run the filter")
@@ -130,7 +160,8 @@ class EagerEstimator:
             - ``pdf``, the emission probabilities
             - ``mask``, a mask to select ocean pixels
 
-            Due to the convolution method we use today, we can't pass np.nan, thus we send ``x.fillna(0)``, but drop the values whihch are less than 0 and put them back to np.nan when we return the value.
+            Due to the convolution method we use today, we can't pass np.nan, thus we send ``x.fillna(0)``,
+            but drop the values whihch are less than 0 and put them back to np.nan when we return the value.
         spatial_dims : list of hashable, optional
             The spatial dimensions of the dataset.
         temporal_dims : list of hashable, optional
@@ -175,6 +206,35 @@ class EagerEstimator:
             The score for the fit with the current parameters.
         """
         return self._score(
+            X.fillna(0), spatial_dims=spatial_dims, temporal_dims=temporal_dims
+        )
+
+    def score_final_pos(self, X, *, spatial_dims=None, temporal_dims=None):
+        """Score the fit of the selected model to the data
+
+        Apply the forward-backward algorithm to the given data, then return the
+        negative logarithm of the normalization factors.
+
+        Parameters
+        ----------
+        X : xarray.Dataset
+            The emission probability maps. The dataset should contain these variables:
+
+            - ``pdf``, the emission probabilities
+            - ``mask``, a mask to select ocean pixels
+            - ``initial``, the initial probability map
+
+        spatial_dims : list of hashable, optional
+            The spatial dimensions of the dataset.
+        temporal_dims : list of hashable, optional
+            The temporal dimensions of the dataset.
+
+        Returns
+        -------
+        score : float
+            The score for the fit with the current parameters.
+        """
+        return self._score_final_pos(
             X.fillna(0), spatial_dims=spatial_dims, temporal_dims=temporal_dims
         )
 

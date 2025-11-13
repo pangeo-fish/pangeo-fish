@@ -2,6 +2,7 @@
 
 import cf_xarray  # noqa: F401
 import more_itertools
+import numpy as np
 import scipy.stats
 import xarray as xr
 from more_itertools import first
@@ -9,48 +10,91 @@ from more_itertools import first
 from pangeo_fish.utils import _detect_spatial_dims, normalize
 
 
-# also try: multivariate_normal, gaussian_kde
-# TODO: use numba to vectorize (using `guvectorize`?)
 def normal(samples, mean, std, *, dims):
-    """Compute the combined pdf of independent layers
-
-    Parameters
-    ----------
-    samples : xarray.DataArray, Variable, or array-like
-        The samples to compute the pdf from
-    mean : float
-        The mean of the distribution
-    std : float
-        The standard deviation of the distribution
-    dims : list of hashable
-        The dimension to compute the pdf along
-
-    Returns
-    -------
-    pdf : xarray.DataArray
-        The computed pdf
+    """
+    Compute the combined pdf of independent layers.
     """
 
     def _pdf(samples, mean, std):
         return scipy.stats.norm.pdf(samples, mean, std)
 
-    if isinstance(std, int | float) or std.size == 1:
-        param_dims = []
-    else:
-        param_dims = mean.dims
+    if not hasattr(mean, "dims"):
+        mean = xr.zeros_like(samples) + mean
+
+    # --- Choix des core-dims en fonction de std ---
+    is_scalar_std = (
+        np.isscalar(std)
+        or (hasattr(std, "ndim") and std.ndim == 0)
+        or (hasattr(std, "size") and np.size(std) == 1)
+    )
+
+    if is_scalar_std:
+        # std scalar
+        input_core_dims = [["cells"], ["cells"], []]
+    elif hasattr(std, "dims") and ("time" in std.dims):
+        # std(time)
+        input_core_dims = [dims, dims, []]
 
     result = xr.apply_ufunc(
         _pdf,
         samples,
         mean,
-        std**2,
+        std,
         dask="parallelized",
-        input_core_dims=[dims, param_dims, param_dims],
+        input_core_dims=input_core_dims,
         output_core_dims=[dims],
-        exclude_dims=set(param_dims),
+        output_dtypes=[samples.dtype],
         vectorize=True,
     )
+
     return result.rename("pdf").drop_attrs(deep=False)
+
+
+# def normal(samples, mean, std, *, dims):
+#     """
+#     Compute the combined pdf of independent layers.
+#     Works with:
+#       - scalar std (σ constant)
+#       - std(time) (σ dépend du temps)
+#       - std(cells,time) (σ dépend des deux)
+#     """
+
+#     def _pdf(samples, mean, std):
+#         return scipy.stats.norm.pdf(samples, mean, std)
+
+#     # mean scalaire -> DataArray aligné à samples
+#     if not hasattr(mean, "dims"):
+#         mean = xr.zeros_like(samples) + mean
+
+#     # Déterminer les dimensions de std
+#     is_scalar_std = np.isscalar(std) or (
+#         hasattr(std, "size") and np.size(std) == 1
+#     )
+
+#     if is_scalar_std:
+#         param_dims = []
+#     elif hasattr(std, "dims"):
+#         param_dims = list(std.dims)
+#     else:
+#         # Cas liste -> on suppose variance déjà transformée en std(time)
+#         param_dims = ["time"]
+#         std = xr.DataArray(std, dims=param_dims)
+
+#     # Pas de sqrt ici — std est déjà un écart-type
+#     result = xr.apply_ufunc(
+#         _pdf,
+#         samples,
+#         mean,
+#         std,
+#         dask="parallelized",
+#         input_core_dims=[dims, dims, param_dims],
+#         output_core_dims=[[]],
+#         vectorize=True,
+#         output_dtypes=[samples.dtype],
+#         dask_gufunc_kwargs={"allow_rechunk": True},
+#     )
+
+#     return result.rename("pdf").drop_attrs(deep=False)
 
 
 def combine_emission_pdf(raw, exclude=("initial", "final", "mask")):
