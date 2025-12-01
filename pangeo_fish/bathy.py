@@ -407,7 +407,11 @@ def compute_pdf_bathy_batch_numpy(ds_chunk, reshaped_tag, copernicus_chunk):
     prof_corr = pressure[:, None, :] - XE[:, :, None] + 10  # (T, C, O)
     valid = ~np.isnan(prof_corr)
 
-    bin_index = np.floor(prof_corr).astype("int32")
+    depth_bins = ds_chunk.depth_bins.values            
+    depth_bin_size = depth_bins[1] - depth_bins[0]     
+    
+ 
+    bin_index = np.floor(prof_corr / depth_bin_size).astype("int32")
     bin_index[~valid] = 0
     max_bin = hist.shape[1] - 1
     bin_index = np.clip(bin_index, 0, max_bin)
