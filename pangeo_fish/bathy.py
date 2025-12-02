@@ -184,7 +184,6 @@ def compute_pdf_bathy_numba_like_numpy(hist, pressure, XE, depth_bins):
 
             max_val = -1e32
 
-
             all_nan = True
 
             for o in range(n_obs):
@@ -199,8 +198,6 @@ def compute_pdf_bathy_numba_like_numpy(hist, pressure, XE, depth_bins):
 
                 if pc > max_val:
                     max_val = pc
-
-
 
             if all_nan:
                 out[t, c] = np.nan
