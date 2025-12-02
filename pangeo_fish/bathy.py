@@ -1,21 +1,10 @@
 import warnings
 
-import dask.array as da
 import healpy as hp
-import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
-import xdggs
-from dask import delayed
-from distributed import LocalCluster
 from numba import njit, prange
 from tqdm import tqdm
-
-from pangeo_fish.cf import bounds_to_bins
-from pangeo_fish.diff import diff_z
-from pangeo_fish.helpers import compute_diff, load_model
-from pangeo_fish.io import open_tag
-from pangeo_fish.tags import adapt_model_time, reshape_by_bins, to_time_slice
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
@@ -169,13 +158,13 @@ def compute_healpix_histogram_region_bin_size(
 @njit(parallel=True)
 def compute_pdf_bathy_numba_like_numpy(hist, pressure, XE, depth_bins):
 
-    T, C, O = pressure.shape
+    T, C, n_obs = pressure.shape
     B = hist.shape[1]
 
     depth_bin_size = depth_bins[1] - depth_bins[0]
     out = np.empty((T, C), dtype=np.float64)
 
-    # ---- RÈGLE 4 : Terre : hist[c,:] = NaN ----
+    # ---- land : hist[c,:] = NaN ----
     for c in range(C):
         if np.isnan(XE[0, c]):
             for b in range(B):
@@ -189,21 +178,18 @@ def compute_pdf_bathy_numba_like_numpy(hist, pressure, XE, depth_bins):
     for t in prange(T):
         for c in range(C):
 
-            # Terre → toujours NaN (comme l'original)
             if np.isnan(XE[t, c]):
                 out[t, c] = np.nan
                 continue
 
             max_val = -1e32
-            max_o = -1
 
-            # Pour detecter les profils entièrement NaN
+
             all_nan = True
 
-            for o in range(O):
+            for o in range(n_obs):
                 val = pressure[t, c, o]
 
-                # RÈGLE 2 : NaN de prof remplacé par 1e-14 pour le max
                 if np.isnan(val):
                     val = 1e-14
                 else:
@@ -213,9 +199,9 @@ def compute_pdf_bathy_numba_like_numpy(hist, pressure, XE, depth_bins):
 
                 if pc > max_val:
                     max_val = pc
-                    max_o = o
 
-            # ---- RÈGLE 3 : profil entièrement NaN ----
+
+
             if all_nan:
                 out[t, c] = np.nan
                 continue
@@ -227,7 +213,6 @@ def compute_pdf_bathy_numba_like_numpy(hist, pressure, XE, depth_bins):
             elif bin_idx >= B:
                 bin_idx = B - 1
 
-            # ---- TERRE : hist[c,bin_idx] est NaN → RENVOIE NATURELLEMENT NaN ----
             out[t, c] = hist[c, bin_idx]
 
     return out
@@ -236,7 +221,7 @@ def compute_pdf_bathy_numba_like_numpy(hist, pressure, XE, depth_bins):
 def compute_pdf_bathy_batch_numba(ds_chunk, reshaped_tag, copernicus_chunk):
 
     hist = np.asarray(ds_chunk["bathy_pixel_hist"].values)  # (C,B)
-    pressure = np.asarray(reshaped_tag["pressure"].values)  # (T,O) or (T,C,O)
+    pressure = np.asarray(reshaped_tag["pressure"].values)  # (T,n_obs) or (T,C,n_obs)
     XE = np.asarray(copernicus_chunk["XE"].values)  # (T,C)
     depth_bins = np.asarray(ds_chunk.depth_bins.values)
 
