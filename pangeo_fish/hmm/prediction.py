@@ -115,7 +115,7 @@ class Foscat1DHealpix(Predictor):
 
         self.kernel_size = 33
         nside = 2**self.grid_info.level
-        
+
         self.stencil = sc.SphericalStencil(
             nside, int(self.kernel_size), cell_ids=self.cell_ids
         )
@@ -127,12 +127,12 @@ class Foscat1DHealpix(Predictor):
         )
         W = np.exp(-(xx**2 + yy**2) / (sigma_opt**2))
         W = W / W.sum()
-        
-        print("sigma",self.sigma)
-        print("sigma_opt",sigma_opt)
+
+        print("sigma", self.sigma)
+        print("sigma_opt", sigma_opt)
         print(W)
         print("kernel cut:", W[:, self.kernel_size // 2])
-        
+
         self.W_tensor = self.stencil.to_tensor(W).reshape(1, 1, self.kernel_size**2)
 
     def _ensure_bcp(self, arr: np.ndarray):
