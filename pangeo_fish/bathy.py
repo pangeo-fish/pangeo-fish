@@ -8,8 +8,8 @@ import xarray as xr
 import xdggs
 from dask import delayed
 from distributed import LocalCluster
-from tqdm import tqdm
 from numba import njit, prange
+from tqdm import tqdm
 
 from pangeo_fish.cf import bounds_to_bins
 from pangeo_fish.diff import diff_z
@@ -18,8 +18,6 @@ from pangeo_fish.io import open_tag
 from pangeo_fish.tags import adapt_model_time, reshape_by_bins, to_time_slice
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
-
-
 
 
 def compute_healpix_histogram_region_bin_size(
@@ -167,6 +165,7 @@ def compute_healpix_histogram_region_bin_size(
     )
     return ds_out
 
+
 @njit(parallel=True)
 def compute_pdf_bathy_numba_like_numpy(hist, pressure, XE, depth_bins):
 
@@ -236,14 +235,16 @@ def compute_pdf_bathy_numba_like_numpy(hist, pressure, XE, depth_bins):
 
 def compute_pdf_bathy_batch_numba(ds_chunk, reshaped_tag, copernicus_chunk):
 
-    hist = np.asarray(ds_chunk["bathy_pixel_hist"].values)       # (C,B)
-    pressure = np.asarray(reshaped_tag["pressure"].values)       # (T,O) or (T,C,O)
-    XE = np.asarray(copernicus_chunk["XE"].values)               # (T,C)
+    hist = np.asarray(ds_chunk["bathy_pixel_hist"].values)  # (C,B)
+    pressure = np.asarray(reshaped_tag["pressure"].values)  # (T,O) or (T,C,O)
+    XE = np.asarray(copernicus_chunk["XE"].values)  # (T,C)
     depth_bins = np.asarray(ds_chunk.depth_bins.values)
 
     if pressure.ndim == 2:
         pressure = pressure[:, None, :]
-        pressure = np.broadcast_to(pressure, (XE.shape[0], XE.shape[1], pressure.shape[2]))
+        pressure = np.broadcast_to(
+            pressure, (XE.shape[0], XE.shape[1], pressure.shape[2])
+        )
 
     result = compute_pdf_bathy_numba_like_numpy(hist, pressure, XE, depth_bins)
 
@@ -255,6 +256,7 @@ def compute_pdf_bathy_batch_numba(ds_chunk, reshaped_tag, copernicus_chunk):
             "cells": ds_chunk["cells"],
         },
     )
+
 
 def batch_compute_pdf_bathy(
     ds_lr,
@@ -273,14 +275,13 @@ def batch_compute_pdf_bathy(
     reference = xr.open_dataset(
         f"{target_root}/diff-regridded.zarr",
         engine="zarr",
-        chunks={},       
+        chunks={},
         inline_array=True,
         storage_options=None,
     )
 
     # Get common cell IDs
-    common_ids = np.intersect1d(reference.cell_ids.values,
-                                ds_lr.cell_ids.values)
+    common_ids = np.intersect1d(reference.cell_ids.values, ds_lr.cell_ids.values)
 
     # Align histogram dataset
     ds_histo_coords = ds_lr.assign_coords(cell_ids=("cells", ds_lr.cell_ids.values))
