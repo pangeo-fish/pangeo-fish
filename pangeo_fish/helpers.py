@@ -498,6 +498,7 @@ def compute_diff(
         .assign(
             {
                 "H0": reference_model["H0"],
+                "XE": reference_model["XE"],
                 "ocean_mask": reference_model["H0"].notnull(),
             }
         )
@@ -1205,6 +1206,7 @@ def predict_positions(
     track_modes=["mean", "mode"],
     additional_track_quantities=["speed", "distance"],
     save=True,
+    tag_name: str,
     **kwargs,
 ):
     """High-level helper function for predicting fish's positions and generating the consequent trajectories.
@@ -1242,7 +1244,7 @@ def predict_positions(
 
     # loads the normalized .zarr array
     emission = xr.open_dataset(
-        f"{target_root}/combined.zarr",
+        f"{target_root}/emission_w_bathy_pdf_{tag_name}.zarr",
         engine="zarr",
         chunks=chunks,
         inline_array=True,
