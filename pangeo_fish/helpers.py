@@ -1045,7 +1045,7 @@ def _get_predictor_factory(
         predictor = curry(Gaussian2DCartesian, truncate=truncate)
 
     elif dims == ["cells"]:
-        if conv_method == "HealpixConv":Z
+        if conv_method == "HealpixConv":
             if truncate is None:
                 raise ValueError(
                     "truncate must not be None when using HealpixConv on 'cells'"
@@ -1206,7 +1206,6 @@ def predict_positions(
     track_modes=["mean", "mode"],
     additional_track_quantities=["speed", "distance"],
     save=True,
-    tag_name: str,
     **kwargs,
 ):
     """High-level helper function for predicting fish's positions and generating the consequent trajectories.
@@ -1263,10 +1262,10 @@ def predict_positions(
     # do not account for the other kwargs...
     # not very robust yet...
     predictor_kwargs = params["predictor_factory"].get("kwargs", {})
-
+    
     truncate_raw = predictor_kwargs.get("truncate")
     truncate = float(truncate_raw) if truncate_raw is not None else None
-
+    
     cls_name = params["predictor_factory"]["class"]  # type: str
     if "Gaussian2DCartesian" in cls_name:
         predictor_factory = _get_predictor_factory(
