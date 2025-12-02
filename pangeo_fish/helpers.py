@@ -1099,7 +1099,7 @@ def _get_max_sigma(
             maximum_speed_ * timedelta * adjustment_factor / grid_resolution
         )
     max_sigma = max_grid_displacement.pint.to("dimensionless").pint.magnitude
-
+    print("Max sigma :", max_sigma)
     return max_sigma.item()
 
 
