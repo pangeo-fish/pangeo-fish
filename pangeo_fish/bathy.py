@@ -253,7 +253,6 @@ def batch_compute_pdf_bathy(
     Dividing calculation into batches using the Numba-accelerated per-batch function.
     """
 
-    n_cells_total = ds_lr.sizes["cells"]
     pdf_chunks = []
 
     # Load reference grid
