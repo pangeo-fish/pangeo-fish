@@ -3,6 +3,7 @@ channels:
 dependencies:
   - pytest
   - pytest-cov
+  - tqdm
   # I/O
   - fsspec
   - h5netcdf
