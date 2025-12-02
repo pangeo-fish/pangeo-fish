@@ -1275,10 +1275,10 @@ def predict_positions(
     # do not account for the other kwargs...
     # not very robust yet...
     predictor_kwargs = params["predictor_factory"].get("kwargs", {})
-    
+
     truncate_raw = predictor_kwargs.get("truncate")
     truncate = float(truncate_raw) if truncate_raw is not None else None
-    
+
     cls_name = params["predictor_factory"]["class"]  # type: str
     if "Gaussian2DCartesian" in cls_name:
         predictor_factory = _get_predictor_factory(
