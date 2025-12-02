@@ -132,7 +132,7 @@ class Foscat1DHealpix(Predictor):
 
     def _ensure_bcp(self, arr: np.ndarray):
         """
-        Garantit que arr est en (B, C, P).
+        Ensure (B, C, P).
         """
         n_cells = self.cell_ids.shape[0]
         a = np.array(arr)

@@ -1036,12 +1036,19 @@ def normalize_pdf(
 
 
 def _get_predictor_factory(
-    ds: xr.Dataset, truncate: float, dims: list[str], conv_method: str
+    ds: xr.Dataset, truncate: float | None, dims: list[str], conv_method: str
 ):
     if dims == ["x", "y"]:
+        if truncate is None:
+            raise ValueError("truncate must not be None when dims == ['x', 'y']")
         predictor = curry(Gaussian2DCartesian, truncate=truncate)
+
     elif dims == ["cells"]:
-        if conv_method == "HealpixConv":
+        if conv_method == "HealpixConv":Z
+            if truncate is None:
+                raise ValueError(
+                    "truncate must not be None when using HealpixConv on 'cells'"
+                )
             predictor = curry(
                 Gaussian1DHealpix,
                 cell_ids=ds["cell_ids"].data,
@@ -1051,18 +1058,21 @@ def _get_predictor_factory(
                 pad_kwargs={"mode": "constant", "constant_value": 0},
                 optimize_convolution=True,
             )
+
         elif conv_method == "FoscatConv":
             predictor = curry(
                 Foscat1DHealpix,
                 cell_ids=ds["cell_ids"].data,
                 grid_info=ds.dggs.grid_info,
             )
+
         else:
             raise ValueError(
                 f'Unknown helper "{conv_method}". Expected "HealpixConv" or "FoscatConv".'
             )
     else:
         raise ValueError(f'Unknown dims "{dims}".')
+
     return predictor
 
 
@@ -1070,7 +1080,6 @@ def _get_max_sigma(
     ds: xr.Dataset,
     earth_radius: pint.Quantity,
     adjustment_factor: float,
-    truncate: float,
     maximum_speed: pint.Quantity,
     as_radians: bool,
 ) -> float:
@@ -1098,7 +1107,7 @@ def optimize_pdf(
     ds: xr.Dataset,
     earth_radius: pint.Quantity,
     adjustment_factor: float,
-    truncate: float,
+    truncate: float | None,
     maximum_speed: pint.Quantity,
     tolerance: float,
     dims: list[str] = ["cells"],
@@ -1150,7 +1159,7 @@ def optimize_pdf(
         as_radians = False
 
     max_sigma = _get_max_sigma(
-        ds, earth_radius, adjustment_factor, truncate, maximum_speed, as_radians
+        ds, earth_radius, adjustment_factor, maximum_speed, as_radians
     )
     predictor_factory = _get_predictor_factory(
         ds=ds, truncate=truncate, dims=dims, conv_method=conv_method
@@ -1252,7 +1261,10 @@ def predict_positions(
     # do not account for the other kwargs...
     # not very robust yet...
     predictor_kwargs = params["predictor_factory"].get("kwargs", {})
-    truncate = float(predictor_kwargs.get("truncate", 0.0))
+    
+    truncate_raw = predictor_kwargs.get("truncate")
+    truncate = float(truncate_raw) if truncate_raw is not None else None
+    
     cls_name = params["predictor_factory"]["class"]  # type: str
     if "Gaussian2DCartesian" in cls_name:
         predictor_factory = _get_predictor_factory(
