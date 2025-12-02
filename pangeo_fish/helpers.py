@@ -1200,7 +1200,8 @@ def optimize_pdf(
 
 def predict_positions(
     *,
-    target_root: str,
+    ds: xr.Dataset | None = None,      
+    target_root: str | None = None,    
     storage_options: dict,
     chunks: dict,
     track_modes=["mean", "mode"],
@@ -1241,16 +1242,28 @@ def predict_positions(
     pangeo_fish.hmm.estimator.EagerEstimator.decode
     """
 
-    # loads the normalized .zarr array
-    emission = xr.open_dataset(
-        f"{target_root}/emission_w_bathy_pdf_{tag_name}.zarr",
-        engine="zarr",
-        chunks=chunks,
-        inline_array=True,
-        storage_options=storage_options,
-    )
+    if ds is None:
+            if target_root is None:
+                raise ValueError(
+                    "You must provide either `ds` or `target_root` "
+                    "to load the dataset."
+                )
+    
+            # old behavior preserved:
+            emission = xr.open_dataset(
+                f"{target_root}/combined.zarr",
+                engine="zarr",
+                chunks=chunks,
+                inline_array=True,
+                storage_options=storage_options,
+            )
+            emission = emission.compute()
+    
+    else:
+        
+        emission = ds
 
-    emission = emission.compute()
+        emission = emission.compute()
 
     if "cells" in emission.dims:
         emission = to_healpix(emission)
