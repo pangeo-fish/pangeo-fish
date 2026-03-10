@@ -4,6 +4,7 @@ import dask
 import dask.array as da
 import numpy as np
 import zarr  # noqa: F401
+from tqdm import tqdm
 
 
 def score(emission, predictor, initial_probability, mask=None):
@@ -42,7 +43,7 @@ def score(emission, predictor, initial_probability, mask=None):
     normalizations.append(np.sum(initial * dask.compute(emission[0, ...])[0]))
     previous = initial
 
-    for index in range(1, n_max):
+    for index in tqdm(range(1, n_max), desc="Scoring"):
         prediction = predictor.predict(previous, mask=mask)
         updated = prediction * dask.compute(emission[index, ...])[0]
 
@@ -90,7 +91,7 @@ def forward(emission, predictor, initial_probability, mask=None):
     predictions.append(initial_probability)
     states.append(initial_probability)
 
-    for index in range(1, n_max):
+    for index in tqdm(range(1, n_max), desc="Forward"):
         prediction = predictor.predict(states[index - 1], mask=mask)
         predictions.append(prediction)
 
@@ -108,7 +109,7 @@ def backward(states, predictions, predictor, mask=None):
 
     smoothed = [states[-1, ...]]
     backward_predictions = [states[-1, ...]]
-    for index in range(1, n_max):
+    for index in tqdm(range(1, n_max), desc="Backward"):
         ratio = smoothed[index - 1] / (predictions[-index, ...] + eps)
         backward_prediction = predictor.predict(ratio, mask=None)
         normalized = backward_prediction / np.sum(backward_prediction)

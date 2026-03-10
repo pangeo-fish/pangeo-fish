@@ -1,9 +1,8 @@
 channels:
   - conda-forge
-  - nodefaults
 dependencies:
   # development
-  - python=3.12
+  - python=3.11
   - jupyterlab
   # plotting
   - cmocean
@@ -11,7 +10,6 @@ dependencies:
   - hvplot
   - geoviews
   # I/O
-  - python-dotenv
   - fsspec
   - h5netcdf
   - intake-xarray
@@ -20,17 +18,16 @@ dependencies:
   - cf_xarray>=0.10.4
   - pint-xarray
   # general computing
-  - coiled
   - flox
-  - xarray=2025.3.1
+  - xarray
   - more-itertools
   - cytoolz
   - toolz
   - scipy
   - opt_einsum
-  - sparse=0.15
+  - sparse
   # geographic manipulations
-  - movingpandas<=0.21.3
+  - movingpandas
   - geopandas
   - cartopy
   - healpy
@@ -46,7 +43,6 @@ dependencies:
   # fixes...
   - aiohttp=3.9.5
   - zarr=2.18.4
-  - kerchunk=0.2.7
   - intake-xarray=0.7.0
   - aiobotocore=2.19.0
   - eccodes>=2.35.0
@@ -54,12 +50,9 @@ dependencies:
   - cdshealpix
   - copernicusmarine
   - dask-image
-  - jupyterlab
-  - ipywidgets
   - pip
   - pip:
-      - nbsphinx_link>=1.3.1
-      - xdggs
-      # - xarray-healpy @ git+https://github.com/iaocea/xarray-healpy.git@0ffca6058f4008f4f22f076e2d60787fcf32ac82
-      - xhealpixify
-      - -e ../.
+      - cdshealpix
+      - dask-hpcconfig
+      - pangeo-fish
+      - jupyterhub==4.1.6

@@ -13,7 +13,7 @@ import xarray as xr
 
 
 def geographic_to_astronomic(lat, lon, rot):
-    """Transform geographic coordinates to astronomic coordinates
+    """transform geographic coordinates to astronomic coordinates
 
     Parameters
     ----------
@@ -21,7 +21,7 @@ def geographic_to_astronomic(lat, lon, rot):
         geographic latitude, in degrees
     lon : array-like
         geographic longitude, in degrees
-    rot : array-like
+    rot : list-like
         Two element list with the rotation transformation (shift?) used by the grid, in
         degrees
 
@@ -39,20 +39,20 @@ def geographic_to_astronomic(lat, lon, rot):
 
 
 def astronomic_to_cartesian(theta, phi, dim="receiver_id"):
-    """Transform astronomic coordinates to cartesian coordinates
+    """transform astronomic coordinates to cartesian coordinates
 
     Parameters
     ----------
-    theta : array-like
+    theta : DataArray
         astronomic colatitude, in degrees
-    phi : array-like
+    phi : DataArray
         astronomic longitude, in degrees
     dim : hashable
         Name of the dimension
 
     Returns
     -------
-    cartesian : xarray.Dataset
+    cartesian : Dataset
         Cartesian coordinates
 
     See Also
@@ -78,12 +78,12 @@ def astronomic_to_cell_ids(nside, phi, theta):
     ----------
     nside : int
         Healpix resolution level
-    phi, theta : array-like
+    phi, theta : xr.DataArray
         astronomic longitude and colatitude, in degrees
 
     Returns
     -------
-    cell_ids : xarray.DataArray
+    cell_ids : xr.DataArray
         The computed cell ids
     """
     phi_, theta_ = dask.compute(phi, theta)
@@ -131,7 +131,7 @@ def _compute_coords(nside):
 
 @dataclass
 class HealpyGridInfo:
-    """Class representing a HealPix grid
+    """class representing a HealPix grid
 
     Attributes
     ----------
@@ -139,9 +139,9 @@ class HealpyGridInfo:
         HealPix grid resolution
     rot : dict of str to float
         Rotation of the healpix sphere.
-    coords : xarray.Dataset
+    coords : xr.Dataset
         Unstructured grid coordinates: latitude, longitude, cell ids.
-    indices ; xarray.DataArray
+    indices : xr.DataArray
         Indices that can be used to reorder to a flattened 2D healpy grid
     """
 
@@ -188,30 +188,6 @@ def concat(iterable):
 
 def unique(iterable):
     return list(dict.fromkeys(iterable))
-
-
-def create_grid(nside, rot={"lat": 0, "lon": 0}):
-    xx, yy = _compute_indices(nside)
-
-    raw_indices = np.full((nside, nside), fill_value=-1, dtype=int)
-    raw_indices[xx, yy] = np.arange(nside**2)
-    indices = xr.DataArray(np.ravel(raw_indices), dims="cells").chunk()
-
-    lat_, lon_, cell_ids = _compute_coords(nside)
-    lat = lat_ - rot["lat"]
-    lon = lon_ + rot["lon"]
-
-    resolution = hp.nside2resol(nside)
-    coords = xr.Dataset(
-        {
-            "latitude": (["cells"], lat, {"units": "deg"}),
-            "longitude": (["cells"], lon, {"units": "deg"}),
-            "cell_ids": (["cells"], cell_ids),
-        },
-        coords={"resolution": ((), resolution, {"units": "rad"})},
-    )
-
-    return HealpyGridInfo(nside=nside, rot=rot, indices=indices, coords=coords)
 
 
 def _compute_weights(source_lat, source_lon, *, nside, rot={"lat": 0, "lon": 0}):
@@ -263,14 +239,14 @@ def _weights_to_sparse(weights):
 
 @dataclass(repr=False)
 class HealpyRegridder:
-    """Regrid a dataset to healpy face 0
+    """regrid a dataset to healpy face 0
 
     Parameters
     ----------
-    input_grid : xarray.Dataset
-        The input dataset. For now, it has to have the ``"latitude"`` and ``"longitude"`` coordinates.
+    input_grid : xr.Dataset
+        The input dataset. For now, it has to have the `"latitude"` and `"longitude"` coordinates.
     output_grid : HealpyGridInfo
-        The target grid, containing healpix parameters like ``nside`` and ``rot``.
+        The target grid, containing healpix parameters like `nside` and `rot`.
     """
 
     input_grid: xr.Dataset
@@ -331,18 +307,18 @@ class HealpyRegridder:
         )
 
     def regrid_ds(self, ds):
-        """Regrid a dataset on the same grid as the input grid
+        """regrid a dataset on the same grid as the input grid
 
         The regridding method is restricted to linear interpolation so far.
 
         Parameters
         ----------
-        ds : xarray.Dataset
+        ds : xr.Dataset
             The input dataset.
 
         Returns
         -------
-        regridded : xarray.Dataset
+        regridded : xr.Dataset
             The regridded dataset
         """
         # based on https://github.com/pangeo-data/xESMF/issues/222#issuecomment-1524041837
@@ -422,7 +398,7 @@ def buffer_points(
     factor=4,
     intersect=False,
 ):
-    """Select the cells within a circular buffer around the given positions
+    """select the cells within a circular buffer around the given positions
 
     Parameters
     ----------
@@ -435,19 +411,19 @@ def buffer_points(
     nside : int
         The resolution of the healpix grid.
     sphere_radius : float, default: 6371000
-        The radius of the underlying sphere, used to convert ``radius`` to radians. By
+        The radius of the underlying sphere, used to convert `radius` to radians. By
         default, this is the standard earth's radius in meters.
     factor : int, default: 4
         The increased resolution for the buffer search.
     intersect : bool, default: False
-        If ``False``, select all cells where the center is within the buffer. If ``True``,
+        If `False`, select all cells where the center is within the buffer. If `True`,
         select cells which intersect the buffer.
 
     Returns
     -------
     masks : xarray.DataArray
-        The masks for each position. The cells within the buffer are ``True``, every other
-        cell is set to ``False``.
+        The masks for each position. The cells within the buffer are `True`, every other
+        cell is set to `False`.
 
     See Also
     --------

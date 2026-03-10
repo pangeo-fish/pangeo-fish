@@ -1,0 +1,7 @@
+# .mailmap — canonicalize contributor identities for pangeo-fish
+# Format: Canonical Name <canonical@email> Commit Name <commit@email>
+Tina Odaka <46813815+tinaok@users.noreply.github.com> tinaok <46813815+tinaok@users.noreply.github.com>
+Etienne Cap <76118668+capetienne@users.noreply.github.com> Etienne CAP <76118668+capetienne@users.noreply.github.com>
+Quentin Mazouni <37085377+QuentinMaz@users.noreply.github.com> Mazouni Quentin <37085377+QuentinMaz@users.noreply.github.com>
+Justus Magin <keewis@users.noreply.github.com> Justus Magin <keewis@posteo.de>
+Alexandre Derrien <142782765+aderrien7@users.noreply.github.com> aderrien7 <142782765+aderrien7@users.noreply.github.com>
