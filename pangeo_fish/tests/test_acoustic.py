@@ -34,7 +34,6 @@ def dummy_grid():
     ds = xr.Dataset(
         coords={"cell_ids": ("cells", cell_ids, grid_info), "time": ("time", time)},
         data_vars={"mask": ("cells", mask)},
-        attrs={"nside": 2**level},
     )
     # Decode the grid using DGGS and assign lat/lon coordinates
     return ds.dggs.decode().dggs.assign_latlon_coords()

@@ -104,7 +104,7 @@ def deployment_reception_masks(
             cell_ids,
             positions,
             buffer_size=buffer_size.m_as("m"),
-            nside=2 ** cell_ids.attrs["level"],
+            nside=2 ** cell_ids.dggs.grid_info.level,
             factor=2**16,
             intersect=True,
         )
@@ -113,7 +113,8 @@ def deployment_reception_masks(
             cell_ids,
             positions,
             buffer_size=buffer_size.m_as("m"),
-            nside=2 ** cell_ids.attrs["level"],
+           # nside=2 ** cell_ids.attrs["level"],
+            nside=2 ** cell_ids.dggs.grid_info.level,
             factor=2**16,
             intersect=True,
         )
