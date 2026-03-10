@@ -3,7 +3,8 @@ name = "pangeo-fish"
 authors = [{ name = "TAOS" }]
 description = "Utilities for fish geolocation"
 readme = "README.md"
-license = { text = "MIT" }
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 classifiers = [
   "Programming Language :: Python :: 3",
@@ -46,7 +47,7 @@ namespaces = false
 
 [build-system]
 requires = [
-  "setuptools>=64.0",
+  "setuptools>=77.0.0",
   "wheel",
   "setuptools_scm[toml]>=3.4",
 ]
