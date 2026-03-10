@@ -55,7 +55,13 @@ dependencies:
   - copernicusmarine
   - dask-image
   - jupyterlab
+  - docutils<0.21 # ADD THIS LINE
   - ipywidgets
+  - sphinx-remove-toctrees # ADD THIS
+  - sphinx-book-theme # ADD THIS
+  - nbsphinx # ADD THIS
+  #- sphinx-copybutton
+  #- myst-parser
   - pip
   - pip:
       - nbsphinx_link>=1.3.1
