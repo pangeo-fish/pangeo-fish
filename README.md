@@ -67,7 +67,8 @@ For detailed guidelines, please refer to our [contribution guidelines](https://g
 
 ## 📜 License
 
-Pangeo-Fish is distributed under the [BSD 3-Clause License](https://github.com/pangeo-fish/pangeo-fish/blob/main/LICENSE).
+Pangeo-Fish is distributed under the [GNU General Public License v3.0](https://github.com/pangeo-fish/pangeo-fish/blob/main/LICENSE).
+Copyright information for the project is provided in [COPYRIGHT](https://github.com/pangeo-fish/pangeo-fish/blob/main/COPYRIGHT).
 
 ---
 
