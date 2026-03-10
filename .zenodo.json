@@ -1,0 +1,58 @@
+{
+  "title": "pangeo-fish",
+  "description": "Pangeo-Fish is an open, community-driven project designed to leverage the power of the Pangeo ecosystem specifically for fish biologging data analysis and related oceanographic research. The project facilitates scalable, reproducible, and collaborative research by integrating biologging data with environmental datasets using cloud-native technologies.",
+  "upload_type": "software",
+  "access_right": "open",
+  "license": "GPL-3.0-only",
+  "language": "eng",
+  "keywords": [
+    "biologging",
+    "oceanography",
+    "Pangeo",
+    "Xarray",
+    "Zarr",
+    "Dask"
+  ],
+  "creators": [
+    {
+      "name": "Magin, Justus",
+      "orcid": "0000-0002-4254-8002",
+      "affiliation": "UMR LOPS (CNRS-Ifremer-IRD-UBO), IUEM, Brest, France"
+    },
+    {
+      "name": "Mazouni, Quentin",
+      "orcid": "0009-0003-3519-5514",
+      "affiliation": "Simula Research Laboratory, Oslo, Norway"
+    },
+    {
+      "name": "Cap, Etienne",
+      "orcid": "0009-0007-0360-0692",
+      "affiliation": "UMR LOPS (CNRS-Ifremer-IRD-UBO), IUEM, Brest, France"
+    },
+    {
+      "name": "Gonse, Marine",
+      "orcid": "0000-0002-5378-8482",
+      "affiliation": "UMR DECOD (Ecosystem Dynamics and Sustainability), IFREMER, Institut Agro, INRAE, Plouzane, France"
+    },
+    {
+      "name": "Woillez, Mathieu",
+      "orcid": "0000-0002-1032-2105",
+      "affiliation": "UMR DECOD (Ecosystem Dynamics and Sustainability), IFREMER, Institut Agro, INRAE, Plouzane, France"
+    },
+    {
+      "name": "Fouilloux, Anne",
+      "orcid": "0000-0002-1784-2920",
+      "affiliation": "Simula Research Laboratory, Oslo, Norway"
+    },
+    {
+      "name": "Delouis, Jean-Marc",
+      "orcid": "0000-0002-0713-1658",
+      "affiliation": "CNRS (UMR LOPS), Brest, France"
+    },
+    {
+      "name": "Odaka, Tina Erica",
+      "orcid": "0000-0002-1500-0156",
+      "affiliation": "UMR LOPS (CNRS-Ifremer-IRD-UBO), IUEM, Brest, France"
+    }
+  ]
+}
