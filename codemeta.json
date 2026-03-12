@@ -5,7 +5,7 @@
   "description": "Tools and examples for scalable analysis of fish biologging data integrated with environmental datasets using the Pangeo ecosystem.",
   "codeRepository": "https://github.com/pangeo-fish/pangeo-fish",
   "hasSourceCode": "https://github.com/pangeo-fish/pangeo-fish",
-  "license": "https://spdx.org/licenses/BSD-3-Clause",
+  "license": "https://spdx.org/licenses/GPL-3.0-only",
   "programmingLanguage": "Python",
   "keywords": [
     "biologging",
