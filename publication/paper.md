@@ -27,7 +27,7 @@ authors:
     affiliation: 3
   - name: Anne Fouilloux
     orcid: 0000-0002-1784-2920
-    affiliation: 2
+    affiliation: 4
   - name: Jean-Marc Delouis
     orcid: 0000-0002-0713-1658
     affiliation: 1
@@ -41,6 +41,8 @@ affiliations:
     index: 2
   - name: DECOD (Ecosystem Dynamics and Sustainability), IFREMER-Institut Agro-INRAE, Plouzané, France
     index: 3
+  - name: LifeWatch ERIC, Seville, Spain
+    index: 4
 date: 05 March 2025
 bibliography: paper.bib
 ---
