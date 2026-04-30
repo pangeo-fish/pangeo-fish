@@ -44,6 +44,12 @@ def reshape_by_bins(ds, *, dim, bins, other_dim="obs"):
     index = bins.to_index()
     grouper = xr.groupers.BinGrouper(index, include_lowest=True)
 
+    if np.issubdtype(ds[dim].dtype, np.datetime64) and np.issubdtype(
+        index.dtype.subtype, np.datetime64
+    ):
+        if ds[dim].dtype != index.dtype.subtype:
+            ds = ds.assign_coords({dim: ds[dim].astype(index.dtype.subtype)})
+
     processed = ds.groupby({dim: grouper}).map(
         expand_group, dim=dim, other_dim=other_dim
     )

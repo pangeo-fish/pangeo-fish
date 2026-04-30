@@ -374,7 +374,9 @@ def _open_parquet_model(parquet_url: str, remote_options=None):
         chunks={},
         storage_options={"remote_options": remote_options},
     )
-    reference_ds.coords["depth"].values[0] = 0.0
+    depth = reference_ds.coords["depth"].values.copy()
+    depth[0] = 0.0
+    reference_ds = reference_ds.assign_coords(depth=depth)
     return reference_ds
 
 
