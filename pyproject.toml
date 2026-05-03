@@ -12,25 +12,54 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
 ]
 dependencies = [
-  "xarray>=2024.11.0",
+  # core scientific stack
+  # xarray 2025.4.0 has a BinGrouper.factorize regression (pd.Index(None));
+  # known-good version is 2025.3.x (matches docs/environment.yaml).
+  "xarray>=2024.11.0,<2025.4",
   "pandas",
   "numpy",
   "scipy",
   "numba",
-  "more_itertools",
-  "opt_einsum",
   "sparse",
+  "opt_einsum",
+  "more_itertools",
+  "toolz",
+  # IO stack — pinned to known-working versions
+  "zarr==2.18.7",
+  "kerchunk==0.2.7",
+  "fsspec==2025.3.2",
+  "s3fs==2025.3.2",
+  "gcsfs==2025.3.2",
+  "numcodecs==0.15.1",
+  "h5netcdf",
+  "intake",
+  "intake-xarray",
+  # geographic & HEALPix
   "healpy",
+  "cartopy",
+  "geopandas",
+  "shapely",
   "movingpandas==0.21.3",
   "xhealpixify",
-  "cf_xarray>=0.10.4",
-  "pint-xarray",
-  "intake",
-  "s3fs",
-  "fsspec",
-  "healpix-convolution",
   "xdggs",
+  "healpix-convolution",
+  "cf_xarray>=0.10.4",
+  "pint",
+  "pint-xarray",
+  # distributed / parallel
+  "dask",
+  "distributed",
+  "flox",
+  # plotting / visualization
+  "matplotlib",
+  "hvplot",
+  "holoviews",
+  "cmocean",
   "imageio[ffmpeg]",
+  # CLI / progress
+  "rich",
+  "rich-click",
+  "tqdm",
 ]
 dynamic = ["version"]
 

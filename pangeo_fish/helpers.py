@@ -176,8 +176,10 @@ def to_healpix(ds: xr.Dataset) -> xr.Dataset:
 
     if "indexing_scheme" not in attrs.keys():
         attrs["indexing_scheme"] = "nested"
-
-    return ds.dggs.decode({"grid_name": "healpix"} | attrs)
+        attrs["grid_name"] = "healpix"
+    decoded = ds.dggs.decode({"grid_name": "healpix"} | attrs)
+    decoded["cell_ids"].attrs.update(attrs)
+    return decoded
 
 
 def reshape_to_2d(ds: xr.Dataset):
@@ -374,7 +376,9 @@ def _open_parquet_model(parquet_url: str, remote_options=None):
         chunks={},
         storage_options={"remote_options": remote_options},
     )
-    reference_ds.coords["depth"].values[0] = 0.0
+    depth = reference_ds.coords["depth"].values.copy()
+    depth[0] = 0.0
+    reference_ds = reference_ds.assign_coords(depth=depth)
     return reference_ds
 
 
@@ -617,6 +621,8 @@ def regrid_dataset(
     attrs = ds.attrs.copy()
     attrs.update(_get_package_versions() | {"min_vertices": min_vertices})
     reshaped = reshaped.assign_attrs(attrs)
+    if "indexing_scheme" not in reshaped["cell_ids"].attrs.keys():
+        reshaped["cell_ids"].attrs["indexing_scheme"] = "nested"
 
     if save:
         _save_zarr(reshaped, f"{target_root}/diff-regridded.zarr", storage_options)
@@ -760,6 +766,8 @@ def compute_emission_pdf(
         }
     )
     emission_pdf = emission_pdf.assign_attrs(attrs)
+    if "cell_ids" in diff_ds.coords and "cell_ids" in emission_pdf.coords:
+        emission_pdf["cell_ids"].attrs.update(diff_ds["cell_ids"].attrs)
     emission_pdf = emission_pdf.chunk({"time": chunk_time} | {d: -1 for d in dims})
 
     if save:
