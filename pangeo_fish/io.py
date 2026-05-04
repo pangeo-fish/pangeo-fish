@@ -22,9 +22,12 @@ def tz_convert(df, timezones):
     timezones : mapping of str to str
         The time zones to convert to per column.
     """
-    new_columns = {
-        column: pd.Index(df[column]).tz_convert(tz) for column, tz in timezones.items()
-    }
+    new_columns = {}
+    for column, tz in timezones.items():
+        idx = pd.Index(df[column])
+        if hasattr(idx, "tzinfo") and idx.tzinfo is None:
+            idx = idx.tz_localize("UTC")
+        new_columns[column] = idx.tz_convert(tz)
 
     return df.assign(**new_columns)
 
@@ -62,12 +65,18 @@ def open_tag(root, name, storage_options=None):
     else:
         mapper = root
 
-    dst = pd.read_csv(
+    _dst = pd.read_csv(
         mapper.dirfs.open(f"{name}/dst.csv"), parse_dates=["time"], index_col="time"
-    ).tz_convert(None)
+    )
+    dst = _dst.tz_convert(None) if _dst.index.tzinfo is not None else _dst
 
+    _te_name = (
+        "tagging_events.csv"
+        if mapper.dirfs.exists(f"{name}/tagging_events.csv")
+        else "tagging_event.csv"
+    )
     tagging_events = pd.read_csv(
-        mapper.dirfs.open(f"{name}/tagging_events.csv"),
+        mapper.dirfs.open(f"{name}/{_te_name}"),
         parse_dates=["time"],
         index_col="event_name",
     ).pipe(tz_convert, {"time": None})
@@ -145,9 +154,6 @@ def open_copernicus_catalog(cat, chunks=None):
         .assign(
             {
                 "dynamic_depth": lambda ds: (ds["depth"] + ds["XE"]).assign_attrs(
-                    {"units": "m", "positive": "down"}
-                ),
-                "dynamic_bathymetry": lambda ds: (ds["H0"] + ds["XE"]).assign_attrs(
                     {"units": "m", "positive": "down"}
                 ),
             }
@@ -235,9 +241,6 @@ def prepare_dataset(dataset, chunks=None, bbox=None, names=None):
         .assign(
             {
                 "dynamic_depth": lambda ds: (ds["depth"] + ds["XE"]).assign_attrs(
-                    {"units": "m", "positive": "down"}
-                ),
-                "dynamic_bathymetry": lambda ds: (ds["H0"] + ds["XE"]).assign_attrs(
                     {"units": "m", "positive": "down"}
                 ),
             }
@@ -497,13 +500,10 @@ def open_copernicus_zarr(
         # Rearrange depth coordinates
         .assign(depth=lambda ds: abs(ds["depth"]))
         .isel(depth=slice(None, None, -1))
-        # assign dynamic depth and bathymetry
+        # assign dynamic depth
         .assign(
             {
                 "dynamic_depth": lambda ds: (ds["depth"] + ds["XE"]).assign_attrs(
-                    {"units": "m", "positive": "down"}
-                ),
-                "dynamic_bathymetry": lambda ds: (ds["H0"] + ds["XE"]).assign_attrs(
                     {"units": "m", "positive": "down"}
                 ),
             }
