@@ -5,6 +5,8 @@ import pandas as pd
 import pytest
 import xarray as xr
 
+from pangeo_fish.light.lunar import correlation_to_likelihood
+from pangeo_fish.light.physics import moon_ground_illuminance
 from pangeo_fish.light.quality import dynamic_threshold
 from pangeo_fish.light.solar import compute_solar_likelihood
 
@@ -23,6 +25,43 @@ def test_dynamic_threshold_full_moon():
 
 def test_dynamic_threshold_half_moon():
     assert dynamic_threshold(50) == pytest.approx(70.0)
+
+
+# ---------------------------------------------------------------------------
+# physics.moon_ground_illuminance
+# ---------------------------------------------------------------------------
+
+
+def test_moon_illuminance_full_moon_zenith():
+    """Full moon at zenith at mean distance should be ~0.25–0.3 lux."""
+    lux = moon_ground_illuminance(100, 90, 384400)
+    assert 0.2 <= lux <= 0.4, f"Expected ~0.25–0.3 lux, got {lux:.4f}"
+
+
+def test_moon_illuminance_below_horizon():
+    """Moon below the horizon → 0.0 lux."""
+    assert moon_ground_illuminance(100, -5, 384400) == 0.0
+    assert moon_ground_illuminance(100, 0, 384400) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# lunar.correlation_to_likelihood
+# ---------------------------------------------------------------------------
+
+
+def test_correlation_to_likelihood_normalization():
+    """After transformation: max == 1, all values > 0 where corr_map is finite."""
+    rng = np.random.default_rng(42)
+    # Synthetic correlation map with r in [-0.5, 0.8]
+    corr_map = rng.uniform(-0.5, 0.8, size=(10, 10))
+
+    moon_nights = [{"corr_map": corr_map}]
+    result = correlation_to_likelihood(moon_nights, sigma_r=0.25)
+
+    lh = result[0]["lh_map"]
+    assert lh is not None
+    assert np.nanmax(lh) == pytest.approx(1.0, abs=1e-9)
+    assert np.all(lh > 0), "All likelihood values should be strictly positive"
 
 
 # ---------------------------------------------------------------------------
