@@ -13,14 +13,15 @@ Every tag must be stored as a folder `{TAG_ROOT}/{tag_name}/` containing three f
 
 Time series of the tag sensor, one row per record:
 
-| column | type | description |
-|---|---|---|
-| `time` | ISO 8601 UTC string, index | timestamp of the record |
-| `temperature` | float (°C) | external temperature |
-| `pressure` | float (dbar) | depth / pressure |
-| `light` | float (raw counts) or `NaN` | raw light intensity |
+| column        | type                        | description             |
+| ------------- | --------------------------- | ----------------------- |
+| `time`        | ISO 8601 UTC string, index  | timestamp of the record |
+| `temperature` | float (°C)                  | external temperature    |
+| `pressure`    | float (dbar)                | depth / pressure        |
+| `light`       | float (raw counts) or `NaN` | raw light intensity     |
 
 **Requirements:**
+
 - `time` must be **sorted** (monotone increasing) and **without duplicates** — `sel(time=slice(...))` will fail otherwise.
 - Extra columns are allowed and ignored by `load_tag`, but only `temperature`, `pressure`, `light` are used by the pipeline.
 
@@ -28,12 +29,12 @@ Time series of the tag sensor, one row per record:
 
 Two rows — release and end of deployment:
 
-| column | description |
-|---|---|
+| column       | description                                |
+| ------------ | ------------------------------------------ |
 | `event_name` | `release` or `fish_death` (or `recapture`) |
-| `time` | ISO 8601 UTC string |
-| `longitude` | decimal degrees |
-| `latitude` | decimal degrees |
+| `time`       | ISO 8601 UTC string                        |
+| `longitude`  | decimal degrees                            |
+| `latitude`   | decimal degrees                            |
 
 ### `metadata.json`
 
@@ -43,12 +44,12 @@ Free JSON dict, stored as tag attributes. Minimum useful fields: `tag_name`, `ta
 
 ## Tag types and light channel
 
-| `tag_type` | Manufacturer / format | Light column | `HAS_LIGHT` |
-|---|---|---|---|
-| `lotek` | Lotek LAT2810 — semicolon-separated raw CSV | `LightIntensity` → renamed to `light` by `prepare_tag_folder` | `True` |
-| `wc_psat` | Wildlife Computers MiniPAT Series CSV | no light sensor → `light = NaN` | **`False`** |
-| `dst` | Already a standard `dst.csv` | depends on the source | depends |
-| *(pre-formatted)* | WC or other tag with light, manually converted | column name varies (e.g. `Light Level`) — must be renamed to `light` in Ch6 of the notebook | `True` if renamed |
+| `tag_type`        | Manufacturer / format                          | Light column                                                                                | `HAS_LIGHT`       |
+| ----------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------- | ----------------- |
+| `lotek`           | Lotek LAT2810 — semicolon-separated raw CSV    | `LightIntensity` → renamed to `light` by `prepare_tag_folder`                               | `True`            |
+| `wc_psat`         | Wildlife Computers MiniPAT Series CSV          | no light sensor → `light = NaN`                                                             | **`False`**       |
+| `dst`             | Already a standard `dst.csv`                   | depends on the source                                                                       | depends           |
+| _(pre-formatted)_ | WC or other tag with light, manually converted | column name varies (e.g. `Light Level`) — must be renamed to `light` in Ch6 of the notebook | `True` if renamed |
 
 **Wildlife Computers PSAT (`wc_psat`):** the `-Series.csv` file from Wildlife Computers only records depth and temperature at 10-minute intervals — no raw light counts. Set `HAS_LIGHT = False` to skip the solar and lunar chapters.
 
@@ -127,8 +128,8 @@ Configure the tag at the top of the notebook (Chapter 1):
 
 Tags stored at `s3://gfts-ifremer/tuna/tags/formatted/`:
 
-| Tag | Type | Light | Notes |
-|---|---|---|---|
-| `281B-4949` | Lotek LAT2810 | `light` (raw counts) | NW Mediterranean, 22 months |
-| `18P0430` | WC with light | `Light Level` → renamed in Ch6 | Mediterranean, ~1 year |
-| `20P0204` | WC with light | `light` (pre-renamed) | Atlantic, ~15 months |
+| Tag         | Type          | Light                          | Notes                       |
+| ----------- | ------------- | ------------------------------ | --------------------------- |
+| `281B-4949` | Lotek LAT2810 | `light` (raw counts)           | NW Mediterranean, 22 months |
+| `18P0430`   | WC with light | `Light Level` → renamed in Ch6 | Mediterranean, ~1 year      |
+| `20P0204`   | WC with light | `light` (pre-renamed)          | Atlantic, ~15 months        |
