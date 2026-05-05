@@ -244,6 +244,88 @@ def detect_twilight_events(
     return pairs
 
 
+def pairs_from_lightloc(lightloc_df, max_depth_dbar=80):
+    """Build twilight pairs and quality flags from a standardised LightLoc DataFrame.
+
+    Used when ``LIGHT_SOURCE = "lightloc"`` — i.e. when only WC satellite-
+    transmitted crossing times are available (non-recovered PSAT tags).
+    Replaces the :func:`detect_twilight_events` + :func:`compute_quality_flags`
+    pair used for raw-series tags.
+
+    Parameters
+    ----------
+    lightloc_df : pd.DataFrame
+        Standardised LightLoc table as written by :func:`~pangeo_fish.light.ingest.ingest_lightloc`.
+        Required columns: ``time`` (UTC), ``type`` (``"rise"`` / ``"set"``),
+        ``max_depth``.
+    max_depth_dbar : float, default 80
+        Events with ``max_depth > max_depth_dbar`` are flagged invalid.
+
+    Returns
+    -------
+    pairs : list of (pd.Timestamp, pd.Timestamp)
+        Paired (t_rise, t_set) tuples, one per night, in the same format as
+        :func:`detect_twilight_events`.
+    qdf : pd.DataFrame
+        Quality DataFrame in the same format as
+        :func:`~pangeo_fish.light.quality.compute_quality_flags`:
+        columns ``night``, ``date``, ``flag``, ``valid_rise``, ``valid_set``,
+        ``dl_rise``, ``dl_set``, ``dp_rise``, ``dp_set``.
+    """
+    df = lightloc_df.copy()
+    df["time"] = pd.to_datetime(df["time"], utc=True)
+    df["date"] = df["time"].dt.date
+
+    rises = df[df["type"] == "rise"].set_index("date")
+    sets = df[df["type"] == "set"].set_index("date")
+
+    pairs = []
+    records = []
+    night_idx = 0
+
+    all_dates = sorted(set(rises.index) | set(sets.index))
+    for date in all_dates:
+        has_rise = date in rises.index
+        has_set = date in sets.index
+
+        t_rise = _tz(rises.loc[date, "time"]) if has_rise else None
+        t_set = _tz(sets.loc[date, "time"]) if has_set else None
+        dp_rise = float(rises.loc[date, "max_depth"]) if has_rise else 9999.0
+        dp_set = float(sets.loc[date, "max_depth"]) if has_set else 9999.0
+
+        v_r = has_rise and dp_rise <= max_depth_dbar
+        v_s = has_set and dp_set <= max_depth_dbar
+
+        if not (has_rise and has_set):
+            continue
+
+        if v_r and v_s:
+            flag = "good"
+        elif v_r or v_s:
+            flag = "partial"
+        else:
+            flag = "bad"
+
+        pairs.append((t_rise, t_set))
+        records.append(
+            {
+                "night": night_idx,
+                "date": pd.Timestamp(date),
+                "flag": flag,
+                "valid_rise": v_r,
+                "valid_set": v_s,
+                "dl_rise": 0.0,
+                "dl_set": 0.0,
+                "dp_rise": dp_rise,
+                "dp_set": dp_set,
+            }
+        )
+        night_idx += 1
+
+    qdf = pd.DataFrame(records)
+    return pairs, qdf
+
+
 class CalibResult(NamedTuple):
     """Return type of :func:`self_calibrate_solar_threshold`.
 

@@ -17,7 +17,7 @@ Usage
     )
 """
 
-from pangeo_fish.light.ingest import load_tag_csv, prepare_tag_folder
+from pangeo_fish.light.ingest import ingest_lightloc, load_tag_csv, prepare_tag_folder
 from pangeo_fish.light.quality import (
     compute_quality_flags,
     dynamic_threshold,
@@ -27,6 +27,7 @@ from pangeo_fish.light.solar import (
     CalibResult,
     compute_solar_likelihood,
     detect_twilight_events,
+    pairs_from_lightloc,
     self_calibrate_solar_threshold,
 )
 
@@ -34,6 +35,7 @@ __all__ = [
     # ingest
     "load_tag_csv",
     "prepare_tag_folder",
+    "ingest_lightloc",
     # quality
     "dynamic_threshold",
     "twilight_quality",
@@ -41,6 +43,7 @@ __all__ = [
     # solar
     "CalibResult",
     "detect_twilight_events",
+    "pairs_from_lightloc",
     "self_calibrate_solar_threshold",
     "compute_solar_likelihood",
 ]
