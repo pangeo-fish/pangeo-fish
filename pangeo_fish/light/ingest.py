@@ -222,7 +222,9 @@ def ingest_lightloc(lightloc_csv_path, output_dir, tag_name):
     out_path = os.path.join(folder, "lightloc.csv")
     out.to_csv(out_path, index=False, date_format="%Y-%m-%dT%H:%M:%S")
 
-    print(f"  lightloc.csv: {len(out):,} twilights | {out['time'].min()} → {out['time'].max()}")
+    print(
+        f"  lightloc.csv: {len(out):,} twilights | {out['time'].min()} → {out['time'].max()}"
+    )
     return out_path
 
 
