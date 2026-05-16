@@ -88,7 +88,7 @@ The data from archival tags can offer detailed insights into vertical movement p
 The estimation of fish positions depends on the likelihood of the observed data from the DTS's logs, such as temperature at specific depths, alongside reference geoscience data such as satellite observations and ocean dynamic models.
 Some approaches can enhance the accuracy of the model's predictions by using additional information, such as telemetry from the acoustic tags mentioned above [@a_combination_tag_2023].
 The use of oceanic models with high spatial and temporal resolutions can significantly improve the accuracy of reconstructed fish tracks.
-However, higher resolutions involves more data, which requires significant computing power and storage capacity.
+However, higher resolutions involve more data, which requires significant computing power and storage capacity.
 The [Pangeo community](https://www.pangeo.io/) handles these challenges, by fostering an ecosystem of interoperable, scalable, open source tools for interactive data analysis in the fields of marine big data and geoscience.
 The Pangeo ecosystem enables biologists to more easily analyze their biologging data and improve fish geolocation modelling.
 Their results can guide policy makers to sustainably manage fish stocks, and can also be used to forecast potential long-term movement changes due to climate change.
@@ -96,7 +96,7 @@ Their results can guide policy makers to sustainably manage fish stocks, and can
 Currently, the research community lacks adaptable, scalable and open source implementations of geolocation models.
 **pangeo-fish** is a Python package that fills this gap.
 
-As its name suggest, the software has been designed to be used within the Pangeo ecosystem on several aspects, accounting for both the users' needs (through a user-friendly API and meaningful result visualization) and computational challenges.
+As its name suggests, the software has been designed to be used within the Pangeo ecosystem on several aspects, accounting for both the users' needs (through a user-friendly API and meaningful result visualization) and computational challenges.
 In particular, **pangeo-fish** has a robust data model based on [Xarray](https://docs.xarray.dev/en/latest/index.html) and scales computation with [Dask](https://docs.dask.org/en/stable/).
 
 Data loading processes are furthermore streamlined by libraries like `intake`, `kerchunk` or `fsspec`. `Xarray` enables interactive visualization of the results using tools such as the `hvplot` library and the JupyterLab environment.
