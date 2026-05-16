@@ -121,6 +121,6 @@ Designed to work with the Pangeo ecosystem, it aims to support ecologists with t
 
 # Acknowledgements
 
-T.O., J.M.D. and J.M. were supported by the CNES R&T project (R-S23/DU-0002-025-01). T.O., J.M.D. and M.W. received support from the TAOS project funded by IFREMER through the AMII OCEAN 2100 programme. Q.M., M.W., A.F. and T.O. were supported by the Global Fish Tracking System (GFTS) initiative funded by ESA (Contract No. 4000140320/23/I-NS, Destination Earth Use Cases 2023). Finally, M.W. and T.O. acknowledge support from the Digital Twin of the Ocean – Animal Tracking (DTO Track) project funded by the Sustainable Blue Economy Partnership (ANR-24-SBEP-0001).
+T.O., J.M.D. and J.M. were supported by the CNES R&T project (R-S23/DU-0002-025-01). T.O., J.M.D. and M.W. received support from the TAOS project funded by IFREMER through the AMII OCEAN 2100 programme. Q.M., E.C, M.W., A.F. and T.O. were supported by the Global Fish Tracking System (GFTS) initiative funded by ESA (Contract No. 4000140320/23/I-NS, Destination Earth Use Cases 2023). Finally, M.W., E.C and T.O. acknowledge support from the Digital Twin of the Ocean – Animal Tracking (DTO Track) project funded by the Sustainable Blue Economy Partnership (ANR-24-SBEP-0001).
 
 # References
