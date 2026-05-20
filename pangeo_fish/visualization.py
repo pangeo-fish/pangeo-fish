@@ -100,7 +100,7 @@ def create_single_frame(ds: xr.Dataset, figure, **kwargs):
         "vmin": 0,
     }
     gs = figure.add_gridspec(nrows=1, ncols=2, hspace=0, wspace=-0.2, top=0.925)
-    (ax1, ax2) = gs.subplots(
+    ax1, ax2 = gs.subplots(
         subplot_kw={"projection": projection, "frameon": True},
         sharex=True,
         sharey=True,

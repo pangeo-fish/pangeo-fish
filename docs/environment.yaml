@@ -1,24 +1,29 @@
 channels:
   - conda-forge
   - nodefaults
+
 dependencies:
   # development
   - python=3.12
   - jupyterlab
+
   # plotting
   - cmocean
   - holoviews
   - hvplot
   - geoviews
+
   # I/O
   - python-dotenv
   - fsspec
   - h5netcdf
   - intake-xarray
   - zstandard
+
   # units, bounds, and cf-conventions
   - cf_xarray>=0.10.4
   - pint-xarray
+
   # general computing
   - coiled
   - flox
@@ -29,6 +34,7 @@ dependencies:
   - scipy
   - opt_einsum
   - sparse=0.15
+
   # geographic manipulations
   - movingpandas<=0.21.3
   - geopandas
@@ -36,14 +42,18 @@ dependencies:
   - healpy
   - scikit-learn
   - astropy
+
   # video processing
   - ffmpeg
+
   # distributed computing
   - dask
+
   # code formatting
   - rich
   - rich-click
-  # fixes...
+
+  # fixes
   - aiohttp=3.9.5
   - zarr=2.18.4
   - kerchunk=0.2.7
@@ -54,12 +64,20 @@ dependencies:
   - cdshealpix
   - copernicusmarine
   - dask-image
-  - jupyterlab
   - ipywidgets
+
+  # documentation
+  - docutils<0.21
+  - sphinx>=9.0
+  - sphinx-book-theme
+  - sphinx-copybutton
+  - sphinx-remove-toctrees
+  - myst-parser
+  - nbsphinx
+
   - pip
   - pip:
       - nbsphinx_link>=1.3.1
       - xdggs
-      # - xarray-healpy @ git+https://github.com/iaocea/xarray-healpy.git@0ffca6058f4008f4f22f076e2d60787fcf32ac82
       - xhealpixify
       - -e ../.
