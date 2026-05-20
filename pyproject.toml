@@ -30,6 +30,7 @@ dependencies = [
   "healpix-convolution",
   "xdggs",
   "imageio[ffmpeg]",
+  "copernicusmarine>=2.4.1",
 ]
 dynamic = ["version"]
 
