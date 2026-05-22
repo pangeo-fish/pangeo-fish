@@ -13,9 +13,7 @@ classifiers = [
 ]
 dependencies = [
   # core scientific stack
-  # xarray 2025.4.0 has a BinGrouper.factorize regression (pd.Index(None));
-  # known-good version is 2025.3.x (matches docs/environment.yaml).
-  "xarray>=2024.11.0,<2025.4",
+  "xarray>=2026.4.0",
   "pandas",
   "numpy",
   "scipy",
@@ -25,8 +23,8 @@ dependencies = [
   "more_itertools",
   "toolz",
   # IO stack — pinned to known-working versions
-  "zarr==2.18.7",
-  "kerchunk==0.2.7",
+  "zarr>=3.1.6",
+  "kerchunk>=0.2.9",
   "fsspec==2025.3.2",
   "s3fs==2025.3.2",
   "gcsfs==2025.3.2",
@@ -47,8 +45,9 @@ dependencies = [
   "pint",
   "pint-xarray",
   # distributed / parallel
+  "copernicusmarine==2.3.0",
   "dask",
-  "distributed",
+  "distributed==2025.2.0",
   "flox",
   # plotting / visualization
   "matplotlib",
