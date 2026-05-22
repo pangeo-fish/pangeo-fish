@@ -385,8 +385,12 @@ def _open_copernicus_model(
     static_name = copernicus_model_name.rsplit("_", 1)[0] + "_static"
 
     if time_slice is not None and time_slice.start is not None:
-        start_datetime = pd.Timestamp(time_slice.start).strftime("%Y-%m-%d")
-        end_datetime = pd.Timestamp(time_slice.stop).strftime("%Y-%m-%d")
+        start_datetime = np.datetime_as_string(
+            np.datetime64(time_slice.start), unit="D"
+        )
+        end_datetime = np.datetime_as_string(
+            np.datetime64(time_slice.stop), unit="D"
+        )
     elif tag_log is not None:
         start_datetime = np.datetime_as_string(tag_log.time.values[0], unit="D")
         end_datetime = np.datetime_as_string(tag_log.time.values[-1], unit="D")
