@@ -7,7 +7,6 @@ import healpy as hp
 import numpy as np
 import pandas as pd
 import xarray as xr
-from tlz.itertoolz import first
 from xhealpixify.conversions import geographic_to_cartesian
 from xhealpixify.operations import buffer_points
 
