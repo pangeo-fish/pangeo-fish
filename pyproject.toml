@@ -60,6 +60,8 @@ dependencies = [
   "rich",
   "rich-click",
   "tqdm",
+  # Copernicus Marine Service client (default model loader)
+  "copernicusmarine>=2.3,<2.4",
 ]
 dynamic = ["version"]
 

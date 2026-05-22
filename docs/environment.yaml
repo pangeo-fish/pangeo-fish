@@ -62,7 +62,7 @@ dependencies:
   - eccodes>=2.35.0
   - altair
   - cdshealpix
-  - copernicusmarine
+  - copernicusmarine=2.3.*
   - dask-image
   - ipywidgets
 
