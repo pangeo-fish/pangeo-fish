@@ -7,7 +7,6 @@ import healpy as hp
 import numpy as np
 import pandas as pd
 import xarray as xr
-from tlz.itertoolz import first
 from xhealpixify.conversions import geographic_to_cartesian
 from xhealpixify.operations import buffer_points
 
@@ -41,10 +40,11 @@ def count_detections(detections, by):
     xarray.Dataset.groupby
     """
     if "bounds" in getattr(by, "dims", []):
-        if len(by.cf.bounds) != 1:
+        unique_bounds = {b for bounds in by.cf.bounds.values() for b in bounds}
+        if len(unique_bounds) != 1:
             raise ValueError("cannot find a valid bounds variable")
 
-        bounds_var = first(by.cf.bounds.values())[0]
+        bounds_var = next(iter(unique_bounds))
         bins_var = f"{bounds_var.removesuffix('_bounds')}_bins"
         by = bounds_to_bins(by)[bins_var]
 
