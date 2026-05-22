@@ -25,10 +25,10 @@ dependencies = [
   # IO stack — pinned to known-working versions
   "zarr>=3.1.6",
   "kerchunk>=0.2.9",
-  "fsspec==2025.3.2",
-  "s3fs==2025.3.2",
-  "gcsfs==2025.3.2",
-  "numcodecs==0.15.1",
+  "fsspec>=2025.9.0",
+  "s3fs>=2025.9.0",
+  "gcsfs>=2025.9.0",
+  "numcodecs>=0.15.1",
   "h5netcdf",
   "intake",
   "intake-xarray",
@@ -47,7 +47,7 @@ dependencies = [
   # distributed / parallel
   "copernicusmarine==2.3.0",
   "dask",
-  "distributed==2025.2.0",
+  "distributed",
   "flox",
   # plotting / visualization
   "matplotlib",
