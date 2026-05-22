@@ -46,8 +46,8 @@ dependencies = [
   "pint-xarray",
   # distributed / parallel
   "copernicusmarine==2.3.0",
-  "dask",
-  "distributed",
+  "dask>=2026.3.0",
+  "distributed>=2026.3.0",
   "flox",
   # plotting / visualization
   "matplotlib",
