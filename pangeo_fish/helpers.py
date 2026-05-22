@@ -388,9 +388,7 @@ def _open_copernicus_model(
         start_datetime = np.datetime_as_string(
             np.datetime64(time_slice.start), unit="D"
         )
-        end_datetime = np.datetime_as_string(
-            np.datetime64(time_slice.stop), unit="D"
-        )
+        end_datetime = np.datetime_as_string(np.datetime64(time_slice.stop), unit="D")
     elif tag_log is not None:
         start_datetime = np.datetime_as_string(tag_log.time.values[0], unit="D")
         end_datetime = np.datetime_as_string(tag_log.time.values[-1], unit="D")
