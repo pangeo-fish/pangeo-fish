@@ -193,23 +193,23 @@ def load_tag(*, tag_root: str, tag_name: str, storage_options: dict = None, **kw
     Parameters
     ----------
     tag_root : str
-        Path to the folder that contains the tag data under a folder ``tag_name``
+        Path to the folder that contains the tag data under a folder ``tag_name``.
     tag_name : str
-        Name of the tagged fish (e.g, "A19124"). Notably, It is used to fetch the biologging data from ``{tag_root}/{tag_name}/``
+        Name of the tagged fish (e.g. ``"281B-4949"``). Used to locate
+        ``{tag_root}/{tag_name}/`` which must contain ``dst.csv``,
+        ``tagging_event.csv`` and ``metadata.json``.
     storage_options : dict, optional
-        Dictionary containing storage options for connecting to the S3 bucket
+        Storage options for S3 access.
 
     Returns
     -------
     tag : xarray.DataTree
-        The tag
+        The tag.
     tag_log : xarray.Dataset
-        The DST data (sliced w.r.t released and recapture dates)
-    time_slice : slice or like
-        Time interval described by the released and recapture dates
+        The DST data sliced between release and recapture dates.
+    time_slice : slice
+        Time interval described by the release and recapture dates.
     """
-
-    # TODO: should we move the input checking lower (i.e. to open_tag())?
     if not tag_root.startswith("s3://"):
         storage_options = {}
     tag = open_tag(tag_root, tag_name, storage_options)
@@ -967,6 +967,57 @@ def combine_pdfs(
                 RuntimeWarning,
             )
     return combined, figure
+
+
+def normalize_pdf_by_mask(ds, mask_var="mask", pdf_var="pdf", tol=1e-12):
+    """Replace zero-mass timesteps with a uniform distribution over ocean cells.
+
+    When a PDF variable sums to zero or NaN over the ocean mask for a given
+    timestep (e.g. because the fish was too deep, or all pixels had zero
+    likelihood), this function replaces that timestep with a flat prior
+    ``1 / n_ocean`` over all ocean cells.  Timesteps with valid mass are
+    left unchanged.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Dataset containing ``pdf_var`` (shape ``(time, cells)``) and
+        ``mask_var`` (shape ``(cells,)``, boolean ocean mask).
+    mask_var : str, default ``"mask"``
+        Name of the ocean-mask variable (True = ocean cell).
+    pdf_var : str, default ``"pdf"``
+        Name of the PDF variable to fix.
+    tol : float, default 1e-12
+        Threshold below which a per-timestep sum is considered zero.
+
+    Returns
+    -------
+    xr.Dataset
+        Copy of ``ds`` with ``pdf_var`` corrected.
+    """
+    mask_cells = ds[mask_var].astype(bool)
+    mask_time = mask_cells.expand_dims(time=ds["time"]).transpose("time", "cells")
+    n_valid = int(mask_cells.sum().compute().item())
+    if n_valid == 0:
+        raise ValueError("Mask has 0 valid (ocean) cells — cannot normalise.")
+
+    sums = ds[pdf_var].where(mask_time).fillna(0).sum(dim="cells").compute()
+    to_fix = (sums <= tol) | np.isnan(sums)
+    if not to_fix.any():
+        return ds
+
+    n_bad = int(to_fix.sum().item())
+    warnings.warn(
+        f"normalize_pdf_by_mask: {n_bad} timestep(s) had zero/NaN mass "
+        f"in '{pdf_var}' — replaced with uniform prior.",
+        UserWarning,
+    )
+    fill = xr.where(to_fix, 1.0 / float(n_valid), np.nan)
+    fill = xr.DataArray(fill, coords={"time": ds["time"]}, dims=["time"])
+    replacement = xr.where(mask_time, fill, np.nan)
+    ds_fixed = ds.copy()
+    ds_fixed[pdf_var] = xr.where(to_fix, replacement, ds[pdf_var])
+    return ds_fixed
 
 
 def normalize_pdf(
