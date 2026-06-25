@@ -1,7 +1,7 @@
 # Données calculées
 data/
 *.zarr 
-
+*diff*/
 
 # Python
 __pycache__/
