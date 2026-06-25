@@ -975,6 +975,7 @@ def normalize_pdf(
     chunks: dict,
     dims=None,
     plot=False,
+    exclude=("initial", "final", "mask"),
     **kwargs,
 ):
     """Normalize a probability distributions (pdf).
@@ -1006,7 +1007,7 @@ def normalize_pdf(
             f'The variable "pdf" in `ds` sums to 0 for {num_times} times.', UserWarning
         )
 
-    normalized = ds.pipe(combine_emission_pdf).chunk(chunks)
+    normalized = ds.pipe(combine_emission_pdf,exclude=exclude).chunk(chunks)
 
     # optional spatial transposition
     if (dims is not None) and ("cells" not in dims):
@@ -1338,7 +1339,9 @@ def plot_trajectories(
     track_modes: list[str],
     storage_options: dict,
     save_html=True,
+    filename=None,
     **kwargs,
+    
 ):
     """Read decoded trajectories and plots an interactive visualization.
     Optionally, the plot can be saved as a HTML file.
@@ -1356,7 +1359,7 @@ def plot_trajectories(
         Additional information for ``xarray`` to open the ``.zarr`` array
     save_html : bool, default: True
         Whether to save the plot (under ``{target_root}/trajectories.html``)
-
+    save_name : name of the html saved
     Returns
     -------
     plot : holoviews.Layout
@@ -1380,7 +1383,7 @@ def plot_trajectories(
     plot = hv.Layout(plots).cols(2)
 
     if save_html:
-        path_to_html = Path(target_root) / "trajectories.html"
+        path_to_html = Path(target_root) / f"trajectories_{filename}.html"
         if storage_options is None:
             path_to_html.parent.mkdir(parents=True, exist_ok=True)
             str_path = str(path_to_html)
