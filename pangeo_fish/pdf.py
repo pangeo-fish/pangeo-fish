@@ -2,10 +2,11 @@
 
 import cf_xarray  # noqa: F401
 import more_itertools
+import numpy as np
 import scipy.stats
 import xarray as xr
 from more_itertools import first
-import numpy as np
+
 from pangeo_fish.utils import _detect_spatial_dims, normalize
 
 
@@ -69,7 +70,7 @@ def combine_emission_pdf(raw, exclude=("initial", "final", "mask")):
     #         .rename("pdf")
     #     )
     ### test with log
-            # Passer en log-space pour éviter l'underflow
+    # Passer en log-space pour éviter l'underflow
     else:
         log_pdf = (
             np.log(raw[to_combine])
@@ -79,7 +80,7 @@ def combine_emission_pdf(raw, exclude=("initial", "final", "mask")):
         # Stabilisation avant exp (soustraction du max par cellule)
         log_pdf = log_pdf - log_pdf.max(dim="cells")  # remplace ... par ta dim spatiale
         pdf = np.exp(log_pdf).rename("pdf")
-        
+
     if "final" in raw:
         pdf[{"time": -1}] = pdf[{"time": -1}] * raw["final"]
 

@@ -38,7 +38,7 @@ results/*
 
 # Données calculées
 data/
-*.zarr 
+*.zarr
 *diff*/
 **/*.zarr*/
 **/*combined.zarr*
@@ -56,21 +56,21 @@ venv/
 *.egg-info/
 dist/
 build/
- 
+
 # Jupyter
 .ipynb_checkpoints/
 *.ipynb
- 
+
 # Logs
 *.log
- 
+
 # Linux / WSL
 *~
 .nfs*
- 
+
 # Windows
 Thumbs.db
 desktop.ini
- 
+
 # VS Code
 .vscode/

@@ -1007,7 +1007,7 @@ def normalize_pdf(
             f'The variable "pdf" in `ds` sums to 0 for {num_times} times.', UserWarning
         )
 
-    normalized = ds.pipe(combine_emission_pdf,exclude=exclude).chunk(chunks)
+    normalized = ds.pipe(combine_emission_pdf, exclude=exclude).chunk(chunks)
 
     # optional spatial transposition
     if (dims is not None) and ("cells" not in dims):
@@ -1341,7 +1341,6 @@ def plot_trajectories(
     save_html=True,
     filename=None,
     **kwargs,
-    
 ):
     """Read decoded trajectories and plots an interactive visualization.
     Optionally, the plot can be saved as a HTML file.

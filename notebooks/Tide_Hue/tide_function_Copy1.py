@@ -13,7 +13,6 @@ import sparse
 from tqdm import tqdm
 from scipy.stats import multivariate_normal
 
-
 #####################################################################
 #  Première partie: Extraction signal de marée par sinus
 #####################################################################
@@ -427,7 +426,8 @@ def datalikelihood_tide_only_normalized(
 
 
 def datalikelihood_tide_only_full_normalized(
-    td_depth, td_time, tidal_ds, tide_found, sigma_tid=2.0):
+    td_depth, td_time, tidal_ds, tide_found, sigma_tid=2.0
+):
     """
     Calcule une PDF normalisée pour chaque instant.
     - Si marée détectée : PDF = vraisemblance (gaussienne)
@@ -470,8 +470,8 @@ def datalikelihood_tide_only_full_normalized(
         # --- mu calculé UNIQUEMENT pour ce pas de temps t ---
         # (au lieu de pré-calculer mu pour tous les n_times en amont)
         tidal_pred_t = amp * np.cos(omega * td_time[t] + phase)  # shape (dim0, n_lon)
-        tidal_sum_t = tidal_pred_t.sum(axis=0)                    # shape (n_lon,)
-        mu_ij = -tidal_sum_t[None, :] + depth_mean                # shape (n_lat, n_lon)
+        tidal_sum_t = tidal_pred_t.sum(axis=0)  # shape (n_lon,)
+        mu_ij = -tidal_sum_t[None, :] + depth_mean  # shape (n_lat, n_lon)
         ###
 
         x_mean = np.nanmean(td_depth[t, :])
@@ -507,20 +507,18 @@ def datalikelihood_tide_only_full_normalized(
     )
     return ds_pdf
 
+
 import numpy as np
 import pandas as pd
 
 
-
-
-
-def tide_pdf(tide_behav,data):
+def tide_pdf(tide_behav, data):
 
     ds = tide_behav.copy()
 
     # Convertir la coordonnée 'time' en datetime pandas
     time = pd.to_datetime(ds["time"].values)
-    
+
     # Créer un DataFrame temporaire pour manipuler facilement les regroupements
     tmp_df = pd.DataFrame(
         {
@@ -531,23 +529,25 @@ def tide_pdf(tide_behav,data):
     )
     # Créer une colonne 'hour' arrondie à l'heure
     tmp_df["hour"] = tmp_df.index.floor("h")
-    
+
     # Propager tide_found à toute l'heure si détecté au moins une fois
     tmp_df["hour_include"] = tmp_df["hour"]
     for h, group in tmp_df.groupby("hour"):
         if group["tide_found"].any():
             tmp_df.loc[group.index, "hour_include"] = h
-    
+
     # Regrouper les mesures par "hour_include"
     grouped_obs = {
         hour: group[["depth"]].values for hour, group in tmp_df.groupby("hour_include")
     }
     # Trier les heures
     hours_sorted = sorted(grouped_obs.keys())
-    
+
     # td_time : heures depuis le début
-    td_time = np.array([(h - hours_sorted[0]).total_seconds() / 3600 for h in hours_sorted])
-    
+    td_time = np.array(
+        [(h - hours_sorted[0]).total_seconds() / 3600 for h in hours_sorted]
+    )
+
     # td_depth : matrice (n_times, n_meas_max)
     n_times = len(hours_sorted)
     n_meas_max = max(len(grouped_obs[h]) for h in hours_sorted)
@@ -562,7 +562,7 @@ def tide_pdf(tide_behav,data):
         dtype=int,
     )
     Likelihood = datalikelihood_tide_only_full_normalized(
-    td_depth, td_time, data, tide_found_hourly, sigma_tid=2.0
+        td_depth, td_time, data, tide_found_hourly, sigma_tid=2.0
     )
 
     ds_pdf = Likelihood.assign_coords(datetime=("time", hours_sorted))
@@ -570,6 +570,4 @@ def tide_pdf(tide_behav,data):
     ds_pdf = ds_pdf.rename({"time": "instant"})
     ds_pdf = ds_pdf.rename({"datetime": "time"}).set_index(time="time")
     ds_pdf = ds_pdf.rename({"ocean_mask": "mask"})
-    return(ds_pdf)
-
-    
+    return ds_pdf
