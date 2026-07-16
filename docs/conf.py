@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path("..").resolve()))
 
 project = "pangeo-fish"
-author = "pangeo-fish developers"
+author = "Pangeo-Fish authors and contributors"
 copyright = f"2023-{datetime.datetime.now().year}, {author}"
 
 extensions = [
