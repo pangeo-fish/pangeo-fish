@@ -6,6 +6,7 @@ import warnings
 from importlib.metadata import version
 from pathlib import Path
 
+import copernicusmarine
 import fsspec
 import holoviews as hv
 import imageio as iio
@@ -334,12 +335,12 @@ def plot_tag(
     return plot
 
 
-def _open_copernicus_model(yaml_url: str, chunks: dict = None):
+def _open_intake_catalog(yaml_url: str, chunks: dict = None):
     """Open an intake catalog.
 
     Parameters
     ----------
-    catalog_url : str
+    yaml_url : str
         Path to the ``.yaml`` file
     chunks : dict, optional
         How to chunk the data
@@ -352,6 +353,70 @@ def _open_copernicus_model(yaml_url: str, chunks: dict = None):
     cat = intake.open_catalog(yaml_url)
     model = open_copernicus_catalog(cat, chunks)
     return model
+
+
+def _open_copernicus_model(
+    copernicus_model_name: str,
+    bbox: dict[str, tuple[float, float]],
+    time_slice: slice,
+    tag_log: xr.Dataset = None,
+):
+    """Open a Copernicus Marine dataset and merge it with its static fields.
+
+    Parameters
+    ----------
+    copernicus_model_name : str
+        Copernicus Marine ``dataset_id`` for the daily-mean physics product
+        (e.g. ``"cmems_mod_glo_phy_my_0.083deg_P1D-m"``). The matching static
+        product (``..._static``) is opened to retrieve ``deptho`` and ``mask``.
+    bbox : dict
+        Spatial boundaries with keys ``longitude`` and ``latitude``.
+    time_slice : slice
+        Time slice used to bound ``start_datetime`` / ``end_datetime``. If
+        ``None``, the full extent of ``tag_log`` is used.
+    tag_log : xarray.Dataset, optional
+        DST data; used as fallback when ``time_slice`` is ``None``.
+
+    Returns
+    -------
+    model : xarray.Dataset
+        Dataset with ``TEMP``, ``XE`` and ``H0`` (via :func:`prepare_dataset`).
+    """
+    static_name = copernicus_model_name.rsplit("_", 1)[0] + "_static"
+
+    if time_slice is not None and time_slice.start is not None:
+        start_datetime = np.datetime_as_string(
+            np.datetime64(time_slice.start), unit="D"
+        )
+        end_datetime = np.datetime_as_string(np.datetime64(time_slice.stop), unit="D")
+    elif tag_log is not None:
+        start_datetime = np.datetime_as_string(tag_log.time.values[0], unit="D")
+        end_datetime = np.datetime_as_string(tag_log.time.values[-1], unit="D")
+    else:
+        raise ValueError("Either `time_slice` or `tag_log` must be provided.")
+
+    ds_thetao_zos = copernicusmarine.open_dataset(
+        dataset_id=copernicus_model_name,
+        variables=["thetao", "zos"],
+        minimum_longitude=bbox["longitude"][0],
+        maximum_longitude=bbox["longitude"][1],
+        minimum_latitude=bbox["latitude"][0],
+        maximum_latitude=bbox["latitude"][1],
+        start_datetime=start_datetime,
+        end_datetime=end_datetime,
+    )
+    static_var = copernicusmarine.open_dataset(
+        dataset_id=static_name,
+        variables=["deptho", "mask"],
+        minimum_longitude=bbox["longitude"][0],
+        maximum_longitude=bbox["longitude"][1],
+        minimum_latitude=bbox["latitude"][0],
+        maximum_latitude=bbox["latitude"][1],
+    )
+    static_var = static_var.assign_coords(longitude=ds_thetao_zos["longitude"].values)
+    ds_all = xr.merge([ds_thetao_zos, static_var], compat="no_conflicts")
+    ds_all = ds_all.rename({"latitude": "lat", "longitude": "lon"})
+    return prepare_dataset(ds_all)
 
 
 def _open_parquet_model(parquet_url: str, remote_options=None):
@@ -384,19 +449,22 @@ def _open_parquet_model(parquet_url: str, remote_options=None):
 
 def load_model(
     *,
-    uri: str,
+    uri: str = None,
     tag_log: xr.Dataset,
     time_slice: slice,
     bbox: dict[str, tuple[float, float]],
     chunk_time=24,
     remote_options=None,
+    copernicus_model_name: str = "cmems_mod_glo_phy_my_0.083deg_P1D-m",
 ) -> xr.Dataset:
     """Load and prepare a reference model.
 
     Parameters
     ----------
-    uri : str
-        Path to the data. either an intake catalog (thus ending with ``.yaml``) or a parquet array (thus ending with ``.parq``)
+    uri : str, optional
+        Path to the data — either an intake catalog (ending with ``.yaml``) or a
+        parquet array (ending with ``.parq``). If ``None``, the model is fetched
+        directly from the Copernicus Marine Service using ``copernicus_model_name``.
     tag_log : xarray.Dataset
         The DST data
     time_slice : slice
@@ -405,6 +473,8 @@ def load_model(
         Spatial boundaries indexed by their coordinates (i.e, ``longitude`` and ``latitude``) as well as the maximum depth indexed by ``max_depth``.
     chunk_time : int, default: 24
         Chunk size for the time dimension
+    copernicus_model_name : str, default: ``"cmems_mod_glo_phy_my_0.083deg_P1D-m"``
+        Copernicus Marine ``dataset_id`` used when ``uri`` is ``None``.
 
     Returns
     -------
@@ -412,15 +482,24 @@ def load_model(
         The subset data
     """
 
-    if uri.endswith(".yaml"):
+    if uri is None:
         model = _open_copernicus_model(
+            copernicus_model_name,
+            bbox=bbox,
+            time_slice=time_slice,
+            tag_log=tag_log,
+        )
+    elif uri.endswith(".yaml"):
+        model = _open_intake_catalog(
             uri, chunks={"time": 8, "lat": -1, "lon": -1, "depth": -1}
         )
     elif uri.rstrip("/").endswith((".parq", ".parquet", ".json")):
         reference_ds = _open_parquet_model(uri, remote_options=remote_options)
         model = prepare_dataset(reference_ds)
     else:
-        raise ValueError('Only intake catalogs and "parquet" data can be loaded.')
+        raise ValueError(
+            'Only intake catalogs, "parquet" data or `uri=None` (Copernicus Marine) can be loaded.'
+        )
 
     reference_model = (
         model.sel(time=adapt_model_time(time_slice))
