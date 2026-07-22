@@ -11,6 +11,7 @@ import fsspec
 import holoviews as hv
 import imageio as iio
 import intake
+import ipywidgets as ipw
 import matplotlib.pyplot as plt
 
 # import hvplot.xarray
@@ -360,6 +361,8 @@ def _open_copernicus_model(
     bbox: dict[str, tuple[float, float]],
     time_slice: slice,
     tag_log: xr.Dataset = None,
+    Username=None,
+    Password=None,
 ):
     """Open a Copernicus Marine dataset and merge it with its static fields.
 
@@ -404,6 +407,8 @@ def _open_copernicus_model(
         maximum_latitude=bbox["latitude"][1],
         start_datetime=start_datetime,
         end_datetime=end_datetime,
+        username=Username,
+        password=Password,
     )
     static_var = copernicusmarine.open_dataset(
         dataset_id=static_name,
@@ -412,6 +417,8 @@ def _open_copernicus_model(
         maximum_longitude=bbox["longitude"][1],
         minimum_latitude=bbox["latitude"][0],
         maximum_latitude=bbox["latitude"][1],
+        username=Username,
+        password=Password,
     )
     static_var = static_var.assign_coords(longitude=ds_thetao_zos["longitude"].values)
     ds_all = xr.merge([ds_thetao_zos, static_var], compat="no_conflicts")
@@ -456,6 +463,8 @@ def load_model(
     chunk_time=24,
     remote_options=None,
     copernicus_model_name: str = "cmems_mod_glo_phy_my_0.083deg_P1D-m",
+    Username=None,
+    Password=None,
 ) -> xr.Dataset:
     """Load and prepare a reference model.
 
@@ -488,6 +497,8 @@ def load_model(
             bbox=bbox,
             time_slice=time_slice,
             tag_log=tag_log,
+            Username=Username,
+            Password=Password,
         )
     elif uri.endswith(".yaml"):
         model = _open_intake_catalog(
@@ -688,7 +699,7 @@ def regrid_dataset(
     )
     regridded = regridder.regrid_ds(ds)
     if dims == ["x", "y"]:
-        reshaped = grid.to_2d(regridded).pipe(center_longitude, 0)
+        raise ValueError(f"dims doit être ['cells'], ['x','y'] is not used anymore")
     elif dims == ["cells"]:
         reshaped = regridded.assign_coords(
             cell_ids=lambda ds: ds.cell_ids.astype("int64")
@@ -774,7 +785,7 @@ def compute_emission_pdf(
     """
 
     if dims == ["x", "y"]:
-        is_2d = True
+        raise ValueError(f"dims must be ['cells'], ['x','y'] is not used anymore")
     elif dims == ["cells"]:
         is_2d = False
     else:
@@ -787,40 +798,16 @@ def compute_emission_pdf(
     initial_position = events_ds.sel(event_name="release")
     final_position = events_ds.sel(event_name="fish_death")
 
-    if dims == ["x", "y"]:
-        cov = distrib.create_covariances(
-            initial_std, coord_names=["latitude", "longitude"]
-        )
-        initial_probability = distrib.normal_at(
-            grid,
-            pos=initial_position,
-            cov=cov,
-            normalize=True,
-            axes=["latitude", "longitude"],
-        )
-    else:
-        initial_probability = distrib.healpix.normal_at(
-            grid, pos=initial_position, sigma=initial_std
-        )
+    initial_probability = distrib.healpix.normal_at(
+        grid, pos=initial_position, sigma=initial_std
+    )
 
     if final_position[["longitude", "latitude"]].to_dataarray().isnull().all():
         final_probability = None
     else:
-        if is_2d:
-            cov = distrib.create_covariances(
-                recapture_std**2, coord_names=["latitude", "longitude"]
-            )
-            final_probability = distrib.normal_at(
-                grid,
-                pos=final_position,
-                cov=cov,
-                normalize=True,
-                axes=["latitude", "longitude"],
-            )
-        else:
-            final_probability = distrib.healpix.normal_at(
-                grid, pos=final_position, sigma=recapture_std
-            )
+        final_probability = distrib.healpix.normal_at(
+            grid, pos=final_position, sigma=recapture_std
+        )
 
     emission_pdf = (
         normal(diff_ds["diff"], mean=0, std=differences_std, dims=dims)
@@ -922,7 +909,8 @@ def compute_acoustic_pdf(
         # adds back "lon" and "lat" keys
         emission_ds["cell_ids"].attrs["lon"] = lon
         emission_ds["cell_ids"].attrs["lat"] = lat
-
+    else:
+        raise ValueError(f"dims must be ['cells'], ['x','y'] is not used anymore")
     acoustic_pdf = emission_probability(
         tag,
         emission_ds[["time", "cell_ids", "mask"]].compute(),
@@ -1054,6 +1042,7 @@ def normalize_pdf(
     chunks: dict,
     dims=None,
     plot=False,
+    exclude=("initial", "final", "mask"),
     **kwargs,
 ):
     """Normalize a probability distributions (pdf).
@@ -1085,7 +1074,7 @@ def normalize_pdf(
             f'The variable "pdf" in `ds` sums to 0 for {num_times} times.', UserWarning
         )
 
-    normalized = ds.pipe(combine_emission_pdf).chunk(chunks)
+    normalized = ds.pipe(combine_emission_pdf, exclude=exclude).chunk(chunks)
 
     # optional spatial transposition
     if (dims is not None) and ("cells" not in dims):
@@ -1127,9 +1116,7 @@ def _get_predictor_factory(
     ds: xr.Dataset, truncate: float | None, dims: list[str], conv_method: str
 ):
     if dims == ["x", "y"]:
-        if truncate is None:
-            raise ValueError("truncate must not be None when dims == ['x', 'y']")
-        predictor = curry(Gaussian2DCartesian, truncate=truncate)
+        raise ValueError(f"dims must be ['cells'], ['x','y'] is not used anymore")
 
     elif dims == ["cells"]:
         if conv_method == "HealpixConv":
@@ -1244,6 +1231,7 @@ def optimize_pdf(
         ds = to_healpix(ds)
         as_radians = True
     else:
+        raise ValueError(f"dims must be ['cells'], ['x','y'] is not used anymore")
         as_radians = False
 
     max_sigma = _get_max_sigma(
@@ -1738,3 +1726,64 @@ def render_distributions(
                 os.remove(filepath)
         pbar.close()
     return video_fp
+
+
+def multiplot_healpix(
+    datasets: list[tuple[xr.Dataset, list[str]]], refinement_level: int = 8
+):
+    """
+    Exemple: [(ds1, ["pdf"]), (ds2, ["pdf", "temp"])]
+    """
+    plots = []
+    for ds, variables in datasets:
+        for var_name in variables:
+            plot = (
+                ds[var_name]
+                .compute()
+                .dggs.decode(
+                    {
+                        "grid_name": "healpix",
+                        "level": refinement_level,
+                        "indexing_scheme": "nested",
+                    }
+                )
+                .dggs.explore(alpha=0.8)
+            )
+            plots.append(plot)
+    return plots
+
+
+def multi_map_with_synced_sliders(maps, width="300px", height="400px"):
+    """
+    Affiche plusieurs maps côte à côte avec leur slider 'time' synchronisé.
+
+    Paramètres
+    ----------
+    maps : list
+        Liste d'objets map (doivent avoir .map, .sliders['time'], .layout)
+    width, height : dimensions appliquées à chaque map
+
+    Exemple
+    -------
+    multi_map_with_synced_sliders([m1, m2, m3])
+    """
+    if len(maps) < 1:
+        raise ValueError("Il faut au moins une map.")
+
+    # 1. Appliquer la taille à chaque map
+    for m in maps:
+        m.layout.width = width
+        m.layout.height = height
+
+    # 2. Synchroniser tous les sliders 'time' entre eux (lié en chaîne au 1er)
+    ref_slider = maps[0].sliders["time"]
+    for m in maps[1:]:
+        ipw.jslink((ref_slider, "value"), (m.sliders["time"], "value"))
+
+    # 3. Construire chaque bloc (map + slider en dessous)
+    def map_with_slider_below(m):
+        return ipw.VBox([m.map, m.sliders["time"]])
+
+    blocks = [map_with_slider_below(m) for m in maps]
+
+    return ipw.HBox(blocks)
