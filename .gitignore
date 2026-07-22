@@ -34,3 +34,11 @@ bin/*.o*
 log/*
 results/*
 .idea/*
+.venv/
+notebooks/A19124/
+notebooks/donnees_importees.tar.gz
+notebooks/donnees_importees/
+notebooks/states.mp4
+notebooks/test/
+notebooks/copernicus_credentials.txt
+notebooks/pangeo-fish-Copy1.ipynb
