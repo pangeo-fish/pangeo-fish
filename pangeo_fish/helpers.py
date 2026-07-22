@@ -11,8 +11,8 @@ import fsspec
 import holoviews as hv
 import imageio as iio
 import intake
-import matplotlib.pyplot as plt
 import ipywidgets as ipw
+import matplotlib.pyplot as plt
 
 # import hvplot.xarray
 import movingpandas  # noqa: F401
@@ -362,7 +362,7 @@ def _open_copernicus_model(
     time_slice: slice,
     tag_log: xr.Dataset = None,
     Username=None,
-    Password=None
+    Password=None,
 ):
     """Open a Copernicus Marine dataset and merge it with its static fields.
 
@@ -408,7 +408,7 @@ def _open_copernicus_model(
         start_datetime=start_datetime,
         end_datetime=end_datetime,
         username=Username,
-        password=Password
+        password=Password,
     )
     static_var = copernicusmarine.open_dataset(
         dataset_id=static_name,
@@ -418,7 +418,7 @@ def _open_copernicus_model(
         minimum_latitude=bbox["latitude"][0],
         maximum_latitude=bbox["latitude"][1],
         username=Username,
-        password=Password
+        password=Password,
     )
     static_var = static_var.assign_coords(longitude=ds_thetao_zos["longitude"].values)
     ds_all = xr.merge([ds_thetao_zos, static_var], compat="no_conflicts")
@@ -498,7 +498,7 @@ def load_model(
             time_slice=time_slice,
             tag_log=tag_log,
             Username=Username,
-            Password=Password
+            Password=Password,
         )
     elif uri.endswith(".yaml"):
         model = _open_intake_catalog(
@@ -798,17 +798,16 @@ def compute_emission_pdf(
     initial_position = events_ds.sel(event_name="release")
     final_position = events_ds.sel(event_name="fish_death")
 
-
     initial_probability = distrib.healpix.normal_at(
         grid, pos=initial_position, sigma=initial_std
-        )
+    )
 
     if final_position[["longitude", "latitude"]].to_dataarray().isnull().all():
         final_probability = None
     else:
         final_probability = distrib.healpix.normal_at(
-                grid, pos=final_position, sigma=recapture_std
-            )
+            grid, pos=final_position, sigma=recapture_std
+        )
 
     emission_pdf = (
         normal(diff_ds["diff"], mean=0, std=differences_std, dims=dims)
@@ -1075,7 +1074,7 @@ def normalize_pdf(
             f'The variable "pdf" in `ds` sums to 0 for {num_times} times.', UserWarning
         )
 
-    normalized = ds.pipe(combine_emission_pdf,exclude=exclude).chunk(chunks)
+    normalized = ds.pipe(combine_emission_pdf, exclude=exclude).chunk(chunks)
 
     # optional spatial transposition
     if (dims is not None) and ("cells" not in dims):
@@ -1111,7 +1110,6 @@ def normalize_pdf(
                 RuntimeWarning,
             )
     return normalized, figure
-
 
 
 def _get_predictor_factory(
@@ -1729,7 +1727,10 @@ def render_distributions(
         pbar.close()
     return video_fp
 
-def multiplot_healpix(datasets: list[tuple[xr.Dataset, list[str]]],refinement_level : int = 8):
+
+def multiplot_healpix(
+    datasets: list[tuple[xr.Dataset, list[str]]], refinement_level: int = 8
+):
     """
     Exemple: [(ds1, ["pdf"]), (ds2, ["pdf", "temp"])]
     """
@@ -1739,24 +1740,29 @@ def multiplot_healpix(datasets: list[tuple[xr.Dataset, list[str]]],refinement_le
             plot = (
                 ds[var_name]
                 .compute()
-                .dggs.decode({"grid_name": "healpix", "level": refinement_level, "indexing_scheme": "nested"})
+                .dggs.decode(
+                    {
+                        "grid_name": "healpix",
+                        "level": refinement_level,
+                        "indexing_scheme": "nested",
+                    }
+                )
                 .dggs.explore(alpha=0.8)
             )
             plots.append(plot)
     return plots
 
 
-
-def multi_map_with_synced_sliders(maps, width='300px', height='400px'):
+def multi_map_with_synced_sliders(maps, width="300px", height="400px"):
     """
     Affiche plusieurs maps côte à côte avec leur slider 'time' synchronisé.
-    
+
     Paramètres
     ----------
     maps : list
         Liste d'objets map (doivent avoir .map, .sliders['time'], .layout)
     width, height : dimensions appliquées à chaque map
-    
+
     Exemple
     -------
     multi_map_with_synced_sliders([m1, m2, m3])
@@ -1770,13 +1776,13 @@ def multi_map_with_synced_sliders(maps, width='300px', height='400px'):
         m.layout.height = height
 
     # 2. Synchroniser tous les sliders 'time' entre eux (lié en chaîne au 1er)
-    ref_slider = maps[0].sliders['time']
+    ref_slider = maps[0].sliders["time"]
     for m in maps[1:]:
-        ipw.jslink((ref_slider, "value"), (m.sliders['time'], "value"))
+        ipw.jslink((ref_slider, "value"), (m.sliders["time"], "value"))
 
     # 3. Construire chaque bloc (map + slider en dessous)
     def map_with_slider_below(m):
-        return ipw.VBox([m.map, m.sliders['time']])
+        return ipw.VBox([m.map, m.sliders["time"]])
 
     blocks = [map_with_slider_below(m) for m in maps]
 

@@ -217,7 +217,7 @@ def emission_probability(
     nondetections="ignore",
     cell_ids="keep",
     chunk_time=24,
-    dims = ["cells"],
+    dims=["cells"],
 ):
     """Construct emission probability maps from acoustic detections
 
@@ -253,9 +253,9 @@ def emission_probability(
     emission : xarray.Dataset
         The resulting emission probability maps.
     """
-    
+
     if dims != ["cells"]:
-        raise ValueError( "dims is not filed right: try 'cells' ")
+        raise ValueError("dims is not filed right: try 'cells' ")
 
     if "acoustic" not in tag or "stations" not in tag:
         return xr.Dataset()
