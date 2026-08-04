@@ -44,6 +44,31 @@ Once JupyterLab has started, open the notebook
 
 to follow the step-by-step tutorial. This is the recommended starting point for new users.
 
+### Light-based geolocation (`pangeo_fish.light`)
+
+`pangeo-fish` includes a sub-package for light-based geolocation from archival DST data.
+Two complementary methods are available:
+
+- **Solar threshold** (`pangeo_fish.light.solar`): detects dusk/dawn threshold crossings,
+  self-calibrates the solar elevation threshold, and computes per-night Gaussian timing
+  likelihood maps on a regular lat/lon grid.
+- **Lunar template-fit** (`pangeo_fish.light.lunar`): identifies bright-moon nights during
+  which the fish was shallow, correlates the observed sub-surface light with the physically
+  predicted moonlight illuminance (Austin 1976 / Poon et al. 2024 MEE / Śmielak 2023) at
+  every grid pixel, and converts Spearman correlations to proper likelihood maps.
+  To the authors' knowledge, this is the first application of this physical model to
+  archival fish-tag geolocation.
+
+Both methods produce `xr.DataArray` outputs ready for HEALPix regridding and injection into
+the HMM pipeline via `pangeo_fish.pdf.combine_emission_pdf_with_light`.
+
+See the tutorial notebook
+[notebooks/pangeo_fish_with_light.ipynb](https://github.com/pangeo-fish/pangeo-fish/blob/main/notebooks/pangeo_fish_with_light.ipynb)
+for a complete worked example that combines temperature-difference, bathymetry, solar, and
+lunar emission PDFs before running the HMM.
+
+**Additional dependency:** `ephem` (automatically installed with `pangeo-fish`).
+
 ## 📖 Documentation
 
 Complete documentation, including guides, tutorials, and examples, is available on [Read the Docs](https://pangeo-fish.readthedocs.io/en/latest/).
