@@ -1,0 +1,2 @@
+[default]
+aws_endpoint_url = https://s3.gra.perf.cloud.ovh.net

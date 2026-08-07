@@ -34,3 +34,43 @@ bin/*.o*
 log/*
 results/*
 .idea/*
+
+
+# Données calculées
+data/
+*.zarr
+*diff*/
+**/*.zarr*/
+**/*combined.zarr*
+*.csv*
+*.html*
+*.json*
+*.parquet*
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Logs
+*.log
+
+# Linux / WSL
+*~
+.nfs*
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# VS Code
+.vscode/
