@@ -344,10 +344,12 @@ def plot_tag(
 
 
 def _open_intake_catalog(yaml_url: str, chunks: dict = None):
+def _open_intake_catalog(yaml_url: str, chunks: dict = None):
     """Open an intake catalog.
 
     Parameters
     ----------
+    yaml_url : str
     yaml_url : str
         Path to the ``.yaml`` file
     chunks : dict, optional
@@ -464,6 +466,7 @@ def _open_parquet_model(parquet_url: str, remote_options=None):
 def load_model(
     *,
     uri: str = None,
+    uri: str = None,
     tag_log: xr.Dataset,
     time_slice: slice,
     bbox: dict[str, tuple[float, float]],
@@ -499,6 +502,7 @@ def load_model(
     """
 
     if uri is None:
+    if uri is None:
         model = _open_copernicus_model(
             copernicus_model_name,
             bbox=bbox,
@@ -515,6 +519,9 @@ def load_model(
         reference_ds = _open_parquet_model(uri, remote_options=remote_options)
         model = prepare_dataset(reference_ds)
     else:
+        raise ValueError(
+            'Only intake catalogs, "parquet" data or `uri=None` (Copernicus Marine) can be loaded.'
+        )
         raise ValueError(
             'Only intake catalogs, "parquet" data or `uri=None` (Copernicus Marine) can be loaded.'
         )
