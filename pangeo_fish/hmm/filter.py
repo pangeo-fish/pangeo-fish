@@ -7,7 +7,7 @@ import zarr  # noqa: F401
 from tqdm import tqdm
 
 
-def score(emission, predictor, initial_probability, mask=None):
+def score(emission, predictors, predictor_indices, initial_probability, mask=None):
     """Score of a single pass (forwards) of the spatial HMM filter
 
     Parameters
@@ -43,28 +43,150 @@ def score(emission, predictor, initial_probability, mask=None):
     normalizations.append(np.sum(initial * dask.compute(emission[0, ...])[0]))
     previous = initial
 
-    for index in tqdm(range(1, n_max), desc="Scoring"):
-        prediction = predictor.predict(previous, mask=mask)
-        updated = prediction * dask.compute(emission[index, ...])[0]
+    for time_index, predictor_index in zip(range(1, n_max), predictor_indices):
+        prediction = predictors[predictor_index].predict(previous, mask=mask)
+        updated = prediction * dask.compute(emission[time_index, ...])[0]
 
         normalization_factor = np.sum(updated)
         if normalization_factor == 0:
             warnings.warn(
-                f"Empty product of the prediction with the true distribution at step {index+1}.",
+                f"Empty product of the prediction with the true distribution at step {time_index+1}.",
                 RuntimeWarning,
             )
             return 1e6
         normalizations.append(normalization_factor)
-        normalized = updated / normalizations[index]
+        normalized = updated / normalizations[time_index]
 
         previous = normalized
 
     normalizations_ = np.stack(normalizations, axis=0)
 
     return -np.sum(np.log(normalizations_))
+def score_final_pos(emission, predictors, predictor_indices, initial_probability, mask, *, eps=np.finfo(np.float64).tiny):
+    n_max = emission.shape[0]
+
+    obs0 = emission[0, ...]
+    if hasattr(obs0, "compute"):
+        obs0 = obs0.compute()
+
+    updated0 = initial_probability * obs0
+    norm0 = float(np.sum(updated0))
+    log_total = np.log(norm0) if norm0 > 0 else np.log(eps)
+    previous = updated0 / norm0 if norm0 > 0 else initial_probability  # RENORMALISÉ, reste dans une plage saine
+
+    for index, predictor_index in zip(range(1, n_max), predictor_indices):
+        prediction = predictors[predictor_index].predict(previous, mask=mask)
+        if hasattr(prediction, "compute"):
+            prediction = prediction.compute()
+
+        obs = emission[index, ...]
+        if hasattr(obs, "compute"):
+            obs = obs.compute()
+
+        updated = prediction * obs
+        norm_factor = float(np.sum(updated))
+
+        if norm_factor > 0:
+            log_total += np.log(norm_factor)
+            previous = updated / norm_factor   # renormalisé à chaque pas -> jamais de sous-flottant
+        else:
+            log_total += np.log(eps)
+  
+
+    final_idx_max = int(np.argmax(emission[-1, ...]))
+    state_val = float(previous[final_idx_max])   # previous est ici states[-1] NORMALISÉ (somme=1)
+
+    loss = - np.log(max(state_val, eps))#-log_total 
+    
+    return loss
+# def score_final_pos(
+#     emission,
+#     predictors,
+#     predictor_indices,
+#     initial_probability,
+#     mask,
+#     *,
+#     return_states=False,
+#     eps=1e-12
+#     ):
+#     """
+#     Forward pass with diagnostics + several policies to handle updated.sum()==0.
+#     Returns loss (or loss, preds_stack, states_stack if return_states True).
+#     """
+#     n_max = emission.shape[0]
+#     predictions = [initial_probability]
+#     states = [initial_probability]
+
+#     normalizations = []
+
+#     obs0 = emission[0, ...]
+#     if isinstance(obs0, da.Array):
+#         obs0 = obs0.compute()
+#     if obs0.ndim > 1:
+#         obs0 = obs0[0]
+#     norm0 = float(np.sum(initial_probability * obs0))
+#     normalizations.append(norm0 if norm0 > 0 else eps)
 
 
-def forward(emission, predictor, initial_probability, mask=None):
+#     final = emission[-1, ...]
+#     final_idx_max = int(np.argmax(final))
+#     final_val_max = float(np.max(final))
+#     print(f"[score_final_pos] final_probability max index = {final_idx_max}, value = {final_val_max}")
+
+#     for index, predictor_index in zip(tqdm(range(1, n_max), desc="Forward pass"), predictor_indices):
+#         prediction = predictors[predictor_index].predict(states[index - 1], mask=mask)
+#         if isinstance(prediction, da.Array):
+#             prediction = prediction.compute()
+        
+#         # prediction /= (np.sum(prediction) + 1e-16)
+
+#         predictions.append(prediction)
+
+#         # emission
+#         obs = emission[index, ...]
+#         if isinstance(obs, da.Array):
+#             obs = obs.compute()
+#         if obs.ndim > 1:
+#             obs = obs[0]
+
+#         updated = prediction * obs
+#         norm_factor = float(np.sum(updated))
+
+#         if norm_factor == 0:
+#             normalizations.append(eps)
+#             print(f"[WARNING] Step {index}: sum(updated)==0 -> keeping previous state")
+    
+#         else:
+#             normalizations.append(norm_factor)
+#             normalized = updated / (norm_factor + 1e-16)
+
+#         states.append(normalized)
+
+#     preds_stack = np.stack(predictions, axis=0)
+#     states_stack = np.stack(states, axis=0)
+
+
+#     last_state = states_stack[-1, ...]
+#     print(f"[score_final_pos] last_state shape = {last_state.shape}, sum={float(np.sum(last_state)):.3e}, max={float(np.max(last_state)):.3e}")
+
+ 
+#     state_val = float(states_stack[-1, final_idx_max])
+#     if state_val <= 0:
+#         warnings.warn(f"state_val at index {final_idx_max} is {state_val} -> using eps for loss", RuntimeWarning)
+        
+#     loss = -np.log(state_val + eps)
+
+
+#     final_state_val = float(states_stack[-1, final_idx_max])
+#     final_info = {
+#         "final_index": final_idx_max,
+#         "final_value": final_val_max,
+#         "state_value": final_state_val,
+#     }
+#     print(final_info)
+#     return loss
+
+def forward(emission, predictors, predictor_indices, initial_probability, mask=None):
     """Single pass (forwards) of the spatial HMM filter
 
     Parameters
@@ -91,11 +213,13 @@ def forward(emission, predictor, initial_probability, mask=None):
     predictions.append(initial_probability)
     states.append(initial_probability)
 
-    for index in tqdm(range(1, n_max), desc="Forward"):
-        prediction = predictor.predict(states[index - 1], mask=mask)
+    for time_index, predictor_index in zip(range(1, n_max), predictor_indices):
+        prediction = predictors[predictor_index].predict(
+            states[time_index - 1], mask=mask
+        )
         predictions.append(prediction)
 
-        updated = prediction * emission[index, ...]
+        updated = prediction * emission[time_index, ...]
 
         normalized = updated / np.sum(updated)
         states.append(normalized)
@@ -103,19 +227,19 @@ def forward(emission, predictor, initial_probability, mask=None):
     return np.stack(predictions, axis=0), np.stack(states, axis=0)
 
 
-def backward(states, predictions, predictor, mask=None):
+def backward(states, predictions, predictors, predictor_indices, mask=None):
     n_max = states.shape[0]
     eps = 2.204e-16**20
 
     smoothed = [states[-1, ...]]
     backward_predictions = [states[-1, ...]]
-    for index in tqdm(range(1, n_max), desc="Backward"):
-        ratio = smoothed[index - 1] / (predictions[-index, ...] + eps)
-        backward_prediction = predictor.predict(ratio, mask=None)
+    for time_index, predictor_index in zip(range(1, n_max), predictor_indices):
+        ratio = smoothed[time_index - 1] / (predictions[-time_index, ...] + eps)
+        backward_prediction = predictors[predictor_index].predict(ratio, mask=None)
         normalized = backward_prediction / np.sum(backward_prediction)
         backward_predictions.append(normalized)
 
-        updated = normalized * states[-index - 1, ...]
+        updated = normalized * states[-time_index - 1, ...]
         updated_normalized = updated / np.sum(updated)
 
         smoothed.append(updated_normalized)
@@ -125,7 +249,7 @@ def backward(states, predictions, predictor, mask=None):
     )
 
 
-def forward_backward(emission, predictor, initial_probability, mask=None):
+def forward_backward(emission, predictors, predictor_indices, initial_probability, mask=None):
     """Double pass (forwards and backwards) of the spatial HMM filter
 
     Parameters
@@ -149,14 +273,16 @@ def forward_backward(emission, predictor, initial_probability, mask=None):
 
     forward_predictions, forward_states = forward(
         emission=emission,
-        predictor=predictor,
+        predictors=predictors,
+        predictor_indices=predictor_indices,
         initial_probability=initial_probability,
         mask=mask,
     )
     backwards_predictions, backwards_states = backward(
         states=forward_states,
         predictions=forward_predictions,
-        predictor=predictor,
+        predictors=predictors,
+        predictor_indices=predictor_indices,
         mask=mask,
     )
     return backwards_states
