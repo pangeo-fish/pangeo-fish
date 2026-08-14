@@ -1521,7 +1521,7 @@ def predict_positions(
                 predictor_factory = _get_predictor_factory(
             emission, truncate=truncate, conv_method="LargeHealpixConv", dims=["cells"]
         )
-    
+
     elif "Gaussian1DHealpix" in cls_name:
         predictor_factory = _get_predictor_factory(
             emission, truncate=truncate, conv_method="HealpixConv", dims=["cells"]
@@ -1928,13 +1928,13 @@ def multiplot_healpix(datasets: list[tuple[xr.Dataset, list[str]]],refinement_le
 def multi_map_with_synced_sliders(maps, width='300px', height='400px'):
     """
     Affiche plusieurs maps côte à côte avec leur slider 'time' synchronisé.
-    
+
     Paramètres
     ----------
     maps : list
         Liste d'objets map (doivent avoir .map, .sliders['time'], .layout)
     width, height : dimensions appliquées à chaque map
-    
+
     Exemple
     -------
     multi_map_with_synced_sliders([m1, m2, m3])
@@ -2254,8 +2254,8 @@ def test_parameter(emission: xr.Dataset = None,
                    Conv_method: str = "Foscat1DHealpix",
                    target_root: str = ".",
                    saving_root: str="/hand_sigma",
-                   default_chunk_dims=None, 
-                   storage_options=None                  
+                   default_chunk_dims=None,
+                   storage_options=None
                    ):
     """
     Load an emission dataset, save it under a dedicated sub-folder, and

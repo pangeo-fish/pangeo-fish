@@ -46,6 +46,7 @@ class EagerEstimator:
             Mapping of parameter name to new value.
         """
         return replace(self, **params)
+
     ####New
     def _get_predictors(self) -> list[Predictor]:
         """Return a list of predictors with their sigma values set in the same order of the ``sigmas`` attribute.
@@ -60,8 +61,9 @@ class EagerEstimator:
             raise ValueError("All or some sigma are not set.")
 
         return [self.predictor_factory(sigma=sigma) for sigma in self.sigma]
+
     #####
-    
+
     def _score(self, X, *, spatial_dims=None, temporal_dims=None):
         if self.sigma is None:
             raise ValueError("unset sigma, cannot run the filter")
@@ -92,7 +94,6 @@ class EagerEstimator:
 
         return value if not np.isnan(value) else np.inf
 
-    
     def _score_final_pos(self, X, *, spatial_dims=None, temporal_dims=None):
         if self.sigma is None:
             raise ValueError("unset sigma, cannot run the filter")
@@ -131,24 +132,23 @@ class EagerEstimator:
         )
         return value if not np.isnan(value) else np.inf
 
-    
-#     def _forward_algorithm(self, X, *, spatial_dims=None, temporal_dims=None):
-#         if self.sigma is None:
-#             raise ValueError("unset sigma, cannot run the filter")
+    #     def _forward_algorithm(self, X, *, spatial_dims=None, temporal_dims=None):
+    #         if self.sigma is None:
+    #             raise ValueError("unset sigma, cannot run the filter")
 
-#         if spatial_dims is None:
-#             spatial_dims = utils._detect_spatial_dims(X)
-#         if temporal_dims is None:
-#             temporal_dims = utils._detect_temporal_dims(X)
+    #         if spatial_dims is None:
+    #             spatial_dims = utils._detect_spatial_dims(X)
+    #         if temporal_dims is None:
+    #             temporal_dims = utils._detect_temporal_dims(X)
 
-#         predictor = self.predictor_factory(sigma=self.sigma)
-#         filtered = forward(
-#             emission=X["pdf"].data,
-#             mask=X["mask"].data,
-#             initial_probability=X["initial"].data,
-#             predictor=predictor,
-#         )
-#         return X["pdf"].copy(data=filtered)
+    #         predictor = self.predictor_factory(sigma=self.sigma)
+    #         filtered = forward(
+    #             emission=X["pdf"].data,
+    #             mask=X["mask"].data,
+    #             initial_probability=X["initial"].data,
+    #             predictor=predictor,
+    #         )
+    #         return X["pdf"].copy(data=filtered)
 
     def _forward_backward_algorithm(self, X, *, spatial_dims=None, temporal_dims=None):
         if self.sigma is None:
@@ -161,14 +161,14 @@ class EagerEstimator:
 
         dims = temporal_dims + spatial_dims
         X_ = X.transpose(*dims)
-        
+
         predictors: list[Predictor]
         if self.predictors is None:
             predictors = self._get_predictors()
             self.predictors = predictors
         else:
             predictors = self.predictors
-        
+
         filtered = forward_backward(
             emission=X_["pdf"].data,
             mask=X_["mask"].data,
@@ -240,7 +240,7 @@ class EagerEstimator:
         return self._score(
             X.fillna(0), spatial_dims=spatial_dims, temporal_dims=temporal_dims
         )
-    
+
     def score_final_pos(self, X, *, spatial_dims=None, temporal_dims=None):
         """Score the fit by matching the predicted final state to the observed
         final position (last time step of the emission).
@@ -249,13 +249,13 @@ class EagerEstimator:
         return self._score_final_pos(
             X.fillna(0), spatial_dims=spatial_dims, temporal_dims=temporal_dims
         )
-        
+
     def decode(
         self,
         X,
         states=None,
         *,
-        mode="mean",#"viterbi",
+        mode="mean",  # "viterbi",
         spatial_dims=None,
         temporal_dims=None,
         progress=False,

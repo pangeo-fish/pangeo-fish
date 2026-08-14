@@ -2,9 +2,9 @@ import itertools
 import warnings
 
 import more_itertools
+import numpy as np
 import scipy.optimize
 import xarray as xr
-import numpy as np
 
 try:
     from rich.progress import track
@@ -97,7 +97,7 @@ class EagerBoundsSearch:
             raise ValueError(
                 "The lower bound must be strictly lower than the upper one."
             )
-            
+
     def fit_single_parameter(self, X: xr.Dataset):
         """Optimize the score of the estimator
 
@@ -119,7 +119,7 @@ class EagerBoundsSearch:
                 return float(result)
 
             return float(result.compute())
-        
+
         if "predictor_index" in X:
             if X["predictor_index"].dtype != np.int32:
                 X["predictor_index"] = X["predictor_index"].astype(np.int32)
@@ -127,15 +127,14 @@ class EagerBoundsSearch:
             X = X.assign(
                 predictor_index=("time", np.zeros(X["time"].size).astype(np.int32))
             )
-            
+
         lower, upper = self.param_bounds
         result = scipy.optimize.fminbound(
             f, lower, upper, args=(X,), **self.optimizer_kwargs
         )
 
         return self.estimator.set_params(sigma=[result.item()])
-    
-    
+
     def fit_multivariate_parameter(self, X: xr.Dataset):
         """
         .. warning::
@@ -191,26 +190,31 @@ class EagerBoundsSearch:
 
     def fit_final_pos(self, X):
         """Optimize sigma so that predicted final state matches the observed final value."""
-    
+
         def f(sigma, X):
             result = self.estimator.set_params(sigma=[sigma]).score_final_pos(X)
-    
+
             # on suppose que score() met à disposition un dict final_info
             final_info = getattr(self.estimator, "last_info", None)
             if final_info is not None:
                 state_val = float(final_info["state_value"])
                 final_val = float(final_info["final_value"])
                 diff = abs(final_val - state_val)
-                print(f"sigma {sigma} | final_value={final_val:.6f} | state_value={state_val:.6f} | diff={diff:.3e}")
+                print(
+                    f"sigma {sigma} | final_value={final_val:.6f} | state_value={state_val:.6f} | diff={diff:.3e}"
+                )
                 return diff
-    
+
             if not hasattr(result, "compute"):
                 return float(result)
             return float(result.compute())
-    
+
         lower, upper = self.param_bounds
-        result = scipy.optimize.fminbound(f, lower, upper, args=(X,), **self.optimizer_kwargs)
+        result = scipy.optimize.fminbound(
+            f, lower, upper, args=(X,), **self.optimizer_kwargs
+        )
         return self.estimator.set_params(sigma=[result.item()])
+
 
 class TargetBoundsSearch:
     """
@@ -265,10 +269,11 @@ class TargetBoundsSearch:
                 return float(result)
 
             return float(result.compute())
+
         X = X.assign(
             predictor_index=("time", np.zeros(X["time"].size).astype(np.int32))
         )
-        
+
         tol = self.optimizer_kwargs.pop("tol", None)
 
         opt_result = scipy.optimize.minimize(

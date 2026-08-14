@@ -1,4 +1,5 @@
 from math import atan2, cos, radians, sin, sqrt
+
 import cf_xarray  # noqa: F401
 import more_itertools
 import numpy as np
@@ -20,6 +21,7 @@ __all__ = [
     "haversine_distance",
     "reindex_ds",
 ]
+
 
 def clear_attrs(obj, variables=None):
     # TODO: remove this after figuring out how to port this to upstream xarray
@@ -116,6 +118,7 @@ def progress_status(sequence):
             progress.update(task_id, advance=0, label=item)
             yield item
             progress.update(task_id, advance=1, label=item)
+
 
 def haversine_distance(
     lon1: float, lon2: float, lat1: float, lat2: float, radius: float = 6371.0

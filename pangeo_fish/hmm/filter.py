@@ -62,7 +62,17 @@ def score(emission, predictors, predictor_indices, initial_probability, mask=Non
     normalizations_ = np.stack(normalizations, axis=0)
 
     return -np.sum(np.log(normalizations_))
-def score_final_pos(emission, predictors, predictor_indices, initial_probability, mask, *, eps=np.finfo(np.float64).tiny):
+
+
+def score_final_pos(
+    emission,
+    predictors,
+    predictor_indices,
+    initial_probability,
+    mask,
+    *,
+    eps=np.finfo(np.float64).tiny,
+):
     n_max = emission.shape[0]
 
     obs0 = emission[0, ...]
@@ -72,7 +82,9 @@ def score_final_pos(emission, predictors, predictor_indices, initial_probability
     updated0 = initial_probability * obs0
     norm0 = float(np.sum(updated0))
     log_total = np.log(norm0) if norm0 > 0 else np.log(eps)
-    previous = updated0 / norm0 if norm0 > 0 else initial_probability  # RENORMALISÉ, reste dans une plage saine
+    previous = (
+        updated0 / norm0 if norm0 > 0 else initial_probability
+    )  # RENORMALISÉ, reste dans une plage saine
 
     for index, predictor_index in zip(range(1, n_max), predictor_indices):
         prediction = predictors[predictor_index].predict(previous, mask=mask)
@@ -88,17 +100,22 @@ def score_final_pos(emission, predictors, predictor_indices, initial_probability
 
         if norm_factor > 0:
             log_total += np.log(norm_factor)
-            previous = updated / norm_factor   # renormalisé à chaque pas -> jamais de sous-flottant
+            previous = (
+                updated / norm_factor
+            )  # renormalisé à chaque pas -> jamais de sous-flottant
         else:
             log_total += np.log(eps)
-  
 
     final_idx_max = int(np.argmax(emission[-1, ...]))
-    state_val = float(previous[final_idx_max])   # previous est ici states[-1] NORMALISÉ (somme=1)
+    state_val = float(
+        previous[final_idx_max]
+    )  # previous est ici states[-1] NORMALISÉ (somme=1)
 
-    loss = - np.log(max(state_val, eps))#-log_total 
-    
+    loss = -np.log(max(state_val, eps))  # -log_total
+
     return loss
+
+
 # def score_final_pos(
 #     emission,
 #     predictors,
@@ -137,7 +154,7 @@ def score_final_pos(emission, predictors, predictor_indices, initial_probability
 #         prediction = predictors[predictor_index].predict(states[index - 1], mask=mask)
 #         if isinstance(prediction, da.Array):
 #             prediction = prediction.compute()
-        
+
 #         # prediction /= (np.sum(prediction) + 1e-16)
 
 #         predictions.append(prediction)
@@ -155,7 +172,7 @@ def score_final_pos(emission, predictors, predictor_indices, initial_probability
 #         if norm_factor == 0:
 #             normalizations.append(eps)
 #             print(f"[WARNING] Step {index}: sum(updated)==0 -> keeping previous state")
-    
+
 #         else:
 #             normalizations.append(norm_factor)
 #             normalized = updated / (norm_factor + 1e-16)
@@ -169,11 +186,11 @@ def score_final_pos(emission, predictors, predictor_indices, initial_probability
 #     last_state = states_stack[-1, ...]
 #     print(f"[score_final_pos] last_state shape = {last_state.shape}, sum={float(np.sum(last_state)):.3e}, max={float(np.max(last_state)):.3e}")
 
- 
+
 #     state_val = float(states_stack[-1, final_idx_max])
 #     if state_val <= 0:
 #         warnings.warn(f"state_val at index {final_idx_max} is {state_val} -> using eps for loss", RuntimeWarning)
-        
+
 #     loss = -np.log(state_val + eps)
 
 
@@ -185,6 +202,7 @@ def score_final_pos(emission, predictors, predictor_indices, initial_probability
 #     }
 #     print(final_info)
 #     return loss
+
 
 def forward(emission, predictors, predictor_indices, initial_probability, mask=None):
     """Single pass (forwards) of the spatial HMM filter
@@ -249,7 +267,9 @@ def backward(states, predictions, predictors, predictor_indices, mask=None):
     )
 
 
-def forward_backward(emission, predictors, predictor_indices, initial_probability, mask=None):
+def forward_backward(
+    emission, predictors, predictor_indices, initial_probability, mask=None
+):
     """Double pass (forwards and backwards) of the spatial HMM filter
 
     Parameters

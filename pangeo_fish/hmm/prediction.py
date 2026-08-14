@@ -4,10 +4,11 @@ from typing import Any
 import dask.array as da
 import numpy as np
 import scipy.ndimage
+import torch
 from tlz.functoolz import curry
 from xarray.namedarray._typing import _arrayfunction_or_api as _ArrayLike
 from xdggs.grid import DGGSInfo
-import torch
+
 
 def gaussian_filter(X, sigma, **kwargs):
     if isinstance(X, da.Array) and X.npartitions > 1:
@@ -101,7 +102,10 @@ class Gaussian1DHealpix(Predictor):
 
         return np.where(mask, filtered, 0)
 
+
 import warnings
+
+
 @dataclass
 class Foscat1DHealpix(Predictor):
     cell_ids: _ArrayLike
@@ -117,9 +121,13 @@ class Foscat1DHealpix(Predictor):
         nside = 2**self.grid_info.level
 
         # # sigma_opt : conversion de sigma (radians) vers pixels
-        sigma_opt = (self.sigma / np.sqrt(np.pi)) * nside # parfois ajouter un 3* à coté de pi 3*
+        sigma_opt = (
+            self.sigma / np.sqrt(np.pi)
+        ) * nside  # parfois ajouter un 3* à coté de pi 3*
 
-        radius = int(np.ceil(3 * sigma_opt))  # troncature à 3 sigma, indépendant du facteur retiré ci-dessus
+        radius = int(
+            np.ceil(3 * sigma_opt)
+        )  # troncature à 3 sigma, indépendant du facteur retiré ci-dessus
         kernel_size = 2 * radius + 1
 
         if self.max_kernel_size is not None and kernel_size > self.max_kernel_size:
@@ -201,26 +209,27 @@ class Foscat1DHealpix(Predictor):
             filtered = np.where(mask, filtered, 0)
         return filtered
 
+
 @dataclass
 @dataclass
 class UpDownGaussian1DHealpix(Predictor):
     cell_ids: _ArrayLike
     grid_info: DGGSInfo
 
-    sigma: float                          # en radians
-    kernel_sz: int | None = None          # taille nominale du noyau (résolution fine)
-    max_compact_kernel_sz: int = 7        # borne sur le noyau compact (résolution grossière)
+    sigma: float  # en radians
+    kernel_sz: int | None = None  # taille nominale du noyau (résolution fine)
+    max_compact_kernel_sz: int = 7  # borne sur le noyau compact (résolution grossière)
     device: str = "cpu"
     dtype: any = torch.float32
 
     def __post_init__(self):
-        from healpix_analyse import LargeConv
         import healpy as hp
+        from healpix_analyse import LargeConv
 
-        nside = 2 ** self.grid_info.level
+        nside = 2**self.grid_info.level
 
         # --- sigma_opt : sigma (radians) -> pixels du grid fin ---
-        sigma_opt = (self.sigma / np.sqrt(np.pi)) * nside #3*
+        sigma_opt = (self.sigma / np.sqrt(np.pi)) * nside  # 3*
         radius = int(np.ceil(3 * sigma_opt))
         if self.kernel_sz is None:
             self.kernel_sz = 2 * radius + 1
@@ -279,7 +288,9 @@ class UpDownGaussian1DHealpix(Predictor):
 
         # --- 4. Conversion du résidu (radians) -> pixels du grid grossier ---
         sigma_compact = (sigma_residual_rad / np.sqrt(np.pi)) * coarse_nside
-        sigma_compact = max(sigma_compact, 1e-6)  # éviter une division par 0 dans le noyau
+        sigma_compact = max(
+            sigma_compact, 1e-6
+        )  # éviter une division par 0 dans le noyau
 
         # --- 5. Construction du vrai noyau gaussien compact ---
         xx, yy = np.meshgrid(
@@ -329,7 +340,9 @@ class UpDownGaussian1DHealpix(Predictor):
         kind, orig_shape = original_info
         B, C, P = out.shape
         if kind == "1d":
-            return out.reshape(P,)
+            return out.reshape(
+                P,
+            )
         if kind == "2d_bp":
             return out.reshape(orig_shape[0], orig_shape[1])
         if kind == "2d_fallback":
