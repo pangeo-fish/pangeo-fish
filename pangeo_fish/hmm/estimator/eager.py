@@ -7,7 +7,7 @@ from tlz.itertoolz import first
 
 from pangeo_fish import tracks, utils
 from pangeo_fish.hmm.decode import mean_track, modal_track, viterbi, viterbi2
-from pangeo_fish.hmm.filter import forward, forward_backward, score
+from pangeo_fish.hmm.filter import forward_backward, score, score_final_pos
 from pangeo_fish.hmm.prediction import Predictor
 
 
@@ -22,15 +22,15 @@ class EagerEstimator:
     predictor_factory : callable
         Factory for the predictor class. It expects the parameter ("sigma") as a keyword
         argument and returns the predictor instance.
-    sigma : float, optional
+    sigma : array of float, optional
         The primary model parameter: the standard deviation of the distance
         per time unit traveled by the fish, in the same unit as the grid coordinates.
     """
 
     predictor_factory: callable
-    sigma: float | None = None
+    sigma: list[float] | None = None
 
-    predictor: Predictor | None = field(default=None, init=False)
+    predictors: list[Predictor] | None = field(default=None, init=False)
 
     def to_dict(self):
         exclude = {"predictor_factory"}
@@ -47,6 +47,23 @@ class EagerEstimator:
         """
         return replace(self, **params)
 
+    ####New
+    def _get_predictors(self) -> list[Predictor]:
+        """Return a list of predictors with their sigma values set in the same order of the ``sigmas`` attribute.
+        Returns
+        -------
+        predictors : list[Predictor]
+            Predictor instances created by the factory.
+        """
+        if (self.sigma is None) or (
+            not all([sigma is not None for sigma in self.sigma])
+        ):
+            raise ValueError("All or some sigma are not set.")
+
+        return [self.predictor_factory(sigma=sigma) for sigma in self.sigma]
+
+    #####
+
     def _score(self, X, *, spatial_dims=None, temporal_dims=None):
         if self.sigma is None:
             raise ValueError("unset sigma, cannot run the filter")
@@ -60,23 +77,24 @@ class EagerEstimator:
 
         X_ = X.transpose(*dims)
 
-        predictor: Predictor
-        if self.predictor is None:
-            predictor = self.predictor_factory(sigma=self.sigma)
-            self.predictor = predictor
+        predictors: list[Predictor]
+        if self.predictors is None:
+            predictors = self._get_predictors()
+            self.predictors = predictors
         else:
-            predictor = self.predictor
+            predictors = self.predictors
 
         value = score(
             emission=X_["pdf"].data,
             mask=X_["mask"].data,
             initial_probability=X_["initial"].data,
-            predictor=predictor,
+            predictor_indices=X_["predictor_index"].data,
+            predictors=predictors,
         )
 
         return value if not np.isnan(value) else np.inf
 
-    def _forward_algorithm(self, X, *, spatial_dims=None, temporal_dims=None):
+    def _score_final_pos(self, X, *, spatial_dims=None, temporal_dims=None):
         if self.sigma is None:
             raise ValueError("unset sigma, cannot run the filter")
 
@@ -85,14 +103,52 @@ class EagerEstimator:
         if temporal_dims is None:
             temporal_dims = utils._detect_temporal_dims(X)
 
-        predictor = self.predictor_factory(sigma=self.sigma)
-        filtered = forward(
-            emission=X["pdf"].data,
-            mask=X["mask"].data,
-            initial_probability=X["initial"].data,
-            predictor=predictor,
+        dims = temporal_dims + spatial_dims
+
+        X_ = X.transpose(*dims)
+
+        # ajout : filet de sécurité si predictor_index est absent du dataset
+        if "predictor_index" in X_:
+            if X_["predictor_index"].dtype != np.int32:
+                X_["predictor_index"] = X_["predictor_index"].astype(np.int32)
+        else:
+            X_ = X_.assign(
+                predictor_index=("time", np.zeros(X_.sizes["time"]).astype(np.int32))
+            )
+
+        predictors: list[Predictor]
+        if self.predictors is None:
+            predictors = self._get_predictors()
+            self.predictors = predictors
+        else:
+            predictors = self.predictors
+
+        value = score_final_pos(
+            emission=X_["pdf"].data,
+            mask=X_["mask"].data,
+            initial_probability=X_["initial"].data,
+            predictor_indices=X_["predictor_index"].data,
+            predictors=predictors,
         )
-        return X["pdf"].copy(data=filtered)
+        return value if not np.isnan(value) else np.inf
+
+    #     def _forward_algorithm(self, X, *, spatial_dims=None, temporal_dims=None):
+    #         if self.sigma is None:
+    #             raise ValueError("unset sigma, cannot run the filter")
+
+    #         if spatial_dims is None:
+    #             spatial_dims = utils._detect_spatial_dims(X)
+    #         if temporal_dims is None:
+    #             temporal_dims = utils._detect_temporal_dims(X)
+
+    #         predictor = self.predictor_factory(sigma=self.sigma)
+    #         filtered = forward(
+    #             emission=X["pdf"].data,
+    #             mask=X["mask"].data,
+    #             initial_probability=X["initial"].data,
+    #             predictor=predictor,
+    #         )
+    #         return X["pdf"].copy(data=filtered)
 
     def _forward_backward_algorithm(self, X, *, spatial_dims=None, temporal_dims=None):
         if self.sigma is None:
@@ -106,12 +162,19 @@ class EagerEstimator:
         dims = temporal_dims + spatial_dims
         X_ = X.transpose(*dims)
 
-        predictor = self.predictor_factory(sigma=self.sigma)
+        predictors: list[Predictor]
+        if self.predictors is None:
+            predictors = self._get_predictors()
+            self.predictors = predictors
+        else:
+            predictors = self.predictors
+
         filtered = forward_backward(
             emission=X_["pdf"].data,
             mask=X_["mask"].data,
             initial_probability=X_["initial"].data,
-            predictor=predictor,
+            predictor_indices=X_["predictor_index"].data,
+            predictors=predictors,
         )
 
         return X["pdf"].copy(data=filtered)
@@ -178,12 +241,21 @@ class EagerEstimator:
             X.fillna(0), spatial_dims=spatial_dims, temporal_dims=temporal_dims
         )
 
+    def score_final_pos(self, X, *, spatial_dims=None, temporal_dims=None):
+        """Score the fit by matching the predicted final state to the observed
+        final position (last time step of the emission).
+        ...
+        """
+        return self._score_final_pos(
+            X.fillna(0), spatial_dims=spatial_dims, temporal_dims=temporal_dims
+        )
+
     def decode(
         self,
         X,
         states=None,
         *,
-        mode="viterbi",
+        mode="mean",  # "viterbi",
         spatial_dims=None,
         temporal_dims=None,
         progress=False,
@@ -239,8 +311,9 @@ class EagerEstimator:
         decoders = {
             "mean": compose_left(maybe_compute_states, mean_track),
             "mode": compose_left(maybe_compute_states, modal_track),
-            "viterbi": compose_left(first, curry(viterbi, sigma=self.sigma)),
-            "viterbi2": compose_left(first, curry(viterbi2, sigma=self.sigma)),
+            # TODO: not supported with multiple sigma
+            # "viterbi": compose_left(first, curry(viterbi, sigma=self.sigma)),
+            # "viterbi2": compose_left(first, curry(viterbi2, sigma=self.sigma)),
         }
 
         if not isinstance(mode, list):

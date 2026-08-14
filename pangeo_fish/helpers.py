@@ -1,4 +1,5 @@
 import inspect
+import json
 import os
 import re
 import sys
@@ -12,6 +13,7 @@ import holoviews as hv
 import imageio as iio
 import intake
 import matplotlib.pyplot as plt
+import ipywidgets as ipw
 
 # import hvplot.xarray
 import movingpandas  # noqa: F401
@@ -38,6 +40,7 @@ from pangeo_fish.hmm.prediction import (
     Foscat1DHealpix,
     Gaussian1DHealpix,
     Gaussian2DCartesian,
+    UpDownGaussian1DHealpix
 )
 from pangeo_fish.io import (
     open_copernicus_catalog,
@@ -50,7 +53,7 @@ from pangeo_fish.io import (
 )
 from pangeo_fish.pdf import combine_emission_pdf, normal
 from pangeo_fish.tags import adapt_model_time, reshape_by_bins, to_time_slice
-from pangeo_fish.utils import temporal_resolution
+from pangeo_fish.utils import temporal_resolution, haversine_distance
 from pangeo_fish.visualization import filter_by_states, plot_map, render_frame
 
 __all__ = [
@@ -58,6 +61,7 @@ __all__ = [
     "reshape_to_2d",
     "load_tag",
     "update_stations",
+    "compute_detection_time_intervals",
     "plot_tag",
     "load_model",
     "compute_diff",
@@ -67,6 +71,10 @@ __all__ = [
     "compute_acoustic_pdf",
     "combine_pdfs",
     "normalize_pdf",
+    "stamp_parameter_indices",
+    "stamp_parameter_indices_from_mask",
+    "test_parameter",
+    "create_parameters",
     "optimize_pdf",
     "predict_positions",
     "plot_trajectories",
@@ -336,10 +344,12 @@ def plot_tag(
 
 
 def _open_intake_catalog(yaml_url: str, chunks: dict = None):
+def _open_intake_catalog(yaml_url: str, chunks: dict = None):
     """Open an intake catalog.
 
     Parameters
     ----------
+    yaml_url : str
     yaml_url : str
         Path to the ``.yaml`` file
     chunks : dict, optional
@@ -360,6 +370,8 @@ def _open_copernicus_model(
     bbox: dict[str, tuple[float, float]],
     time_slice: slice,
     tag_log: xr.Dataset = None,
+    Username=None,
+    Password=None
 ):
     """Open a Copernicus Marine dataset and merge it with its static fields.
 
@@ -404,6 +416,8 @@ def _open_copernicus_model(
         maximum_latitude=bbox["latitude"][1],
         start_datetime=start_datetime,
         end_datetime=end_datetime,
+        username=Username,
+        password=Password
     )
     static_var = copernicusmarine.open_dataset(
         dataset_id=static_name,
@@ -412,6 +426,8 @@ def _open_copernicus_model(
         maximum_longitude=bbox["longitude"][1],
         minimum_latitude=bbox["latitude"][0],
         maximum_latitude=bbox["latitude"][1],
+        username=Username,
+        password=Password
     )
     static_var = static_var.assign_coords(longitude=ds_thetao_zos["longitude"].values)
     ds_all = xr.merge([ds_thetao_zos, static_var], compat="no_conflicts")
@@ -450,12 +466,15 @@ def _open_parquet_model(parquet_url: str, remote_options=None):
 def load_model(
     *,
     uri: str = None,
+    uri: str = None,
     tag_log: xr.Dataset,
     time_slice: slice,
     bbox: dict[str, tuple[float, float]],
     chunk_time=24,
     remote_options=None,
     copernicus_model_name: str = "cmems_mod_glo_phy_my_0.083deg_P1D-m",
+    Username=None,
+    Password=None,
 ) -> xr.Dataset:
     """Load and prepare a reference model.
 
@@ -483,11 +502,14 @@ def load_model(
     """
 
     if uri is None:
+    if uri is None:
         model = _open_copernicus_model(
             copernicus_model_name,
             bbox=bbox,
             time_slice=time_slice,
             tag_log=tag_log,
+            Username=Username,
+            Password=Password
         )
     elif uri.endswith(".yaml"):
         model = _open_intake_catalog(
@@ -497,6 +519,9 @@ def load_model(
         reference_ds = _open_parquet_model(uri, remote_options=remote_options)
         model = prepare_dataset(reference_ds)
     else:
+        raise ValueError(
+            'Only intake catalogs, "parquet" data or `uri=None` (Copernicus Marine) can be loaded.'
+        )
         raise ValueError(
             'Only intake catalogs, "parquet" data or `uri=None` (Copernicus Marine) can be loaded.'
         )
@@ -688,7 +713,7 @@ def regrid_dataset(
     )
     regridded = regridder.regrid_ds(ds)
     if dims == ["x", "y"]:
-        reshaped = grid.to_2d(regridded).pipe(center_longitude, 0)
+        raise ValueError(f"dims doit être ['cells'], ['x','y'] is not used anymore")
     elif dims == ["cells"]:
         reshaped = regridded.assign_coords(
             cell_ids=lambda ds: ds.cell_ids.astype("int64")
@@ -774,7 +799,7 @@ def compute_emission_pdf(
     """
 
     if dims == ["x", "y"]:
-        is_2d = True
+        raise ValueError(f"dims must be ['cells'], ['x','y'] is not used anymore")
     elif dims == ["cells"]:
         is_2d = False
     else:
@@ -787,38 +812,15 @@ def compute_emission_pdf(
     initial_position = events_ds.sel(event_name="release")
     final_position = events_ds.sel(event_name="fish_death")
 
-    if dims == ["x", "y"]:
-        cov = distrib.create_covariances(
-            initial_std, coord_names=["latitude", "longitude"]
-        )
-        initial_probability = distrib.normal_at(
-            grid,
-            pos=initial_position,
-            cov=cov,
-            normalize=True,
-            axes=["latitude", "longitude"],
-        )
-    else:
-        initial_probability = distrib.healpix.normal_at(
-            grid, pos=initial_position, sigma=initial_std
+
+    initial_probability = distrib.healpix.normal_at(
+        grid, pos=initial_position, sigma=initial_std
         )
 
     if final_position[["longitude", "latitude"]].to_dataarray().isnull().all():
         final_probability = None
     else:
-        if is_2d:
-            cov = distrib.create_covariances(
-                recapture_std**2, coord_names=["latitude", "longitude"]
-            )
-            final_probability = distrib.normal_at(
-                grid,
-                pos=final_position,
-                cov=cov,
-                normalize=True,
-                axes=["latitude", "longitude"],
-            )
-        else:
-            final_probability = distrib.healpix.normal_at(
+        final_probability = distrib.healpix.normal_at(
                 grid, pos=final_position, sigma=recapture_std
             )
 
@@ -922,7 +924,8 @@ def compute_acoustic_pdf(
         # adds back "lon" and "lat" keys
         emission_ds["cell_ids"].attrs["lon"] = lon
         emission_ds["cell_ids"].attrs["lat"] = lat
-
+    else:
+        raise ValueError(f"dims must be ['cells'], ['x','y'] is not used anymore")
     acoustic_pdf = emission_probability(
         tag,
         emission_ds[["time", "cell_ids", "mask"]].compute(),
@@ -1054,6 +1057,7 @@ def normalize_pdf(
     chunks: dict,
     dims=None,
     plot=False,
+    exclude=("initial", "final", "mask"),
     **kwargs,
 ):
     """Normalize a probability distributions (pdf).
@@ -1085,7 +1089,7 @@ def normalize_pdf(
             f'The variable "pdf" in `ds` sums to 0 for {num_times} times.', UserWarning
         )
 
-    normalized = ds.pipe(combine_emission_pdf).chunk(chunks)
+    normalized = ds.pipe(combine_emission_pdf,exclude=exclude).chunk(chunks)
 
     # optional spatial transposition
     if (dims is not None) and ("cells" not in dims):
@@ -1123,13 +1127,12 @@ def normalize_pdf(
     return normalized, figure
 
 
+
 def _get_predictor_factory(
-    ds: xr.Dataset, truncate: float | None, dims: list[str], conv_method: str
+    ds: xr.Dataset, truncate: float | None, dims: list[str], conv_method: str, device: str ="cpu"
 ):
     if dims == ["x", "y"]:
-        if truncate is None:
-            raise ValueError("truncate must not be None when dims == ['x', 'y']")
-        predictor = curry(Gaussian2DCartesian, truncate=truncate)
+        raise ValueError(f"dims must be ['cells'], ['x','y'] is not used anymore")
 
     elif dims == ["cells"]:
         if conv_method == "HealpixConv":
@@ -1146,7 +1149,13 @@ def _get_predictor_factory(
                 pad_kwargs={"mode": "constant", "constant_value": 0},
                 optimize_convolution=True,
             )
-
+        elif conv_method == "LargeHealpixConv":
+                predictor = curry(
+                UpDownGaussian1DHealpix,
+                cell_ids=ds["cell_ids"].data,
+                grid_info=ds.dggs.grid_info,
+                device=device
+            )
         elif conv_method == "FoscatConv":
             predictor = curry(
                 Foscat1DHealpix,
@@ -1156,7 +1165,7 @@ def _get_predictor_factory(
 
         else:
             raise ValueError(
-                f'Unknown helper "{conv_method}". Expected "HealpixConv" or "FoscatConv".'
+                f'Unknown helper "{conv_method}". Expected "HealpixConv", "LargeHealpixConv" or "FoscatConv".'
             )
     else:
         raise ValueError(f'Unknown dims "{dims}".')
@@ -1200,6 +1209,7 @@ def optimize_pdf(
     tolerance: float,
     dims: list[str] = ["cells"],
     conv_method: str = "HealpixConv",
+    final: bool = False,
     save_parameters=False,
     storage_options: dict = None,
     target_root=".",
@@ -1223,6 +1233,11 @@ def optimize_pdf(
         Tolerance level for the optimised parameter search computation
     dims : list of str, default: ["cells"]
         The list of the dimensions. Either ``["x", "y"]`` or ``["cells"]``
+    final : bool, default: False
+        If True, optimize sigma by matching the predicted final state to the
+        observed final position (``score_final_pos``) instead of the standard
+        forward log-likelihood. Not currently supported together with
+        multi-sigma optimization (``predictor_index`` in ``ds``).
     save_parameters : bool, default: False
         Whether to save the results under ``{target_root}/parameters.json``
     target_root : str, default: "."
@@ -1237,6 +1252,13 @@ def optimize_pdf(
     params : dict
         A dictionary containing the optimization results (mainly, the sigma value of the Brownian movement model)
     """
+    predictor_index = "predictor_index"
+
+    if final and predictor_index in ds:
+        raise NotImplementedError(
+            f"final=True is not yet supported together with multi-sigma "
+            f"optimization (dataset contains '{predictor_index}'). Use one or the other."
+        )
 
     ds = ds.compute()
 
@@ -1244,27 +1266,54 @@ def optimize_pdf(
         ds = to_healpix(ds)
         as_radians = True
     else:
+        raise ValueError(f"dims must be ['cells'], ['x','y'] is not used anymore")
         as_radians = False
 
     max_sigma = _get_max_sigma(
         ds, earth_radius, adjustment_factor, maximum_speed, as_radians
     )
+    if final:
+        max_sigma=0.01
     predictor_factory = _get_predictor_factory(
         ds=ds, truncate=truncate, dims=dims, conv_method=conv_method
     )
 
     estimator = EagerEstimator(sigma=None, predictor_factory=predictor_factory)
-    ds.attrs["max_sigma"] = max_sigma  # limitation of the helper
+    # ds.attrs["max_sigma"] = max_sigma  # limitation of the helper
 
     optimizer = EagerBoundsSearch(
         estimator,
-        (1e-4, ds.attrs["max_sigma"]),
+        (1e-4, max_sigma),
         optimizer_kwargs={"disp": 3, "xtol": tolerance},
     )
-    optimized = optimizer.fit(ds)
+
+    if final:
+        optimized = optimizer.fit_final_pos(ds)
+    elif predictor_index in ds:
+        optimized = optimizer.fit_multiple_single_parameters(ds, predictor_index)
+    else:
+        optimized = optimizer.fit_single_parameter(ds)
+
     params = optimized.to_dict()  # type: dict
     params = _update_params_dict(factory=predictor_factory, params=params)
     params.update(_get_package_versions())
+
+    ds = ds.assign_attrs(
+        ds.attrs
+        | {
+            "max_sigma": max_sigma,
+            "sigma": params["sigma"],
+            "predictor_factory": params["predictor_factory"],
+        }
+    )
+
+    # adds sigma time indices in `params` in case of multi-sigma minimization
+    if predictor_index in ds:
+        sigma_indices = [
+            list(group_indices)
+            for group_indices in ds.groupby(predictor_index).groups.values()
+        ]
+        params["sigma_indices"] = sigma_indices
 
     if save_parameters:
         try:
@@ -1274,15 +1323,49 @@ def optimize_pdf(
                 str_path_to_json = str(path_to_json)
             else:
                 str_path_to_json = _s3_path_to_str(path_to_json)
-            pd.DataFrame.from_dict(params, orient="index").to_json(
-                str_path_to_json, storage_options=storage_options
-            )
+
+            with fsspec.open(
+                str_path_to_json,
+                "w",
+                **{} if not target_root.startswith("s3://") else storage_options,
+            ) as file:
+                json.dump(params, file)
+
         except Exception:
             warnings.warn(
                 f'An error occurred when attempting to export the results under "{path_to_json}".',
                 RuntimeWarning,
             )
-    return params
+    return params, ds
+
+"""
+Version corrigée de `predict_positions` (extraite de helpers.py).
+
+Ce qui a été réintégré par rapport à votre version actuelle (qui était
+en fait votre ancien code, pas celui de la PR) :
+
+  1. Reconstruction / validation de la variable `predictor_index` sur
+     `emission` dans les 3 cas possibles :
+       - un seul sigma  -> predictor_index rempli de 0
+       - plusieurs sigmas + predictor_index déjà présent -> cast en int32
+       - plusieurs sigmas + predictor_index absent -> reconstruit depuis
+         params["sigma_indices"] (sauvegardé par optimize_pdf)
+  2. Ajout de la variable `sigma` (une valeur par pas de temps) dans
+     `states` en sortie, quand il y a plusieurs sigmas.
+
+Adapté à VOS conventions actuelles :
+  - le champ de l'estimateur reste `sigma` (singulier), pas `sigmas`
+  - conv_method / Foscat1DHealpix conservés (absents de la PR d'origine)
+  - le paramètre `ds=` que vous aviez ajouté est conservé
+  - le chargement de parameters.json via `pd.read_json(...).to_dict()[0]`
+    est conservé tel quel (au lieu du fsspec.open + json.load de la PR)
+
+A COPIER-COLLER À LA PLACE DE L'ACTUELLE `predict_positions` DANS helpers.py
+(pensez à ajouter `predictor_index = "predictor_index"` n'était pas un import,
+c'est une simple variable locale, rien à ajouter côté imports : tout ce dont
+la fonction a besoin — json/warnings/np/pd/fsspec — est déjà importé en tête
+de fichier).
+"""
 
 
 def predict_positions(
@@ -1302,8 +1385,17 @@ def predict_positions(
     .. warning::
         ``target_root`` must not end with "/".
 
+    .. note::
+        If the estimator to load has multiple sigma values, their indices are
+        expected to be defined in the entry "predictor_index"
+        (``emission["predictor_index"]``), or restorable from
+        ``params["sigma_indices"]``.
+
     Parameters
     ----------
+    ds : xarray.Dataset, optional
+        Already-loaded emission dataset. If provided, it is used instead of
+        reloading ``{target_root}/combined.zarr``.
     target_root : str
         Path to a folder that must contain a folder ``combined.zarr`` and the file ``parameters.json``
     storage_options : dict
@@ -1320,7 +1412,8 @@ def predict_positions(
     Returns
     -------
     states : xarray.Dataset
-        A geolocation model, i.e., positional temporal probabilities
+        The positional temporal probabilities. In case of multi-sigma
+        optimization, it also adds the variable "sigma".
     trajectories : movingpandas.TrajectoryCollection
         The tracks decoded from `states`
 
@@ -1329,34 +1422,88 @@ def predict_positions(
     pangeo_fish.hmm.estimator.EagerEstimator.decode
     """
 
+    predictor_index = "predictor_index"
+
     if ds is None:
         if target_root is None:
             raise ValueError(
-                "You must provide either `ds` or `target_root` " "to load the dataset."
+                "You must provide either `ds` or `target_root` to load the dataset."
             )
 
-        # old behavior preserved:
         emission = xr.open_dataset(
             f"{target_root}/combined.zarr",
             engine="zarr",
-            chunks=chunks,
+            chunks={},
             inline_array=True,
             storage_options=storage_options,
-        )
+        ).chunk(chunks)
         emission = emission.compute()
-
     else:
-
         emission = ds
-
         emission = emission.compute()
 
     if "cells" in emission.dims:
         emission = to_healpix(emission)
 
-    params = pd.read_json(
-        f"{target_root}/parameters.json", storage_options=storage_options
-    ).to_dict()[0]
+    with fsspec.open(
+        f"{target_root}/parameters.json", mode="r", **(storage_options or {})
+    ) as f:
+        params = json.load(f)
+
+    def _compute_predictor_indices(indices: list[list[int]]):
+        # TODO: input checking...
+        size = sum([len(sub_list) for sub_list in indices])
+        acc = [None for _ in range(size)]
+
+        for i in range(len(indices)):
+            for index in indices[i]:
+                acc[index] = i
+
+        assert all([s is not None for s in acc])
+        return np.array(acc).astype(np.int32)
+
+    ## deals with the different possible data sources of the "predictor_index" integer values
+    # one parameter
+    if len(params["sigma"]) == 1:
+        emission = emission.assign(
+            predictor_index=("time", np.zeros(emission["time"].size).astype(np.int32))
+        )
+        warnings.warn(
+            'A "predictor_index" entry (filled with 0) is added to the loaded `emission` dataset.',
+            RuntimeWarning,
+        )
+    # more than one parameter
+    else:
+        # in the input dataset
+        if predictor_index in emission:
+            index_data_type = emission[predictor_index].dtype
+            if index_data_type != np.int32:
+                emission[predictor_index] = emission[predictor_index].astype(np.int32)
+                warnings.warn(
+                    f'Entry "predictor_index" in the loaded `emission` dataset is cast to `np.int32` (found "{index_data_type}").',
+                    RuntimeWarning,
+                )
+        # last attempt before raising an error: restore the predictor_index from the dictionary of parameters
+        elif "sigma_indices" in params:
+            try:
+                emission = emission.assign(
+                    predictor_index=(
+                        "time",
+                        _compute_predictor_indices(params["sigma_indices"]),
+                    )
+                )
+                warnings.warn(
+                    'Entry "predictor_index" not found in the emission dataset: predictors\' indices were restored from the dictionary `params`.',
+                    RuntimeWarning,
+                )
+            except Exception:
+                raise ValueError(
+                    'Entry "predictor_index" is missing in the emission dataset and predictors\' indices could not be restored from the dictionary `params`.'
+                )
+        else:
+            raise ValueError(
+                'The time indices for each sigma value is not defined in the `emission` (entry "predictor_index" is missing) and no indices found in the dictionary `params` (entry "sigma_indices" is missing).'
+            )
 
     # do not account for the other kwargs...
     # not very robust yet...
@@ -1370,6 +1517,11 @@ def predict_positions(
         predictor_factory = _get_predictor_factory(
             emission, truncate=truncate, dims=["x", "y"]
         )
+    elif "UpDownGaussian1DHealpix" in cls_name:
+                predictor_factory = _get_predictor_factory(
+            emission, truncate=truncate, conv_method="LargeHealpixConv", dims=["cells"]
+        )
+
     elif "Gaussian1DHealpix" in cls_name:
         predictor_factory = _get_predictor_factory(
             emission, truncate=truncate, conv_method="HealpixConv", dims=["cells"]
@@ -1381,11 +1533,9 @@ def predict_positions(
     else:
         raise RuntimeError("Could not infer predictor's class from the `.json` file.")
 
-    optimized = EagerEstimator(
-        sigma=params["sigma"], predictor_factory=predictor_factory
-    )
+    optimized = EagerEstimator(sigma=params["sigma"], predictor_factory=predictor_factory)
 
-    states = optimized.predict_proba(emission)
+    states = optimized.predict_proba(emission)  # type: xr.DataArray
     states = (
         states.to_dataset()
         .chunk(chunks)
@@ -1393,6 +1543,24 @@ def predict_positions(
             emission.attrs | _get_package_versions() | {"sigma": params["sigma"]}
         )
     )  # type: xr.Dataset
+
+    # adds the variable `sigma` (per time step) to `states`
+    if len(params["sigma"]) > 1:
+        # from the indices in emission
+        if predictor_index in emission:
+            sigma_indices = [
+                list(group_indices)
+                for group_indices in emission.groupby(predictor_index).groups.values()
+            ]
+        elif "sigma_indices" in params:
+            sigma_indices = _compute_predictor_indices(params["sigma_indices"])
+        else:
+            raise RuntimeError(
+                "Failed to add the variable `sigma` to `states` (it should never happen.)"
+            )
+
+        sigma_var = _compute_sigma_var(sigma_indices, params["sigma"])
+        states = states.assign(sigma=("time", sigma_var))
 
     if save:
         _save_zarr(states, f"{target_root}/states.zarr", storage_options)
@@ -1738,3 +1906,423 @@ def render_distributions(
                 os.remove(filepath)
         pbar.close()
     return video_fp
+
+def multiplot_healpix(datasets: list[tuple[xr.Dataset, list[str]]],refinement_level : int = 8):
+    """
+    Exemple: [(ds1, ["pdf"]), (ds2, ["pdf", "temp"])]
+    """
+    plots = []
+    for ds, variables in datasets:
+        for var_name in variables:
+            plot = (
+                ds[var_name]
+                .compute()
+                .dggs.decode({"grid_name": "healpix", "level": refinement_level, "indexing_scheme": "nested"})
+                .dggs.explore(alpha=0.8)
+            )
+            plots.append(plot)
+    return plots
+
+
+
+def multi_map_with_synced_sliders(maps, width='300px', height='400px'):
+    """
+    Affiche plusieurs maps côte à côte avec leur slider 'time' synchronisé.
+
+    Paramètres
+    ----------
+    maps : list
+        Liste d'objets map (doivent avoir .map, .sliders['time'], .layout)
+    width, height : dimensions appliquées à chaque map
+
+    Exemple
+    -------
+    multi_map_with_synced_sliders([m1, m2, m3])
+    """
+    if len(maps) < 1:
+        raise ValueError("Il faut au moins une map.")
+
+    # 1. Appliquer la taille à chaque map
+    for m in maps:
+        m.layout.width = width
+        m.layout.height = height
+
+    # 2. Synchroniser tous les sliders 'time' entre eux (lié en chaîne au 1er)
+    ref_slider = maps[0].sliders['time']
+    for m in maps[1:]:
+        ipw.jslink((ref_slider, "value"), (m.sliders['time'], "value"))
+
+    # 3. Construire chaque bloc (map + slider en dessous)
+    def map_with_slider_below(m):
+        return ipw.VBox([m.map, m.sliders['time']])
+
+    blocks = [map_with_slider_below(m) for m in maps]
+
+    return ipw.HBox(blocks)
+
+def _find_time_intervals(df: pd.DataFrame, min_time: pd.Timedelta, min_dist: float):
+    def _is_far_enough(
+        lon1: float, lat1: float, lon2: float, lat2: float, min_dist: float
+    ):
+        dist = haversine_distance(lon1, lon2, lat1, lat2)
+        return dist > min_dist
+
+    if not all([k in df.columns for k in ["id", "longitude", "latitude"]]):
+        raise ValueError(
+            'The dataframe must have the columns "id", "longitude" and "latitude".'
+        )
+
+    time_delta = pd.Timedelta(0)
+    first_row = df.iloc[0]
+    last_time = first_row.name  # type: pd.Timestamp
+    last_point = (
+        first_row.longitude,
+        first_row.latitude,
+    )  # type: tuple[np.float64, np.float64]
+
+    times = [last_time]
+
+    for curr_time, row in df.iloc[1:].iterrows():
+        time_delta += curr_time - last_time
+
+        if _is_far_enough(*last_point, row.longitude, row.latitude, min_dist):
+            times.append(last_time)
+            times.append(curr_time)
+            time_delta = pd.Timedelta(0)
+
+            last_point = (row.longitude, row.latitude)
+        if time_delta > min_time:
+            times.append(curr_time)
+            time_delta = pd.Timedelta(0)
+
+            last_point = (row.longitude, row.latitude)
+
+        last_time = curr_time
+    return times
+
+
+def compute_detection_time_intervals(
+    *,
+    tag: xr.DataTree,
+    min_time: pd.Timedelta = pd.Timedelta("4days"),
+    min_dist: float = 17.0,
+    **kwargs,
+):
+    """
+    Compute the time intervals based on the acoustic detections of a fish tag.
+    Parameters
+    ----------
+    tag : xarray.DataTree
+        The fish tag, assumed to have an entry "acoustic".
+    min_time : pandas.Timedelta, optional
+        Minimum time length for the intervals (defaults to ``pd.Timedelta("4days")``).
+    min_dist : float, default: 17.0
+        Minimum distance between the detections to set apart different intervals, in kilometers.
+    Returns
+    -------
+    array of pandas.Timestamps
+        The list of timestamps that delimit the detections.
+    """
+
+    def _mapper(string: str):
+        keys = ["id", "longitude", "latitude"]
+        for k in keys:
+            if k in string:
+                return k
+        return string
+
+    # input checking of the acoustic detections
+    if "acoustic" not in tag:
+        raise ValueError("No acoustic detection found in tag.")
+    if tag["acoustic"].ds.to_dataframe().empty:
+        raise ValueError("The acoustic detection data found in tag is empty.")
+
+    # input checking of the intervals' minima
+    if min_dist <= 0.0:
+        raise ValueError(
+            f'The minimum distance must be strictly positive (received: "{min_dist}").'
+        )
+    if min_time <= pd.Timedelta(0):
+        raise ValueError(
+            f'The minimum interval time must be strictly positive (received: "{min_time}").'
+        )
+
+    detection_times_df = (
+        tag["acoustic"].ds.to_dataframe().rename(mapper=_mapper, axis=1)
+    )
+    interval_times = _find_time_intervals(detection_times_df, min_time, min_dist)
+    return interval_times
+
+def _time_indices_in_ds(ds: xr.Dataset, times: list[pd.Timestamp]):
+    """Return the time indices in ``ds`` that split ``ds`` according to the list of timestamps ``times``."""
+    indices = []
+    # adds the time indices
+    ds = ds.assign_coords(time_index=("time", np.arange(ds.sizes["time"])))
+
+    for time in times:
+        index = ds.sel(time=time, method="nearest")["time_index"].to_numpy().item()
+        indices.append(index)
+    return indices
+
+
+def stamp_parameter_indices(
+    *,
+    pdf: xr.Dataset,
+    times: list[pd.Timestamp],
+    index_key: str = "predictor_index",
+    **kwargs,
+):
+    """
+    Add a index-like integer variable to a dataset based on a list of times.
+    Parameters
+    ----------
+    pdf : xarray.Dataset
+        The dataset to add the variable to. It must have a time index.
+    times : array of pandas.Timestamp
+        The list of timestamps to assign the index-like values.
+    index_key : str, default: "predictor_index"
+        Name of the variable to add.
+    Returns
+    -------
+    xarray.Dataset
+        The dataset `pdf` with the new variable whose name is the value of `index_key`.
+    Notes
+    -----
+    The time indices in `pdf` are selected with the method "nearest".
+    Examples
+    --------
+    >>> import pandas as pd
+    >>> import xarray as xr
+    >>> import numpy as np
+    >>> ds = xr.Dataset(
+    ...     {"temperature": ("time", np.arange(10))},
+    ...     coords={
+    ...         "time": xr.date_range("2000-01-01 12:00:00", freq="60 s", periods=10)
+    ...     },
+    ... )
+    >>> print(stamp_parameter_indices(ds, [pd.Timestamp("2000-01-01 12:05:00")]))
+    <xarray.Dataset> Size: 200B
+    Dimensions:          (time: 10)
+    Coordinates:
+    * time             (time) datetime64[ns] 80B 2000-01-01T12:00:00 ... 2000-0...
+    Data variables:
+        temperature      (time) int64 80B 0 1 2 3 4 5 6 7 8 9
+        predictor_index  (time) int32 40B 0 0 0 0 0 0 1 1 1 1
+    """
+
+    time_indices = _time_indices_in_ds(pdf, times)
+    acc = []
+    padded_time_indices = time_indices + [pdf.sizes["time"] - 1]
+
+    for i in range(len(padded_time_indices)):
+        if i == 0:
+            tmp = [i] * (padded_time_indices[i] + 1)
+        else:
+            tmp = [i] * (padded_time_indices[i] - padded_time_indices[i - 1])
+        acc.append(tmp)
+
+    indices = sum(acc, start=[])
+    return pdf.assign(**{index_key: ("time", np.array(indices).astype(np.int32))})
+
+
+def _compute_sigma_var(indices: list[list[int]], values: list[float]):
+    """Return a numpy array composed of the values in ``values`` according to the indices in ``indices``."""
+    # TODO: input checking...
+    var_size = sum([len(sub_list) for sub_list in indices])
+    var_list = [None for _ in range(var_size)]
+    for i, v in enumerate(values):
+        for index in indices[i]:
+            var_list[index] = v
+    assert all([s is not None for s in var_list])
+    return np.array(var_list)
+
+def stamp_parameter_indices_from_mask(*, pdf, mask, index_key: str = "predictor_index"):
+    """
+    Ajoute un index de paramètre (0/1) basé directement sur un masque temporel binaire.
+
+    Parameters
+    ----------
+    pdf : xarray.Dataset
+        Dataset ayant une dimension "time".
+    mask : array-like ou xarray.DataArray de 0/1, aligné sur "time"
+    index_key : str
+        Nom de la variable à ajouter.
+    """
+    mask_arr = np.asarray(mask).astype(np.int32)
+
+    if mask_arr.shape[0] != pdf.sizes["time"]:
+        raise ValueError(
+            f"Le masque (taille {mask_arr.shape[0]}) ne correspond pas "
+            f"à la dimension 'time' de pdf (taille {pdf.sizes['time']})."
+        )
+
+    return pdf.assign(**{index_key: ("time", mask_arr)})
+
+import warnings
+def create_parameters(
+    sigma,
+    sigma_indices=None,
+    predictor_factory=None,
+    predictors=None,
+    class_name="Foscat1DHealpix",
+    comment="Custom parameters",
+    save_parameters=False,
+    storage_options=None,
+    target_root=".",
+):
+    """
+    Create a parameters dictionary compatible with pangeo-fish and
+    optionally save it as parameters.json.
+
+    Parameters
+    ----------
+    sigma : list[float]
+        List of sigma values.
+    sigma_indices : list[list[int]], optional
+        Time indices associated with each sigma.
+    predictor_factory : dict, optional
+        Predictor factory description.
+    predictors : optional
+        Predictor values.
+    comment : str
+        Comment stored in the json file.
+    save_parameters : bool, default=False
+        Save the parameters to {target_root}/parameters.json.
+    storage_options : dict, optional
+        Storage options for S3.
+    target_root : str, default="."
+        Output directory.
+
+    Returns
+    -------
+    dict
+        Parameters dictionary.
+    """
+    if class_name not in ["Foscat1DHealpix","UpDownGaussian1DHealpix","Gaussian1DHealpix"]:
+            raise ValueError(
+            f'Unknown class_name "{class_name}". Expected "Gaussian1DHealpix", "Foscat1DHealpix" or "UpDownGaussian1DHealpix".'
+        )
+    if predictor_factory is None:
+        predictor_factory = {
+            "class": class_name,
+            "kwargs": {
+                "grid_info": "HealpixInfo(level=11, ellipsoid=None, indexing_scheme='nested')",
+                "sigma": None,
+                "truncate": 4.0 if class_name == "Gaussian1DHealpix" else None,
+                "kernel_size": None,
+            },
+        }
+    params = {
+        "sigma": sigma,
+        "predictors": predictors,
+        "predictor_factory": predictor_factory,
+        "comment": comment,
+    }
+
+    if sigma_indices is not None:
+        params["sigma_indices"] = sigma_indices
+
+    if save_parameters:
+        try:
+            path_to_json = Path(target_root) / "parameters.json"
+
+            if storage_options is None:
+                path_to_json.parent.mkdir(parents=True, exist_ok=True)
+                str_path_to_json = str(path_to_json)
+            else:
+                str_path_to_json = _s3_path_to_str(path_to_json)
+
+            with fsspec.open(
+                str_path_to_json,
+                "w",
+                **{} if not target_root.startswith("s3://") else storage_options,
+            ) as file:
+                json.dump(params, file, indent=4)
+
+        except Exception:
+            warnings.warn(
+                f'An error occurred when attempting to export the results under "{path_to_json}".',
+                RuntimeWarning,
+            )
+
+    return params
+
+
+def test_parameter(emission: xr.Dataset = None,
+                sigma_tested: list = [0.004],
+                   sigma_indices: list[list[int]] = None,
+                   Conv_method: str = "Foscat1DHealpix",
+                   target_root: str = ".",
+                   saving_root: str="/hand_sigma",
+                   default_chunk_dims=None,
+                   storage_options=None
+                   ):
+    """
+    Load an emission dataset, save it under a dedicated sub-folder, and
+    generate the corresponding parameters.json for a given set of sigma
+    values to test.
+
+    This is typically used to prepare a "hand-tuned" sigma test folder:
+    the emission distributions are (re)written next to a parameters.json
+    describing the sigma(s) to evaluate, so that downstream pangeo-fish
+    steps can pick them up from `target_root/saving_root`.
+
+    Parameters
+    ----------
+    emission : xr.Dataset, optional
+        Emission dataset to use. If None (default), it is loaded from
+        `{target_root}/combined.zarr`.
+    sigma_tested : list[float], default=[0.004]
+        List of sigma values to test.
+    sigma_indices : list[list[int]], optional
+        Time indices associated with each sigma.
+    Conv_method : str, default="Foscat1DHealpix"
+        Convolution class name used to build the predictor factory
+        (see `create_parameters`). Expected values are
+        "Gaussian1DHealpix", "Foscat1DHealpix" or "UpDownGaussian1DHealpix".
+    target_root : str, default=""
+        Root directory where the input `combined.zarr` is read from, and
+        under which `saving_root` is created for the outputs.
+    saving_root : str, default="/hand_sigma"
+        Sub-folder (relative to `target_root`) where the emission dataset
+        and parameters.json are written.
+    default_chunk_dims : dict, optional
+        Chunk sizes used when opening the input zarr with dask
+        (passed as `chunks=` to `xr.open_dataset`). Ignored if `emission`
+        is already provided.
+    storage_options : dict, optional
+        Storage options for remote stores (e.g. S3), used both when
+        opening the input zarr and when writing the output zarr.
+
+    Returns
+    -------
+    dict
+        Parameters dictionary, as returned by `create_parameters`, also
+        saved as `{target_root}{saving_root}/parameters.json`.
+    """
+    # Open the distributions
+    emission = xr.open_dataset(
+        f"{target_root}/combined.zarr",
+        engine="zarr",
+        chunks=default_chunk_dims,
+        inline_array=True,
+        storage_options=storage_options,
+    ) if emission is None else emission
+
+    # Create a new folder
+    emission.to_zarr(
+        f"{target_root}{saving_root}/combined.zarr",
+        mode="w",
+        consolidated=True,
+        storage_options=storage_options,
+        zarr_format=2
+    )
+    params = create_parameters(
+    sigma=sigma_tested,
+    sigma_indices=sigma_indices,
+    class_name=Conv_method,
+    target_root= f"{target_root}{saving_root}",#stayconsistent here
+    save_parameters=True,
+    storage_options=storage_options
+    )
+    return (params)
