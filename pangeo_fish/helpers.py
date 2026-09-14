@@ -1055,6 +1055,7 @@ def normalize_pdf(
     dims=None,
     plot=False,
     exclude=("initial", "final", "mask"),
+    excluded_pdf=None,
     **kwargs,
 ):
     """Normalize a probability distributions (pdf).
@@ -1069,7 +1070,8 @@ def normalize_pdf(
         Spatial dimensions to transpose the combined dataset. Relevant in case of a 2D, such as ["x", "y"] or ["y", "x"]
     plot : bool, default: False
         Whether to plot the sum of the distributions along the time dimension.
-
+    exclude : what you don't want to be considered as a pdf it will be ignored by the merging
+    excluded_pdf : tuple of str, pdf contained in ds that you don't want to use for the normalization 
 
     Returns
     -------
@@ -1086,7 +1088,7 @@ def normalize_pdf(
             f'The variable "pdf" in `ds` sums to 0 for {num_times} times.', UserWarning
         )
 
-    normalized = ds.pipe(combine_emission_pdf,exclude=exclude).chunk(chunks)
+    normalized = ds.pipe(combine_emission_pdf,exclude=exclude+excluded_pdf).chunk(chunks)
 
     # optional spatial transposition
     if (dims is not None) and ("cells" not in dims):
@@ -1121,6 +1123,12 @@ def normalize_pdf(
                 "An error occurred when plotting the normalized dataset.",
                 RuntimeWarning,
             )
+    # we get rid of the pdf in excluded-pdf (or they will stay in normalized)
+    for item in excluded_pdf:
+        normalized=normalized.drop_vars(item)
+    
+    normalized=normalized.rename({"pdf_normalized": "pdf"})
+    warnings.warn(f"you decided to normalize the pdf without: {excluded_pdf}, if you want to include them, change excluded_pdf ", UserWarning)
     return normalized, figure
 
 
