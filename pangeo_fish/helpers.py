@@ -344,7 +344,6 @@ def plot_tag(
 
 
 def _open_intake_catalog(yaml_url: str, chunks: dict = None):
-def _open_intake_catalog(yaml_url: str, chunks: dict = None):
     """Open an intake catalog.
 
     Parameters
@@ -466,7 +465,6 @@ def _open_parquet_model(parquet_url: str, remote_options=None):
 def load_model(
     *,
     uri: str = None,
-    uri: str = None,
     tag_log: xr.Dataset,
     time_slice: slice,
     bbox: dict[str, tuple[float, float]],
@@ -501,7 +499,6 @@ def load_model(
         The subset data
     """
 
-    if uri is None:
     if uri is None:
         model = _open_copernicus_model(
             copernicus_model_name,
