@@ -3,7 +3,7 @@ Module for computing probability distributions from acoustic detections.
 """
 
 import flox.xarray
-import healpy as hp
+import healpix_geo as hpg
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -127,8 +127,13 @@ def buffer_points_cells(
     """ """
 
     def _buffer_masks(cell_ids, vector, nside, radius, factor=4, intersect=False):
-        selected_cells = hp.query_disc(
-            nside, vector, radius, nest=True, fact=factor, inclusive=intersect
+        ## replacement
+        radius_deg = np.degrees(radius)
+        depth = int(np.log2(nside))
+        vector_ang=hpg.cartesian_to_lonlat(vector[0],vector[1],vector[2],ellipsoid="sphere")
+        vector_ang=[vector_ang[0][0],vector_ang[1][0]]
+        selected_cells,_,_ = hpg.nested.cone_coverage(
+            vector_ang, radius_deg, depth, delta_depth=0, ellipsoid='sphere', flat=True
         )
         return np.isin(cell_ids, selected_cells, assume_unique=True)
 
