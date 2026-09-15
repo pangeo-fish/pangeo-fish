@@ -225,6 +225,8 @@ class UpDownGaussian1DHealpix(Predictor):
     def __post_init__(self):
         import healpy as hp
         from healpix_analyse import LargeConv
+        import healpy as hp
+        import healpix_geo.nested as hpg_n
 
         nside = 2**self.grid_info.level
 
@@ -265,7 +267,9 @@ class UpDownGaussian1DHealpix(Predictor):
         impulse[centre_index] = 1.0
         response_downup_only = self.layer(impulse)
 
-        lon, lat = hp.pix2ang(nside, self.cell_ids, nest=True, lonlat=True)  # degrés
+        # lon, lat = hp.pix2ang(nside, self.cell_ids, nest=True, lonlat=True)  # degrés
+        lon, lat = hpg_n.healpix_to_lonlat(self.cell_ids,self.grid_info.level,ellipsoid=self.layer.ellipsoid)
+        
         sigma_downup_deg = self._measure_effective_sigma(
             response_downup_only, lon, lat, centre_index
         )
