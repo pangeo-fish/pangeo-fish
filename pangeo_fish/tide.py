@@ -361,4 +361,34 @@ def tide_pdf(tide_behav, data):
     ds_pdf = ds_pdf.rename({"time": "instant"})
     ds_pdf = ds_pdf.rename({"datetime": "time"}).set_index(time="time")
     ds_pdf = ds_pdf.rename({"ocean_mask": "mask"})
-    return ds_pdf
+    return(ds_pdf)
+
+
+def plot_tide(tag_test):
+    #function that shows where tide have been detected should be implemented here
+    # Dataset : ds
+    time = tag_test["time"].values
+    depth = tag_test["depth"].values
+    tide_found = tag_test["tide_found"].values  # 0 or 1
+
+    plt.figure(figsize=(15, 4))
+    plt.plot(time, depth, color="blue", label="Profondeur")
+
+    # green bar for tide time
+    plt.fill_between(
+        time,
+        depth.min(),
+        depth.max(),
+        where=(tide_found == 1),
+        color="green",
+        alpha=0.3,
+        label="Marée détectée",
+    )
+
+    plt.xlabel("Temps")
+    plt.ylabel("Profondeur (m)")
+    plt.title(f'Temporal Depth & Tidal Detection - Tag {tag_test.attrs["tagno"]}')
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+        

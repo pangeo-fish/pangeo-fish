@@ -56,6 +56,9 @@ from pangeo_fish.tags import adapt_model_time, reshape_by_bins, to_time_slice
 from pangeo_fish.utils import temporal_resolution, haversine_distance
 from pangeo_fish.visualization import filter_by_states, plot_map, render_frame
 
+from healpix_resample import NearestResampler, CloughTocherResampler, BilinearResampler
+import healpix_geo as hg
+
 __all__ = [
     "to_healpix",
     "reshape_to_2d",
@@ -657,6 +660,149 @@ def open_diff_dataset(*, target_root: str, storage_options: dict, **kwargs):
     return ds
 
 
+
+def regrid_dataset_hpresample(
+    *,
+    ds: xr.Dataset,
+    refinement_level: int,
+    min_vertices=1, 
+    ellipsoid="sphere",
+    dims: list[str] = ["cells"],
+    plot=False,
+    save=False,
+    target_root=".",
+    storage_options: dict = None,
+    mask_threshold=0.5,
+    **kwargs,
+):
+    nside = 2**refinement_level
+
+    lon = ds.longitude.values.ravel().astype("float64")
+    lat = ds.latitude.values.ravel().astype("float64")
+    mask_src = ds.ocean_mask.values.ravel().astype("float64")
+
+    # ------------------------------------------------------------------
+    # Partie 1 : ensemble de cellules HEALPix + masque océan
+    # threshold=-1 : on garde toutes les cellules atteintes par une source,
+    # la séparation terre/océan se fait ensuite avec mask_threshold.
+    # ------------------------------------------------------------------
+    resampler_mask = BilinearResampler(
+        lon_deg=lon,
+        lat_deg=lat,
+        level=refinement_level,
+        threshold=-1,
+        ring_search_max=8,
+        ellipsoid=ellipsoid,
+    )
+    mask_regridded = resampler_mask.resample(mask_src)
+    cell_ids = resampler_mask.get_cell_ids()
+
+    order = np.argsort(cell_ids)
+    ref_cell_ids = cell_ids[order].astype("int64")
+    ocean_mask_final = mask_regridded.cell_data[order]
+    print("ocean_mask_final min/max :", ocean_mask_final.min(), ocean_mask_final.max())
+    is_ocean = ocean_mask_final >= mask_threshold
+
+    # ------------------------------------------------------------------
+    # Partie 2 : Clough-Tocher construit uniquement sur les points océan
+    # (évite la propagation des NaN terre dans les gradients)
+    # ------------------------------------------------------------------
+    valid_src = mask_src > 0.8
+
+    resampler_ct = CloughTocherResampler(
+        lon_deg=lon[valid_src],
+        lat_deg=lat[valid_src],
+        level=refinement_level,
+        ellipsoid=ellipsoid,
+    )
+
+    # alignement des cellules produites par CT sur ref_cell_ids
+    ct_cell_ids = resampler_ct.get_cell_ids().astype("int64")  # pas de np.sort ici
+    idx = pd.Index(ct_cell_ids).get_indexer(ref_cell_ids)
+    valid = idx != -1
+
+    n_missing = int((is_ocean & ~valid).sum())
+    print(f"cellules océan non couvertes par Clough-Tocher : {n_missing}")
+
+    # Repli : bilinéaire sur les seuls points océan, pour la bande côtière
+    # hors de l'enveloppe convexe (CT n'extrapole pas).
+    resampler_bil = BilinearResampler(
+        lon_deg=lon[valid_src],
+        lat_deg=lat[valid_src],
+        level=refinement_level,
+        threshold=0.5,
+        ring_search_max=4,
+        ellipsoid=ellipsoid,
+    )
+    idx_b = pd.Index(resampler_bil.get_cell_ids().astype("int64")).get_indexer(
+        ref_cell_ids
+    )
+    valid_b = idx_b != -1
+    n_left = int((is_ocean & ~valid & ~valid_b).sum())
+    print(f"cellules océan couvertes ni par CT ni par le repli : {n_left}")
+
+    def to_full(cell_data):
+        """Replace les sorties CT sur ref_cell_ids et applique le masque océan."""
+        out = np.full(cell_data.shape[:-1] + (ref_cell_ids.size,), np.nan)
+        out[..., valid] = cell_data[..., idx[valid]]
+        out[..., ~is_ocean] = np.nan
+        return out
+
+    # ------------------------------------------------------------------
+    # Assemblage du Dataset
+    # ------------------------------------------------------------------
+    lon_out, lat_out = hg.nested.healpix_to_lonlat(
+        ref_cell_ids, refinement_level, ellipsoid=ellipsoid
+    )
+
+    new_ds = xr.Dataset(
+        data_vars={"ocean_mask": ("cells", is_ocean.astype(float))},
+        coords={
+            "cell_ids": ("cells", ref_cell_ids),
+            "latitude": ("cells", lat_out),
+            "longitude": ("cells", lon_out),
+            "time": ds.time.values,
+            "resolution": np.sqrt(4 * np.pi / (12 * nside**2)),
+        },
+    )
+
+    for name, da in ds.data_vars.items():
+        # ne pas écraser ocean_mask / coordonnées déjà présentes dans new_ds
+        # if name in new_ds.variables:
+        #     continue
+        print(name, da.dims)
+
+        if len(da.dims) == 3:
+            variable = (
+                ds[name]
+                .transpose("time", "yi", "xi")
+                .values.reshape(ds.sizes["time"], -1)[:, valid_src]
+            )
+            new_ds[name] = (("time", "cells"), to_full(resampler_ct.resample(variable).cell_data))
+
+        elif len(da.dims) == 2:
+            variable = ds[name].transpose("yi", "xi").values.ravel()[valid_src]
+            new_ds[name] = (("cells",), to_full(resampler_ct.resample(variable).cell_data))
+
+    new_ds["cell_ids"].attrs.update(
+        indexing_scheme="nested",
+        grid_name="healpix",
+        level=refinement_level,
+    )
+
+    attrs = ds.attrs.copy()
+    attrs.update(grid_type="healpix", level=refinement_level, nside=nside)
+    new_ds.attrs.update(attrs)
+
+    if plot:
+        print("no method implemented to plot")
+    if save:
+        print("you can save outside of the function")
+    return new_ds
+
+
+
+
 def regrid_dataset(
     *,
     ds: xr.Dataset,
@@ -1087,8 +1233,8 @@ def normalize_pdf(
         warnings.warn(
             f'The variable "pdf" in `ds` sums to 0 for {num_times} times.', UserWarning
         )
-
-    normalized = ds.pipe(combine_emission_pdf,exclude=exclude+excluded_pdf).chunk(chunks)
+    total_exclude=exclude+excluded_pdf if excluded_pdf is not None else exclude
+    normalized = ds.pipe(combine_emission_pdf,exclude=total_exclude).chunk(chunks)
 
     # optional spatial transposition
     if (dims is not None) and ("cells" not in dims):
@@ -1124,8 +1270,9 @@ def normalize_pdf(
                 RuntimeWarning,
             )
     # we get rid of the pdf in excluded-pdf (or they will stay in normalized)
-    for item in excluded_pdf:
-        normalized=normalized.drop_vars(item)
+    if excluded_pdf is not None:
+        for item in excluded_pdf:
+            normalized=normalized.drop_vars(item)
     
     normalized=normalized.rename({"pdf_normalized": "pdf"})
     warnings.warn(f"you decided to normalize the pdf without: {excluded_pdf}, if you want to include them, change excluded_pdf ", UserWarning)
@@ -1923,7 +2070,7 @@ def multiplot_healpix(datasets: list[tuple[xr.Dataset, list[str]]],refinement_le
                 ds[var_name]
                 .compute()
                 .dggs.decode({"grid_name": "healpix", "level": refinement_level, "indexing_scheme": "nested"})
-                .dggs.explore(alpha=0.8)
+                .dggs.explore(alpha=0.5)
             )
             plots.append(plot)
     return plots

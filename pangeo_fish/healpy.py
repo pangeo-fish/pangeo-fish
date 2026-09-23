@@ -206,11 +206,9 @@ def _get_interp_weights_geo(lon, lat, depth, ellipsoid):
     pix, weights = hpa_hpi.get_interp_weights(
         lon.ravel(), lat.ravel(), depth, ellipsoid=ellipsoid
     )
-    # pix, weights ont la forme (N, 4) -> on restaure la forme d'origine
+    # format de donnée
     pix = pix.reshape(shape + (4,))
     weights = weights.reshape(shape + (4,))
-
-    # on met l'axe des 4 voisins en premier, comme healpy
     pix = np.moveaxis(pix, -1, 0)
     weights = np.moveaxis(weights, -1, 0)
     return pix, weights
