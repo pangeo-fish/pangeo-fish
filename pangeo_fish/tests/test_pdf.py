@@ -38,7 +38,9 @@ def test_single_emission_with_final():
 
     # Time 0 and 1: sum is 4 → pdf = 2/4 = 0.5
     # Time 2: sum is 12 → pdf = 6/12 = 0.5
-    expected = ds.assign(pdf_normalized=xr.full_like(em, fill_value=0.5)).drop_vars("em")
+    expected = ds.assign(pdf_normalized=xr.full_like(em, fill_value=0.5)).drop_vars(
+        "em"
+    )
     xr.testing.assert_allclose(result, expected, rtol=1e-7, atol=1e-7)
 
 

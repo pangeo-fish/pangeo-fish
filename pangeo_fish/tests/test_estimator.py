@@ -7,7 +7,7 @@ from tlz.functoolz import curry
 
 from pangeo_fish.hmm.estimator import EagerEstimator
 from pangeo_fish.hmm.optimize import EagerBoundsSearch
-from pangeo_fish.hmm.prediction import Gaussian1DHealpix, Foscat1DHealpix
+from pangeo_fish.hmm.prediction import Foscat1DHealpix, Gaussian1DHealpix
 
 
 @pytest.fixture
@@ -65,11 +65,10 @@ def predictor_factory(sample_dataset):
     #     optimize_convolution=True,
     # )
     return curry(
-                Foscat1DHealpix,
-                cell_ids=sample_dataset["cell_ids"].data,
-                grid_info=sample_dataset.dggs.grid_info,
-            )
-            
+        Foscat1DHealpix,
+        cell_ids=sample_dataset["cell_ids"].data,
+        grid_info=sample_dataset.dggs.grid_info,
+    )
 
 
 @pytest.mark.parametrize("sigma", [[0.0004], [0.0002]])
