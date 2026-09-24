@@ -29,6 +29,7 @@ dependencies:
   - healpy
   - scikit-learn
   - astropy
+  - pytorch
   # video processing
   - ffmpeg
   - xmovie
@@ -42,7 +43,10 @@ dependencies:
       - cdshealpix
       - xdggs
       - healpix-convolution>=0.1.2
+      - healpix-geo
       - dask-hpcconfig
       - imageio[ffmpeg]
       # - git+https://github.com/iaocea/xarray-healpy.git@0ffca6058f4008f4f22f076e2d60787fcf32ac82
       - xhealpixify
+      - git+https://github.com/GRID4EARTH/healpix-analyse.git
+      - git+https://github.com/GRID4EARTH/healpix-resample.git
