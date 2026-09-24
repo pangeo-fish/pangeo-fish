@@ -50,3 +50,4 @@ dependencies:
       - xhealpixify
       - git+https://github.com/GRID4EARTH/healpix-analyse.git
       - git+https://github.com/GRID4EARTH/healpix-resample.git
+      - foscat
