@@ -7,7 +7,7 @@ from tlz.functoolz import curry
 
 from pangeo_fish.hmm.estimator import EagerEstimator
 from pangeo_fish.hmm.optimize import EagerBoundsSearch
-from pangeo_fish.hmm.prediction import Foscat1DHealpix, Gaussian1DHealpix
+from pangeo_fish.hmm.prediction import Foscat1DHealpix
 
 
 @pytest.fixture

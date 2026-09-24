@@ -1,15 +1,9 @@
-import cartopy.crs as ccrs
-import cartopy.feature as cfeature
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import sparse
 import xarray as xr
-import xdggs
-from ipywidgets import IntSlider, interact
 from numpy.linalg import lstsq
 from scipy.signal import savgol_filter
-from scipy.stats import multivariate_normal
 from tqdm import tqdm
 
 #####################################################################
@@ -297,10 +291,6 @@ def datalikelihood_tide_only_full_normalized(
         coords={"time": td_time, "latitude": lat, "longitude": lon},
     )
     return ds_pdf
-
-
-import numpy as np
-import pandas as pd
 
 
 def tide_pdf(tide_behav, data):

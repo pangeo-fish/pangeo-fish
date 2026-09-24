@@ -224,7 +224,6 @@ class UpDownGaussian1DHealpix(Predictor):
 
     def __post_init__(self):
         import healpix_geo.nested as hpg_n
-        import healpy as hp
         from healpix_analyse import LargeConv
 
         nside = 2**self.grid_info.level

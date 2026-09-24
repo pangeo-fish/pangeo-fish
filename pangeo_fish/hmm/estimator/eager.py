@@ -3,10 +3,9 @@ from dataclasses import asdict, dataclass, field, replace
 import movingpandas as mpd
 import numpy as np
 from tlz.functoolz import compose_left, curry, pipe
-from tlz.itertoolz import first
 
 from pangeo_fish import tracks, utils
-from pangeo_fish.hmm.decode import mean_track, modal_track, viterbi, viterbi2
+from pangeo_fish.hmm.decode import mean_track, modal_track
 from pangeo_fish.hmm.filter import forward_backward, score, score_final_pos
 from pangeo_fish.hmm.prediction import Predictor
 

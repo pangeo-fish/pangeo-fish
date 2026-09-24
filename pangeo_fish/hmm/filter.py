@@ -4,7 +4,6 @@ import dask
 import dask.array as da
 import numpy as np
 import zarr  # noqa: F401
-from tqdm import tqdm
 
 
 def score(emission, predictors, predictor_indices, initial_probability, mask=None):

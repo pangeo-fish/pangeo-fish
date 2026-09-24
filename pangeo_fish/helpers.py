@@ -25,7 +25,7 @@ import s3fs
 import tqdm
 import xarray as xr
 import xdggs  # noqa: F401
-from healpix_resample import BilinearResampler, CloughTocherResampler, NearestResampler
+from healpix_resample import BilinearResampler, CloughTocherResampler
 from matplotlib.figure import Figure
 from toolz.dicttoolz import valfilter
 from toolz.functoolz import curry  # to change
@@ -41,7 +41,6 @@ from pangeo_fish.hmm.optimize import EagerBoundsSearch
 from pangeo_fish.hmm.prediction import (
     Foscat1DHealpix,
     Gaussian1DHealpix,
-    Gaussian2DCartesian,
     UpDownGaussian1DHealpix,
 )
 from pangeo_fish.io import (
@@ -858,7 +857,7 @@ def regrid_dataset(
     )
     regridded = regridder.regrid_ds(ds)
     if dims == ["x", "y"]:
-        raise ValueError(f"dims doit être ['cells'], ['x','y'] is not used anymore")
+        raise ValueError("dims doit être ['cells'], ['x','y'] is not used anymore")
     elif dims == ["cells"]:
         reshaped = regridded.assign_coords(
             cell_ids=lambda ds: ds.cell_ids.astype("int64")
@@ -944,7 +943,7 @@ def compute_emission_pdf(
     """
 
     if dims == ["x", "y"]:
-        raise ValueError(f"dims must be ['cells'], ['x','y'] is not used anymore")
+        raise ValueError("dims must be ['cells'], ['x','y'] is not used anymore")
     elif dims == ["cells"]:
         is_2d = False
     else:
@@ -1069,7 +1068,7 @@ def compute_acoustic_pdf(
         emission_ds["cell_ids"].attrs["lon"] = lon
         emission_ds["cell_ids"].attrs["lat"] = lat
     else:
-        raise ValueError(f"dims must be ['cells'], ['x','y'] is not used anymore")
+        raise ValueError("dims must be ['cells'], ['x','y'] is not used anymore")
     acoustic_pdf = emission_probability(
         tag,
         emission_ds[["time", "cell_ids", "mask"]].compute(),
@@ -1291,7 +1290,7 @@ def _get_predictor_factory(
     device: str = "cpu",
 ):
     if dims == ["x", "y"]:
-        raise ValueError(f"dims must be ['cells'], ['x','y'] is not used anymore")
+        raise ValueError("dims must be ['cells'], ['x','y'] is not used anymore")
 
     elif dims == ["cells"]:
         if conv_method == "HealpixConv":
@@ -1425,7 +1424,7 @@ def optimize_pdf(
         ds = to_healpix(ds)
         as_radians = True
     else:
-        raise ValueError(f"dims must be ['cells'], ['x','y'] is not used anymore")
+        raise ValueError("dims must be ['cells'], ['x','y'] is not used anymore")
         as_radians = False
 
     max_sigma = _get_max_sigma(
@@ -1496,36 +1495,6 @@ def optimize_pdf(
                 RuntimeWarning,
             )
     return params, ds
-
-
-"""
-Version corrigée de `predict_positions` (extraite de helpers.py).
-
-Ce qui a été réintégré par rapport à votre version actuelle (qui était
-en fait votre ancien code, pas celui de la PR) :
-
-  1. Reconstruction / validation de la variable `predictor_index` sur
-     `emission` dans les 3 cas possibles :
-       - un seul sigma  -> predictor_index rempli de 0
-       - plusieurs sigmas + predictor_index déjà présent -> cast en int32
-       - plusieurs sigmas + predictor_index absent -> reconstruit depuis
-         params["sigma_indices"] (sauvegardé par optimize_pdf)
-  2. Ajout de la variable `sigma` (une valeur par pas de temps) dans
-     `states` en sortie, quand il y a plusieurs sigmas.
-
-Adapté à VOS conventions actuelles :
-  - le champ de l'estimateur reste `sigma` (singulier), pas `sigmas`
-  - conv_method / Foscat1DHealpix conservés (absents de la PR d'origine)
-  - le paramètre `ds=` que vous aviez ajouté est conservé
-  - le chargement de parameters.json via `pd.read_json(...).to_dict()[0]`
-    est conservé tel quel (au lieu du fsspec.open + json.load de la PR)
-
-A COPIER-COLLER À LA PLACE DE L'ACTUELLE `predict_positions` DANS helpers.py
-(pensez à ajouter `predictor_index = "predictor_index"` n'était pas un import,
-c'est une simple variable locale, rien à ajouter côté imports : tout ce dont
-la fonction a besoin — json/warnings/np/pd/fsspec — est déjà importé en tête
-de fichier).
-"""
 
 
 def predict_positions(
@@ -2330,9 +2299,6 @@ def stamp_parameter_indices_from_mask(*, pdf, mask, index_key: str = "predictor_
         )
 
     return pdf.assign(**{index_key: ("time", mask_arr)})
-
-
-import warnings
 
 
 def create_parameters(
