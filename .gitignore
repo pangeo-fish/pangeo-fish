@@ -50,3 +50,4 @@ pangeo_fish/modif_backward/
 extract_function_tree.py
 .vscode/settings.json
 pangeo_fish/tests/test_helpixgeo.ipynb
+notebooks/test_helpixgeo.ipynb
