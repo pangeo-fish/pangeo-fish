@@ -9,11 +9,12 @@ from pathlib import Path
 
 import copernicusmarine
 import fsspec
+import healpix_geo as hg
 import holoviews as hv
 import imageio as iio
 import intake
-import matplotlib.pyplot as plt
 import ipywidgets as ipw
+import matplotlib.pyplot as plt
 
 # import hvplot.xarray
 import movingpandas  # noqa: F401
@@ -24,6 +25,7 @@ import s3fs
 import tqdm
 import xarray as xr
 import xdggs  # noqa: F401
+from healpix_resample import BilinearResampler, CloughTocherResampler, NearestResampler
 from matplotlib.figure import Figure
 from toolz.dicttoolz import valfilter
 from toolz.functoolz import curry  # to change
@@ -40,7 +42,7 @@ from pangeo_fish.hmm.prediction import (
     Foscat1DHealpix,
     Gaussian1DHealpix,
     Gaussian2DCartesian,
-    UpDownGaussian1DHealpix
+    UpDownGaussian1DHealpix,
 )
 from pangeo_fish.io import (
     open_copernicus_catalog,
@@ -53,11 +55,8 @@ from pangeo_fish.io import (
 )
 from pangeo_fish.pdf import combine_emission_pdf, normal
 from pangeo_fish.tags import adapt_model_time, reshape_by_bins, to_time_slice
-from pangeo_fish.utils import temporal_resolution, haversine_distance
+from pangeo_fish.utils import haversine_distance, temporal_resolution
 from pangeo_fish.visualization import filter_by_states, plot_map, render_frame
-
-from healpix_resample import NearestResampler, CloughTocherResampler, BilinearResampler
-import healpix_geo as hg
 
 __all__ = [
     "to_healpix",
@@ -373,7 +372,7 @@ def _open_copernicus_model(
     time_slice: slice,
     tag_log: xr.Dataset = None,
     Username=None,
-    Password=None
+    Password=None,
 ):
     """Open a Copernicus Marine dataset and merge it with its static fields.
 
@@ -419,7 +418,7 @@ def _open_copernicus_model(
         start_datetime=start_datetime,
         end_datetime=end_datetime,
         username=Username,
-        password=Password
+        password=Password,
     )
     static_var = copernicusmarine.open_dataset(
         dataset_id=static_name,
@@ -429,7 +428,7 @@ def _open_copernicus_model(
         minimum_latitude=bbox["latitude"][0],
         maximum_latitude=bbox["latitude"][1],
         username=Username,
-        password=Password
+        password=Password,
     )
     static_var = static_var.assign_coords(longitude=ds_thetao_zos["longitude"].values)
     ds_all = xr.merge([ds_thetao_zos, static_var], compat="no_conflicts")
@@ -509,7 +508,7 @@ def load_model(
             time_slice=time_slice,
             tag_log=tag_log,
             Username=Username,
-            Password=Password
+            Password=Password,
         )
     elif uri.endswith(".yaml"):
         model = _open_intake_catalog(
@@ -660,12 +659,11 @@ def open_diff_dataset(*, target_root: str, storage_options: dict, **kwargs):
     return ds
 
 
-
 def regrid_dataset_hpresample(
     *,
     ds: xr.Dataset,
     refinement_level: int,
-    min_vertices=1, 
+    min_vertices=1,
     ellipsoid="sphere",
     dims: list[str] = ["cells"],
     plot=False,
@@ -778,11 +776,17 @@ def regrid_dataset_hpresample(
                 .transpose("time", "yi", "xi")
                 .values.reshape(ds.sizes["time"], -1)[:, valid_src]
             )
-            new_ds[name] = (("time", "cells"), to_full(resampler_ct.resample(variable).cell_data))
+            new_ds[name] = (
+                ("time", "cells"),
+                to_full(resampler_ct.resample(variable).cell_data),
+            )
 
         elif len(da.dims) == 2:
             variable = ds[name].transpose("yi", "xi").values.ravel()[valid_src]
-            new_ds[name] = (("cells",), to_full(resampler_ct.resample(variable).cell_data))
+            new_ds[name] = (
+                ("cells",),
+                to_full(resampler_ct.resample(variable).cell_data),
+            )
 
     new_ds["cell_ids"].attrs.update(
         indexing_scheme="nested",
@@ -799,8 +803,6 @@ def regrid_dataset_hpresample(
     if save:
         print("you can save outside of the function")
     return new_ds
-
-
 
 
 def regrid_dataset(
@@ -955,17 +957,16 @@ def compute_emission_pdf(
     initial_position = events_ds.sel(event_name="release")
     final_position = events_ds.sel(event_name="fish_death")
 
-
     initial_probability = distrib.healpix.normal_at(
         grid, pos=initial_position, sigma=initial_std
-        )
+    )
 
     if final_position[["longitude", "latitude"]].to_dataarray().isnull().all():
         final_probability = None
     else:
         final_probability = distrib.healpix.normal_at(
-                grid, pos=final_position, sigma=recapture_std
-            )
+            grid, pos=final_position, sigma=recapture_std
+        )
 
     emission_pdf = (
         normal(diff_ds["diff"], mean=0, std=differences_std, dims=dims)
@@ -1217,7 +1218,7 @@ def normalize_pdf(
     plot : bool, default: False
         Whether to plot the sum of the distributions along the time dimension.
     exclude : what you don't want to be considered as a pdf it will be ignored by the merging
-    excluded_pdf : tuple of str, pdf contained in ds that you don't want to use for the normalization 
+    excluded_pdf : tuple of str, pdf contained in ds that you don't want to use for the normalization
 
     Returns
     -------
@@ -1233,8 +1234,8 @@ def normalize_pdf(
         warnings.warn(
             f'The variable "pdf" in `ds` sums to 0 for {num_times} times.', UserWarning
         )
-    total_exclude=exclude+excluded_pdf if excluded_pdf is not None else exclude
-    normalized = ds.pipe(combine_emission_pdf,exclude=total_exclude).chunk(chunks)
+    total_exclude = exclude + excluded_pdf if excluded_pdf is not None else exclude
+    normalized = ds.pipe(combine_emission_pdf, exclude=total_exclude).chunk(chunks)
 
     # optional spatial transposition
     if (dims is not None) and ("cells" not in dims):
@@ -1272,16 +1273,22 @@ def normalize_pdf(
     # we get rid of the pdf in excluded-pdf (or they will stay in normalized)
     if excluded_pdf is not None:
         for item in excluded_pdf:
-            normalized=normalized.drop_vars(item)
-    
-    normalized=normalized.rename({"pdf_normalized": "pdf"})
-    warnings.warn(f"you decided to normalize the pdf without: {excluded_pdf}, if you want to include them, change excluded_pdf ", UserWarning)
+            normalized = normalized.drop_vars(item)
+
+    normalized = normalized.rename({"pdf_normalized": "pdf"})
+    warnings.warn(
+        f"you decided to normalize the pdf without: {excluded_pdf}, if you want to include them, change excluded_pdf ",
+        UserWarning,
+    )
     return normalized, figure
 
 
-
 def _get_predictor_factory(
-    ds: xr.Dataset, truncate: float | None, dims: list[str], conv_method: str, device: str ="cpu"
+    ds: xr.Dataset,
+    truncate: float | None,
+    dims: list[str],
+    conv_method: str,
+    device: str = "cpu",
 ):
     if dims == ["x", "y"]:
         raise ValueError(f"dims must be ['cells'], ['x','y'] is not used anymore")
@@ -1302,11 +1309,11 @@ def _get_predictor_factory(
                 optimize_convolution=True,
             )
         elif conv_method == "LargeHealpixConv":
-                predictor = curry(
+            predictor = curry(
                 UpDownGaussian1DHealpix,
                 cell_ids=ds["cell_ids"].data,
                 grid_info=ds.dggs.grid_info,
-                device=device
+                device=device,
             )
         elif conv_method == "FoscatConv":
             predictor = curry(
@@ -1425,7 +1432,7 @@ def optimize_pdf(
         ds, earth_radius, adjustment_factor, maximum_speed, as_radians
     )
     if final:
-        max_sigma=0.01
+        max_sigma = 0.01
     predictor_factory = _get_predictor_factory(
         ds=ds, truncate=truncate, dims=dims, conv_method=conv_method
     )
@@ -1489,6 +1496,7 @@ def optimize_pdf(
                 RuntimeWarning,
             )
     return params, ds
+
 
 """
 Version corrigée de `predict_positions` (extraite de helpers.py).
@@ -1670,7 +1678,7 @@ def predict_positions(
             emission, truncate=truncate, dims=["x", "y"]
         )
     elif "UpDownGaussian1DHealpix" in cls_name:
-                predictor_factory = _get_predictor_factory(
+        predictor_factory = _get_predictor_factory(
             emission, truncate=truncate, conv_method="LargeHealpixConv", dims=["cells"]
         )
 
@@ -1685,7 +1693,9 @@ def predict_positions(
     else:
         raise RuntimeError("Could not infer predictor's class from the `.json` file.")
 
-    optimized = EagerEstimator(sigma=params["sigma"], predictor_factory=predictor_factory)
+    optimized = EagerEstimator(
+        sigma=params["sigma"], predictor_factory=predictor_factory
+    )
 
     states = optimized.predict_proba(emission)  # type: xr.DataArray
     states = (
@@ -2059,7 +2069,10 @@ def render_distributions(
         pbar.close()
     return video_fp
 
-def multiplot_healpix(datasets: list[tuple[xr.Dataset, list[str]]],refinement_level : int = 8):
+
+def multiplot_healpix(
+    datasets: list[tuple[xr.Dataset, list[str]]], refinement_level: int = 8
+):
     """
     Exemple: [(ds1, ["pdf"]), (ds2, ["pdf", "temp"])]
     """
@@ -2069,15 +2082,20 @@ def multiplot_healpix(datasets: list[tuple[xr.Dataset, list[str]]],refinement_le
             plot = (
                 ds[var_name]
                 .compute()
-                .dggs.decode({"grid_name": "healpix", "level": refinement_level, "indexing_scheme": "nested"})
+                .dggs.decode(
+                    {
+                        "grid_name": "healpix",
+                        "level": refinement_level,
+                        "indexing_scheme": "nested",
+                    }
+                )
                 .dggs.explore(alpha=0.5)
             )
             plots.append(plot)
     return plots
 
 
-
-def multi_map_with_synced_sliders(maps, width='300px', height='400px'):
+def multi_map_with_synced_sliders(maps, width="300px", height="400px"):
     """
     Affiche plusieurs maps côte à côte avec leur slider 'time' synchronisé.
 
@@ -2100,17 +2118,18 @@ def multi_map_with_synced_sliders(maps, width='300px', height='400px'):
         m.layout.height = height
 
     # 2. Synchroniser tous les sliders 'time' entre eux (lié en chaîne au 1er)
-    ref_slider = maps[0].sliders['time']
+    ref_slider = maps[0].sliders["time"]
     for m in maps[1:]:
-        ipw.jslink((ref_slider, "value"), (m.sliders['time'], "value"))
+        ipw.jslink((ref_slider, "value"), (m.sliders["time"], "value"))
 
     # 3. Construire chaque bloc (map + slider en dessous)
     def map_with_slider_below(m):
-        return ipw.VBox([m.map, m.sliders['time']])
+        return ipw.VBox([m.map, m.sliders["time"]])
 
     blocks = [map_with_slider_below(m) for m in maps]
 
     return ipw.HBox(blocks)
+
 
 def _find_time_intervals(df: pd.DataFrame, min_time: pd.Timedelta, min_dist: float):
     def _is_far_enough(
@@ -2205,6 +2224,7 @@ def compute_detection_time_intervals(
     interval_times = _find_time_intervals(detection_times_df, min_time, min_dist)
     return interval_times
 
+
 def _time_indices_in_ds(ds: xr.Dataset, times: list[pd.Timestamp]):
     """Return the time indices in ``ds`` that split ``ds`` according to the list of timestamps ``times``."""
     indices = []
@@ -2288,6 +2308,7 @@ def _compute_sigma_var(indices: list[list[int]], values: list[float]):
     assert all([s is not None for s in var_list])
     return np.array(var_list)
 
+
 def stamp_parameter_indices_from_mask(*, pdf, mask, index_key: str = "predictor_index"):
     """
     Ajoute un index de paramètre (0/1) basé directement sur un masque temporel binaire.
@@ -2310,7 +2331,10 @@ def stamp_parameter_indices_from_mask(*, pdf, mask, index_key: str = "predictor_
 
     return pdf.assign(**{index_key: ("time", mask_arr)})
 
+
 import warnings
+
+
 def create_parameters(
     sigma,
     sigma_indices=None,
@@ -2350,8 +2374,12 @@ def create_parameters(
     dict
         Parameters dictionary.
     """
-    if class_name not in ["Foscat1DHealpix","UpDownGaussian1DHealpix","Gaussian1DHealpix"]:
-            raise ValueError(
+    if class_name not in [
+        "Foscat1DHealpix",
+        "UpDownGaussian1DHealpix",
+        "Gaussian1DHealpix",
+    ]:
+        raise ValueError(
             f'Unknown class_name "{class_name}". Expected "Gaussian1DHealpix", "Foscat1DHealpix" or "UpDownGaussian1DHealpix".'
         )
     if predictor_factory is None:
@@ -2400,15 +2428,16 @@ def create_parameters(
     return params
 
 
-def test_parameter(emission: xr.Dataset = None,
-                sigma_tested: list = [0.004],
-                   sigma_indices: list[list[int]] = None,
-                   Conv_method: str = "Foscat1DHealpix",
-                   target_root: str = ".",
-                   saving_root: str="/hand_sigma",
-                   default_chunk_dims=None,
-                   storage_options=None
-                   ):
+def test_parameter(
+    emission: xr.Dataset = None,
+    sigma_tested: list = [0.004],
+    sigma_indices: list[list[int]] = None,
+    Conv_method: str = "Foscat1DHealpix",
+    target_root: str = ".",
+    saving_root: str = "/hand_sigma",
+    default_chunk_dims=None,
+    storage_options=None,
+):
     """
     Load an emission dataset, save it under a dedicated sub-folder, and
     generate the corresponding parameters.json for a given set of sigma
@@ -2453,13 +2482,17 @@ def test_parameter(emission: xr.Dataset = None,
         saved as `{target_root}{saving_root}/parameters.json`.
     """
     # Open the distributions
-    emission = xr.open_dataset(
-        f"{target_root}/combined.zarr",
-        engine="zarr",
-        chunks=default_chunk_dims,
-        inline_array=True,
-        storage_options=storage_options,
-    ) if emission is None else emission
+    emission = (
+        xr.open_dataset(
+            f"{target_root}/combined.zarr",
+            engine="zarr",
+            chunks=default_chunk_dims,
+            inline_array=True,
+            storage_options=storage_options,
+        )
+        if emission is None
+        else emission
+    )
 
     # Create a new folder
     emission.to_zarr(
@@ -2467,14 +2500,14 @@ def test_parameter(emission: xr.Dataset = None,
         mode="w",
         consolidated=True,
         storage_options=storage_options,
-        zarr_format=2
+        zarr_format=2,
     )
     params = create_parameters(
-    sigma=sigma_tested,
-    sigma_indices=sigma_indices,
-    class_name=Conv_method,
-    target_root= f"{target_root}{saving_root}",#stayconsistent here
-    save_parameters=True,
-    storage_options=storage_options
+        sigma=sigma_tested,
+        sigma_indices=sigma_indices,
+        class_name=Conv_method,
+        target_root=f"{target_root}{saving_root}",  # stayconsistent here
+        save_parameters=True,
+        storage_options=storage_options,
     )
-    return (params)
+    return params

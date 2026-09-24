@@ -361,11 +361,11 @@ def tide_pdf(tide_behav, data):
     ds_pdf = ds_pdf.rename({"time": "instant"})
     ds_pdf = ds_pdf.rename({"datetime": "time"}).set_index(time="time")
     ds_pdf = ds_pdf.rename({"ocean_mask": "mask"})
-    return(ds_pdf)
+    return ds_pdf
 
 
 def plot_tide(tag_test):
-    #function that shows where tide have been detected should be implemented here
+    # function that shows where tide have been detected should be implemented here
     # Dataset : ds
     time = tag_test["time"].values
     depth = tag_test["depth"].values
@@ -391,4 +391,3 @@ def plot_tide(tag_test):
     plt.legend()
     plt.tight_layout()
     plt.show()
-        

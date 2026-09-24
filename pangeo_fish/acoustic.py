@@ -130,10 +130,12 @@ def buffer_points_cells(
         ## replacement
         radius_deg = np.degrees(radius)
         depth = int(np.log2(nside))
-        vector_ang=hpg.cartesian_to_lonlat(vector[0],vector[1],vector[2],ellipsoid="sphere")
-        vector_ang=[vector_ang[0][0],vector_ang[1][0]]
-        selected_cells,_,_ = hpg.nested.cone_coverage(
-            vector_ang, radius_deg, depth, delta_depth=0, ellipsoid='sphere', flat=True
+        vector_ang = hpg.cartesian_to_lonlat(
+            vector[0], vector[1], vector[2], ellipsoid="sphere"
+        )
+        vector_ang = [vector_ang[0][0], vector_ang[1][0]]
+        selected_cells, _, _ = hpg.nested.cone_coverage(
+            vector_ang, radius_deg, depth, delta_depth=0, ellipsoid="sphere", flat=True
         )
         return np.isin(cell_ids, selected_cells, assume_unique=True)
 

@@ -1,7 +1,7 @@
 import warnings
 
-import healpy as hp
 import healpix_geo.nested as hpg_n
+import healpy as hp
 import numpy as np
 import xarray as xr
 from numba import njit, prange
@@ -75,9 +75,11 @@ def compute_healpix_histogram_region_bin_size(
 
         hidx = hp.ang2pix(nside, lon_blk, lat_blk, lonlat=True, nest=nest)
         depth = int(np.log2(nside))
-        hidx_2 = hpg_n.lonlat_to_healpix(lon_blk,lat_blk,depth=depth,ellipsoid = ellipsoid)
+        hidx_2 = hpg_n.lonlat_to_healpix(
+            lon_blk, lat_blk, depth=depth, ellipsoid=ellipsoid
+        )
         print("TEST")
-        print(sum(abs(hidx-hidx_2)))
+        print(sum(abs(hidx - hidx_2)))
         used_cells.update(np.unique(hidx))
 
     used_cells = np.array(sorted(used_cells), dtype=np.int64)
@@ -108,8 +110,8 @@ def compute_healpix_histogram_region_bin_size(
 
         hidx = hp.ang2pix(nside, lon_v, lat_v, lonlat=True, nest=nest)
         depth = int(np.log2(nside))
-        hidx_2 = hpg_n.lonlat_to_healpix(lon_v,lat_v,depth=depth,ellipsoid = ellipsoid)
-        print(sum(abs(hidx-hidx_2)))
+        hidx_2 = hpg_n.lonlat_to_healpix(lon_v, lat_v, depth=depth, ellipsoid=ellipsoid)
+        print(sum(abs(hidx - hidx_2)))
         # --- binning basé sur depth_bin_size ---
         # profondeur positive = -elev_v (elev is negative for bathy)
         depth_val = (-elev_v - depth_offset) / float(depth_bin_size)
@@ -157,11 +159,11 @@ def compute_healpix_histogram_region_bin_size(
 
     cell_ids = ds_out.cell_ids.values
     lon, lat = hp.pix2ang(nside, cell_ids, nest=True, lonlat=True)
-    depth=int(np.log2(nside))
+    depth = int(np.log2(nside))
     lon_2, lat_2 = hpg_n.healpix_to_lonlat(cell_ids, depth, ellipsoid=ellipsoid)
     print("TEST 3")
-    print(sum(abs(lon-lon_2)))
-    print(sum(abs(lat_2-lat)))
+    print(sum(abs(lon - lon_2)))
+    print(sum(abs(lat_2 - lat)))
     ds_out = ds_out.assign_coords(
         {"latitude": ("cells", lat), "longitude": ("cells", lon)}
     )
@@ -253,12 +255,14 @@ def compute_pdf_bathy_batch_numba(ds_chunk, reshaped_tag, copernicus_chunk):
     )
 
 
-
 def batch_compute_pdf_bathy(ds_lr, reshaped_tag, target_root: str, batch_size=50000):
-    pdf_chunks=[]
+    pdf_chunks = []
     reference = xr.open_dataset(
-        f"{target_root}/diff-regridded.zarr", engine="zarr", chunks={},
-        inline_array=True, storage_options=None,
+        f"{target_root}/diff-regridded.zarr",
+        engine="zarr",
+        chunks={},
+        inline_array=True,
+        storage_options=None,
     )
     common_ids = np.intersect1d(reference.cell_ids.values, ds_lr.cell_ids.values)
 
@@ -270,12 +274,17 @@ def batch_compute_pdf_bathy(ds_lr, reshaped_tag, target_root: str, batch_size=50
     reference = reference.swap_dims({"cell_ids": "cells"})
 
     # diagnostic (à retirer ensuite)
-    print(len(reference.cells), len(common_ids),
-          np.array_equal(reference.cells.values, common_ids))
+    print(
+        len(reference.cells),
+        len(common_ids),
+        np.array_equal(reference.cells.values, common_ids),
+    )
 
-    reference = reference.sel(cells=common_ids)   # la correction
+    reference = reference.sel(cells=common_ids)  # la correction
 
-    assert np.array_equal(histogram_ds_subset_model.cells.values, reference.cells.values)
+    assert np.array_equal(
+        histogram_ds_subset_model.cells.values, reference.cells.values
+    )
 
     # Loop over batches
     n_cells = histogram_ds_subset_model.sizes["cells"]

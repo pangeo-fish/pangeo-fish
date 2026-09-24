@@ -5,9 +5,9 @@ from dataclasses import dataclass, field
 from functools import partial
 
 import dask
-import healpy as hp
-import healpix_geo as hpg
 import healpix_analyse.healpix_interp as hpa_hpi
+import healpix_geo as hpg
+import healpy as hp
 import numba
 import numpy as np
 import sparse
@@ -70,10 +70,9 @@ def astronomic_to_cartesian(theta, phi, dim="receiver_id"):
         input_core_dims=[[dim], [dim]],
         output_core_dims=[[dim], [dim], [dim]],
     )
-    earth_radius = 6371e3 
+    earth_radius = 6371e3
     cartesian = (
-        xr.concat([x, y, z], dim="cartesian")
-        .assign_coords(cartesian=["x", "y", "z"])
+        xr.concat([x, y, z], dim="cartesian").assign_coords(cartesian=["x", "y", "z"])
         / earth_radius
     )
     return cartesian.assign_coords(cartesian=["x", "y", "z"])
@@ -98,14 +97,14 @@ def astronomic_to_cell_ids(nside, phi, theta, ellipsoid="sphere"):
     depth = int(np.log2(nside))
     print(depth)
     ellipsoid = ellipsoid
-    
+
     cell_ids = xr.apply_ufunc(
         hpg.nested.lonlat_to_healpix,
         phi_,
-        90-theta_,        
+        90 - theta_,
         depth,
-        kwargs={"ellipsoid":ellipsoid},
-        input_core_dims=[["x", "y"], ["x", "y"],[]],
+        kwargs={"ellipsoid": ellipsoid},
+        input_core_dims=[["x", "y"], ["x", "y"], []],
         output_core_dims=[["x", "y"]],
     )
 
@@ -130,9 +129,9 @@ def _compute_indices(nside):
     return xx, yy
 
 
-def _compute_coords(nside,ellipsoid="sphere"):
+def _compute_coords(nside, ellipsoid="sphere"):
     lidx = np.arange(nside**2)
-    depth=int(np.log2(nside))
+    depth = int(np.log2(nside))
     lon, lat = hpg.nested.healpix_to_lonlat(lidx, depth, ellipsoid=ellipsoid)
     lon = -lon
     return lat, lon, lidx
@@ -198,6 +197,7 @@ def concat(iterable):
 def unique(iterable):
     return list(dict.fromkeys(iterable))
 
+
 def _get_interp_weights_geo(lon, lat, depth, ellipsoid):
     lon = np.asarray(lon)
     lat = np.asarray(lat)
@@ -213,7 +213,10 @@ def _get_interp_weights_geo(lon, lat, depth, ellipsoid):
     weights = np.moveaxis(weights, -1, 0)
     return pix, weights
 
-def _compute_weights(source_lat, source_lon, *, nside, rot={"lat": 0, "lon": 0},ellipsoid = "sphere"):
+
+def _compute_weights(
+    source_lat, source_lon, *, nside, rot={"lat": 0, "lon": 0}, ellipsoid="sphere"
+):
     theta = (90.0 - (source_lat - rot["lat"])) / 180.0 * np.pi
     phi = -(source_lon - rot["lon"]) / 180.0 * np.pi
 
@@ -232,7 +235,7 @@ def _compute_weights(source_lat, source_lon, *, nside, rot={"lat": 0, "lon": 0},
     )
     pix -= nside**2 * (np.min(pix) // nside**2)
 
-    depth=int(np.log2(nside))
+    depth = int(np.log2(nside))
     lon_for_geo = -(source_lon - rot["lon"])
     lat_for_geo = source_lat - rot["lat"]
 
@@ -482,10 +485,12 @@ def buffer_points(
         ## replacement
         radius_deg = np.degrees(radius)
         depth = int(np.log2(nside))
-        vector_ang=hpg.cartesian_to_lonlat(vector[0],vector[1],vector[2],ellipsoid="sphere")
-        vector_ang=[vector_ang[0][0],vector_ang[1][0]]
-        selected_cells,_,_ = hpg.nested.cone_coverage(
-            vector_ang, radius_deg, depth, delta_depth=0, ellipsoid='sphere', flat=True
+        vector_ang = hpg.cartesian_to_lonlat(
+            vector[0], vector[1], vector[2], ellipsoid="sphere"
+        )
+        vector_ang = [vector_ang[0][0], vector_ang[1][0]]
+        selected_cells, _, _ = hpg.nested.cone_coverage(
+            vector_ang, radius_deg, depth, delta_depth=0, ellipsoid="sphere", flat=True
         )
         return np.isin(cell_ids, selected_cells, assume_unique=True)
 
