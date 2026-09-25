@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 from functools import partial
 
 import dask
+import healpix_analyse.healpix_interp as hpa_hpi
+import healpix_geo as hpg
 import healpy as hp
 import numba
 import numpy as np
@@ -60,18 +62,23 @@ def astronomic_to_cartesian(theta, phi, dim="receiver_id"):
     healpy.ang2vec
     """
     # TODO: try to determine `dim` automatically
-    cartesian = xr.apply_ufunc(
-        hp.ang2vec,
-        np.deg2rad(theta),
-        np.deg2rad(phi),
+    x, y, z = xr.apply_ufunc(
+        hpg.lonlat_to_cartesian,
+        phi,
+        90 - theta,
+        kwargs={"ellipsoid": "sphere"},
         input_core_dims=[[dim], [dim]],
-        output_core_dims=[[dim, "cartesian"]],
+        output_core_dims=[[dim], [dim], [dim]],
     )
-
+    earth_radius = 6371e3
+    cartesian = (
+        xr.concat([x, y, z], dim="cartesian").assign_coords(cartesian=["x", "y", "z"])
+        / earth_radius
+    )
     return cartesian.assign_coords(cartesian=["x", "y", "z"])
 
 
-def astronomic_to_cell_ids(nside, phi, theta):
+def astronomic_to_cell_ids(nside, phi, theta, ellipsoid="sphere"):
     """Compute cell ids from astronomic coordinates
 
     Parameters
@@ -87,14 +94,17 @@ def astronomic_to_cell_ids(nside, phi, theta):
         The computed cell ids
     """
     phi_, theta_ = dask.compute(phi, theta)
+    depth = int(np.log2(nside))
+    print(depth)
+    ellipsoid = ellipsoid
 
     cell_ids = xr.apply_ufunc(
-        hp.ang2pix,
-        nside,
-        np.deg2rad(theta_),
-        np.deg2rad(phi_),
-        kwargs={"nest": True},
-        input_core_dims=[[], ["x", "y"], ["x", "y"]],
+        hpg.nested.lonlat_to_healpix,
+        phi_,
+        90 - theta_,
+        depth,
+        kwargs={"ellipsoid": ellipsoid},
+        input_core_dims=[["x", "y"], ["x", "y"], []],
         output_core_dims=[["x", "y"]],
     )
 
@@ -119,13 +129,11 @@ def _compute_indices(nside):
     return xx, yy
 
 
-def _compute_coords(nside):
+def _compute_coords(nside, ellipsoid="sphere"):
     lidx = np.arange(nside**2)
-    theta, phi = hp.pix2ang(nside, lidx, nest=True)
-
-    lat = 90.0 - np.rad2deg(theta)
-    lon = -np.rad2deg(phi)
-
+    depth = int(np.log2(nside))
+    lon, lat = hpg.nested.healpix_to_lonlat(lidx, depth, ellipsoid=ellipsoid)
+    lon = -lon
     return lat, lon, lidx
 
 
@@ -190,7 +198,25 @@ def unique(iterable):
     return list(dict.fromkeys(iterable))
 
 
-def _compute_weights(source_lat, source_lon, *, nside, rot={"lat": 0, "lon": 0}):
+def _get_interp_weights_geo(lon, lat, depth, ellipsoid):
+    lon = np.asarray(lon)
+    lat = np.asarray(lat)
+    shape = lon.shape  # forme d'origine (peut être () pour un scalaire)
+
+    pix, weights = hpa_hpi.get_interp_weights(
+        lon.ravel(), lat.ravel(), depth, ellipsoid=ellipsoid
+    )
+    # format de donnée
+    pix = pix.reshape(shape + (4,))
+    weights = weights.reshape(shape + (4,))
+    pix = np.moveaxis(pix, -1, 0)
+    weights = np.moveaxis(weights, -1, 0)
+    return pix, weights
+
+
+def _compute_weights(
+    source_lat, source_lon, *, nside, rot={"lat": 0, "lon": 0}, ellipsoid="sphere"
+):
     theta = (90.0 - (source_lat - rot["lat"])) / 180.0 * np.pi
     phi = -(source_lon - rot["lon"]) / 180.0 * np.pi
 
@@ -209,6 +235,24 @@ def _compute_weights(source_lat, source_lon, *, nside, rot={"lat": 0, "lon": 0})
     )
     pix -= nside**2 * (np.min(pix) // nside**2)
 
+    depth = int(np.log2(nside))
+    lon_for_geo = -(source_lon - rot["lon"])
+    lat_for_geo = source_lat - rot["lat"]
+
+    pix_2, weights_2 = xr.apply_ufunc(
+        partial(_get_interp_weights_geo, depth=depth, ellipsoid=ellipsoid),
+        lon_for_geo,
+        lat_for_geo,
+        input_core_dims=[input_core_dims, input_core_dims],
+        output_core_dims=[output_core_dims, output_core_dims],
+        dask="parallelized",
+        dask_gufunc_kwargs={"output_sizes": {new_dim: 4}},
+    )
+    pix_2 -= nside**2 * (np.min(pix_2) // nside**2)
+    print(pix)
+    print(pix_2)
+    print(weights)
+    print(weights_2)
     return pix, weights
 
 
@@ -431,9 +475,22 @@ def buffer_points(
     pangeo_fish.healpy.astronomic_to_cartesian
     """
 
+    # def _buffer_masks(cell_ids, vector, nside, radius, factor=4, intersect=False):
+    #     selected_cells = hp.query_disc(
+    #         nside, vector, radius, nest=True, fact=factor, inclusive=intersect
+    #     )
+    #     return np.isin(cell_ids, selected_cells, assume_unique=True)
+
     def _buffer_masks(cell_ids, vector, nside, radius, factor=4, intersect=False):
-        selected_cells = hp.query_disc(
-            nside, vector, radius, nest=True, fact=factor, inclusive=intersect
+        ## replacement
+        radius_deg = np.degrees(radius)
+        depth = int(np.log2(nside))
+        vector_ang = hpg.cartesian_to_lonlat(
+            vector[0], vector[1], vector[2], ellipsoid="sphere"
+        )
+        vector_ang = [vector_ang[0][0], vector_ang[1][0]]
+        selected_cells, _, _ = hpg.nested.cone_coverage(
+            vector_ang, radius_deg, depth, delta_depth=0, ellipsoid="sphere", flat=True
         )
         return np.isin(cell_ids, selected_cells, assume_unique=True)
 

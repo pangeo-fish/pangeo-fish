@@ -33,7 +33,9 @@ dependencies = [
   "numcodecs==0.15.1",
   "h5netcdf",
   "intake",
-  "intake-xarray",
+  "intake-xarray==0.7.0",
+  "aiohttp==3.9.5",
+  "aiobotocore==2.19.0",
   # geographic & HEALPix
   "healpy",
   "cartopy",
@@ -46,6 +48,10 @@ dependencies = [
   "cf_xarray>=0.10.4",
   "pint",
   "pint-xarray",
+  "eccodes>=2.35.0",
+  "cdshealpix",
+  "dask-image",
+  "dask-hpcconfig",
   # distributed / parallel
   "dask",
   "distributed",
@@ -54,6 +60,8 @@ dependencies = [
   "matplotlib",
   "hvplot",
   "holoviews",
+  "geoviews",
+  "altair",
   "cmocean",
   "imageio[ffmpeg]",
   # CLI / progress
@@ -62,6 +70,11 @@ dependencies = [
   "tqdm",
   # Copernicus Marine Service client (default model loader)
   "copernicusmarine>=2.3,<2.4",
+  # deep learning (CPU-only usage in notebooks via CUDA_VISIBLE_DEVICES="")
+  "torch==2.13.0",
+  # not yet released on PyPI at the version this project needs
+  "healpix-analyse @ git+https://github.com/GRID4EARTH/healpix-analyse.git",
+  "healpix-resample @ git+https://github.com/GRID4EARTH/healpix-resample.git",
 ]
 dynamic = ["version"]
 

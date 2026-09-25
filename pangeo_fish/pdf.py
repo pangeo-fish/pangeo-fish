@@ -71,4 +71,5 @@ def combine_emission_pdf(raw, exclude=("initial", "final", "mask")):
         pdf[{"time": -1}] = pdf[{"time": -1}] * raw["final"]
 
     spatial_dims = _detect_spatial_dims(raw)
-    return xr.merge([raw[exclude], pdf.pipe(normalize, spatial_dims)])
+    normalized = pdf.pipe(normalize, spatial_dims).rename("pdf_normalized")
+    return xr.merge([raw[exclude], normalized])
