@@ -51,3 +51,4 @@ extract_function_tree.py
 .vscode/settings.json
 pangeo_fish/tests/test_helpixgeo.ipynb
 notebooks/test_helpixgeo.ipynb
+Subset_NS_EC_forTMD30_21_2_2025.nc
