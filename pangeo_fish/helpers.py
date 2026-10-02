@@ -22,11 +22,13 @@ import numpy as np
 import pandas as pd
 import pint
 import s3fs
+import torch
 import tqdm
 import xarray as xr
 import xdggs  # noqa: F401
 from healpix_resample import BilinearResampler, CloughTocherResampler
 from matplotlib.figure import Figure
+from scipy import ndimage
 from toolz.dicttoolz import valfilter
 from toolz.functoolz import curry  # to change
 from xhealpixify import HealpyGridInfo, HealpyRegridder
@@ -56,9 +58,6 @@ from pangeo_fish.pdf import combine_emission_pdf, normal
 from pangeo_fish.tags import adapt_model_time, reshape_by_bins, to_time_slice
 from pangeo_fish.utils import haversine_distance, temporal_resolution
 from pangeo_fish.visualization import filter_by_states, plot_map, render_frame
-from scipy import ndimage
-import torch
-
 
 __all__ = [
     "to_healpix",
@@ -198,7 +197,10 @@ def to_healpix(ds: xr.Dataset) -> xr.Dataset:
 def reshape_to_2d(ds: xr.Dataset):
     grid = HealpyGridInfo(level=ds.dggs.grid_info.level)
     return grid.to_2d(ds)
+
+
 # Replace reshape_to_2d
+
 
 # --- utilitaires ------------------------------------------------------------
 def _np(x):
@@ -219,8 +221,17 @@ def fill_nearest(a, max_dist=None):
 
 # --- conversion HEALPix -> grille 2D ---------------------------------------
 
-def healpix_to_grid(da, resampler, shape, coords, max_dist=None,
-                    batch=16, min_weight=1e-3, fill_inside=True):
+
+def healpix_to_grid(
+    da,
+    resampler,
+    shape,
+    coords,
+    max_dist=None,
+    batch=16,
+    min_weight=1e-3,
+    fill_inside=True,
+):
     """DataArray (..., cells) sur HEALPix -> DataArray (..., latitude, longitude).
 
     Le masque NaN est celui de la cellule HEALPix la plus proche de chaque pixel.
@@ -234,7 +245,9 @@ def healpix_to_grid(da, resampler, shape, coords, max_dist=None,
         if "cells" in da.dims:
             da = da.swap_dims({"cells": "cell_ids"})
         cell_dim = "cell_ids"
-    da = da.reindex({cell_dim: cells})  # cellules absentes des données -> NaN (donc masquées)
+    da = da.reindex(
+        {cell_dim: cells}
+    )  # cellules absentes des données -> NaN (donc masquées)
 
     # 2) cellules en dernier
     da = da.transpose(..., cell_dim)
@@ -252,15 +265,15 @@ def healpix_to_grid(da, resampler, shape, coords, max_dist=None,
     # 3) inversion par paquets
     out = np.empty((vals.shape[0], *shape), dtype="float32")
     for i in range(0, vals.shape[0], batch):
-        v = torch.as_tensor(vals[i:i + batch])
-        m = torch.as_tensor(valid[i:i + batch].astype("float32"))
+        v = torch.as_tensor(vals[i : i + batch])
+        m = torch.as_tensor(valid[i : i + batch].astype("float32"))
         num = _np(resampler.invert(v))
         den = _np(resampler.invert(m))
 
         res = np.where(den > min_weight, num / np.maximum(den, min_weight), np.nan)
 
         # masque d'origine : pixel valide si sa cellule la plus proche est valide
-        pix_valid = valid[i:i + batch][:, hi0] & has_cell[None, :]
+        pix_valid = valid[i : i + batch][:, hi0] & has_cell[None, :]
         res = res.reshape(-1, *shape)
         pix_valid = pix_valid.reshape(-1, *shape)
 
@@ -268,7 +281,7 @@ def healpix_to_grid(da, resampler, shape, coords, max_dist=None,
             for k in range(res.shape[0]):
                 res[k] = fill_nearest(np.where(pix_valid[k], res[k], np.nan), max_dist)
         res[~pix_valid] = np.nan
-        out[i:i + batch] = res
+        out[i : i + batch] = res
 
     new_shape = [da.sizes[d] for d in batch_dims] + list(shape)
     return xr.DataArray(
@@ -277,6 +290,8 @@ def healpix_to_grid(da, resampler, shape, coords, max_dist=None,
         coords={**{d: da[d] for d in batch_dims if d in da.coords}, **coords},
         name=da.name,
     )
+
+
 def dataset_to_2d(ds, resampler, shape, coords, **kw):
     """Applique la conversion à toutes les variables qui ont une dimension cellules."""
     out = {
@@ -895,7 +910,7 @@ def regrid_dataset_hpresample(
         "resolution_2D": list(ds.sizes.values())[0:2],
         "refinement_level": refinement_level,
         "ellipsoid": ellipsoid,
-        }
+    }
 
 
 def regrid_dataset(
@@ -1841,7 +1856,7 @@ def plot_trajectories(
     plots = [
         traj.hvplot(
             c="speed",
-            tiles="OSM",  #"CartoLight",
+            tiles="OSM",  # "CartoLight",
             title=traj.id,
             cmap="cmo.speed",
             width=300,
