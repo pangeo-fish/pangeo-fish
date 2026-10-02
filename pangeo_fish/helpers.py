@@ -56,6 +56,9 @@ from pangeo_fish.pdf import combine_emission_pdf, normal
 from pangeo_fish.tags import adapt_model_time, reshape_by_bins, to_time_slice
 from pangeo_fish.utils import haversine_distance, temporal_resolution
 from pangeo_fish.visualization import filter_by_states, plot_map, render_frame
+from scipy import ndimage
+import torch
+
 
 __all__ = [
     "to_healpix",
@@ -195,6 +198,93 @@ def to_healpix(ds: xr.Dataset) -> xr.Dataset:
 def reshape_to_2d(ds: xr.Dataset):
     grid = HealpyGridInfo(level=ds.dggs.grid_info.level)
     return grid.to_2d(ds)
+# Replace reshape_to_2d
+
+# --- utilitaires ------------------------------------------------------------
+def _np(x):
+    return x.detach().cpu().numpy() if torch.is_tensor(x) else np.asarray(x)
+
+
+def fill_nearest(a, max_dist=None):
+    """Remplit les NaN par la valeur valide la plus proche (distance en pixels)."""
+    hole = np.isnan(a)
+    if not hole.any() or hole.all():
+        return a
+    dist, (iy, ix) = ndimage.distance_transform_edt(hole, return_indices=True)
+    out = a[iy, ix]
+    if max_dist is not None:
+        out[dist > max_dist] = np.nan
+    return out
+
+
+# --- conversion HEALPix -> grille 2D ---------------------------------------
+
+def healpix_to_grid(da, resampler, shape, coords, max_dist=None,
+                    batch=16, min_weight=1e-3, fill_inside=True):
+    """DataArray (..., cells) sur HEALPix -> DataArray (..., latitude, longitude).
+
+    Le masque NaN est celui de la cellule HEALPix la plus proche de chaque pixel.
+    fill_inside=True : comble seulement les NaN d'interpolation *à l'intérieur* du masque valide.
+    """
+    # 1) alignement sur les cellules du resampler
+    cells = resampler.get_cell_ids().astype("int64")
+    cell_dim = "cells"
+    if "cell_ids" in da.coords:
+        da = da.assign_coords(cell_ids=da["cell_ids"].astype("int64"))
+        if "cells" in da.dims:
+            da = da.swap_dims({"cells": "cell_ids"})
+        cell_dim = "cell_ids"
+    da = da.reindex({cell_dim: cells})  # cellules absentes des données -> NaN (donc masquées)
+
+    # 2) cellules en dernier
+    da = da.transpose(..., cell_dim)
+    batch_dims = [d for d in da.dims if d != cell_dim]
+
+    vals = da.values.reshape(-1, cells.size).astype("float32")
+    valid = np.isfinite(vals)
+    vals = np.where(valid, vals, 0.0)
+
+    # cellule la plus proche de chaque pixel de la grille (N,)
+    hi0 = _np(resampler.hi)[:, 0]
+    has_cell = hi0 >= 0
+    hi0 = np.where(has_cell, hi0, 0)
+
+    # 3) inversion par paquets
+    out = np.empty((vals.shape[0], *shape), dtype="float32")
+    for i in range(0, vals.shape[0], batch):
+        v = torch.as_tensor(vals[i:i + batch])
+        m = torch.as_tensor(valid[i:i + batch].astype("float32"))
+        num = _np(resampler.invert(v))
+        den = _np(resampler.invert(m))
+
+        res = np.where(den > min_weight, num / np.maximum(den, min_weight), np.nan)
+
+        # masque d'origine : pixel valide si sa cellule la plus proche est valide
+        pix_valid = valid[i:i + batch][:, hi0] & has_cell[None, :]
+        res = res.reshape(-1, *shape)
+        pix_valid = pix_valid.reshape(-1, *shape)
+
+        if fill_inside:
+            for k in range(res.shape[0]):
+                res[k] = fill_nearest(np.where(pix_valid[k], res[k], np.nan), max_dist)
+        res[~pix_valid] = np.nan
+        out[i:i + batch] = res
+
+    new_shape = [da.sizes[d] for d in batch_dims] + list(shape)
+    return xr.DataArray(
+        out.reshape(new_shape),
+        dims=batch_dims + ["latitude", "longitude"],
+        coords={**{d: da[d] for d in batch_dims if d in da.coords}, **coords},
+        name=da.name,
+    )
+def dataset_to_2d(ds, resampler, shape, coords, **kw):
+    """Applique la conversion à toutes les variables qui ont une dimension cellules."""
+    out = {
+        name: healpix_to_grid(da, resampler, shape, coords, **kw)
+        for name, da in ds.data_vars.items()
+        if "cells" in da.dims or "cell_ids" in da.dims
+    }
+    return xr.Dataset(out)
 
 
 def load_tag(*, tag_root: str, tag_name: str, storage_options: dict = None, **kwargs):
@@ -801,7 +891,11 @@ def regrid_dataset_hpresample(
         print("no method implemented to plot")
     if save:
         print("you can save outside of the function")
-    return new_ds
+    return new_ds, {
+        "resolution_2D": list(ds.sizes.values())[0:2],
+        "refinement_level": refinement_level,
+        "ellipsoid": ellipsoid,
+        }
 
 
 def regrid_dataset(
@@ -1747,7 +1841,7 @@ def plot_trajectories(
     plots = [
         traj.hvplot(
             c="speed",
-            tiles="CartoLight",
+            tiles="OSM",  #"CartoLight",
             title=traj.id,
             cmap="cmo.speed",
             width=300,
@@ -1799,6 +1893,12 @@ def open_distributions(
     --------
     pangeo_fish.helpers.plot_distributions and pangeo_fish.helpers.render_distributions.
     """
+    with open(f"{target_root}/resampling_info.json") as f:
+        resampling_info = json.load(f)
+    bbox = resampling_info["bbox"]
+    res = resampling_info["resolution_2D"]
+    ellipsoid = resampling_info["ellipsoid"]
+    refinement_level = resampling_info["refinement_level"]
 
     emission = (
         xr.open_dataset(
@@ -1819,13 +1919,29 @@ def open_distributions(
         storage_options=storage_options,
     ).where(emission["mask"])
 
-    data = xr.merge([states, emission.drop_vars(["mask"])])
+    data_hp = xr.merge([states, emission.drop_vars(["mask"])])
 
     # if the data is 1D indexed, regrid it to 2D
     # since this function is expected to be used for plotting and rendering tasks
-    if "cells" in data.dims:
-        data = to_healpix(data)
-        data = reshape_to_2d(data)
+    if "cells" in data_hp.dims:
+        # data = to_healpix(data)
+        # --- grille cible et resampler -------------------------------------------
+        nx = res[0]
+        ny = res[1]
+        lon_target = np.linspace(bbox["longitude"][0], bbox["longitude"][1], nx)
+        lat_target = np.linspace(bbox["latitude"][0], bbox["latitude"][1], ny)
+        lon_2d, lat_2d = np.meshgrid(lon_target, lat_target)
+
+        resampler_hp2grid = BilinearResampler(
+            lon_deg=lon_2d.ravel(),
+            lat_deg=lat_2d.ravel(),
+            level=refinement_level,
+            ellipsoid=ellipsoid,
+        )
+        target_coords = {"latitude": lat_target, "longitude": lon_target}
+
+        data = dataset_to_2d(data_hp, resampler_hp2grid, (ny, nx), target_coords)
+        # data = reshape_to_2d(data)
 
     data = data.assign_coords(longitude=center_longitude(data["longitude"], center=0))
     data = data.chunk({d: -1 if d != "time" else chunk_time for d in data.dims})

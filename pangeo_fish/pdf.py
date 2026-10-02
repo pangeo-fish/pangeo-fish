@@ -43,7 +43,7 @@ def normal(samples, mean, std, *, dims):
         _pdf,
         samples,
         mean,
-        std**2,
+        std,#**2,
         dask="parallelized",
         input_core_dims=[dims, param_dims, param_dims],
         output_core_dims=[dims],
