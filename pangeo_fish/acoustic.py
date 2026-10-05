@@ -3,13 +3,12 @@ Module for computing probability distributions from acoustic detections.
 """
 
 import flox.xarray
-import healpy as hp
+import healpix_geo as hpg
 import numpy as np
 import pandas as pd
 import xarray as xr
 from tlz.itertoolz import first
 from xhealpixify.conversions import geographic_to_cartesian
-from xhealpixify.operations import buffer_points
 
 from pangeo_fish import utils
 from pangeo_fish.cf import bounds_to_bins
@@ -70,7 +69,7 @@ def count_detections(detections, by):
 
 
 def deployment_reception_masks(
-    stations, grid, buffer_size, method="recompute", dims=["x", "y"]
+    stations, grid, buffer_size, method="recompute", dims=["cells"]
 ):
     rot = {
         "lat": grid["cell_ids"].attrs.get("lat", 0),
@@ -108,16 +107,8 @@ def deployment_reception_masks(
             factor=2**16,
             intersect=True,
         )
-    elif dims == ["x", "y"]:
-        masks = buffer_points(
-            cell_ids,
-            positions,
-            buffer_size=buffer_size.m_as("m"),
-            # nside=2 ** cell_ids.attrs["level"],
-            nside=2**cell_ids.dggs.grid_info.level,
-            factor=2**16,
-            intersect=True,
-        )
+    else:
+        raise ValueError("dims should be 'cells'")
 
     return masks.drop_vars(["cell_ids"])
 
@@ -135,8 +126,15 @@ def buffer_points_cells(
     """ """
 
     def _buffer_masks(cell_ids, vector, nside, radius, factor=4, intersect=False):
-        selected_cells = hp.query_disc(
-            nside, vector, radius, nest=True, fact=factor, inclusive=intersect
+        ## replacement
+        radius_deg = np.degrees(radius)
+        depth = int(np.log2(nside))
+        vector_ang = hpg.cartesian_to_lonlat(
+            vector[0], vector[1], vector[2], ellipsoid="sphere"
+        )
+        vector_ang = [vector_ang[0][0], vector_ang[1][0]]
+        selected_cells, _, _ = hpg.nested.cone_coverage(
+            vector_ang, radius_deg, depth, delta_depth=0, ellipsoid="sphere", flat=True
         )
         return np.isin(cell_ids, selected_cells, assume_unique=True)
 
@@ -160,7 +158,7 @@ def buffer_points_cells(
     return masks.assign_coords(cell_ids=cell_ids)
 
 
-def create_masked_fill_map(tag, grid, maps, chunk_time=24, dims=["x", "y"]):
+def create_masked_fill_map(tag, grid, maps, chunk_time=24, dims=["cells"]):
     """Create a masked fill map indicating the detection zones.
 
     The function creates a masked fill map based on the station and grid information provided. It calculates
@@ -225,7 +223,7 @@ def emission_probability(
     nondetections="ignore",
     cell_ids="keep",
     chunk_time=24,
-    dims=None,
+    dims=["cells"],
 ):
     """Construct emission probability maps from acoustic detections
 
@@ -261,8 +259,9 @@ def emission_probability(
     emission : xarray.Dataset
         The resulting emission probability maps.
     """
-    if dims is None:
-        dims = ["x", "y"]
+
+    if dims != ["cells"]:
+        raise ValueError("dims is not filed right: try 'cells' ")
 
     if "acoustic" not in tag or "stations" not in tag:
         return xr.Dataset()
