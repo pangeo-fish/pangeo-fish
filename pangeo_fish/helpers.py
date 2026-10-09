@@ -2108,7 +2108,8 @@ def render_distributions(
     # os.path.split(.) removes the "/"!
     path_root, filename = os.path.split(output_path)
     filename = filename.split(".")[0]
-
+    if path_root:
+        Path(path_root).mkdir(parents=True, exist_ok=True)
     # quick input checking
     if not all(var_name in data.variables for var_name in ["emission", "states"]):
         raise ValueError(
@@ -2141,7 +2142,7 @@ def render_distributions(
     try:
         video_fp = _render_video(
             frames_fp=[file.resolve() for file in path_to_frames.glob("*.png")],
-            video_fn=filename,
+            video_fn=str(Path(path_root) / filename) if path_root else filename,
             extension=extension,
             fps=fps,
         )

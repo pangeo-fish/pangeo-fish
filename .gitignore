@@ -40,8 +40,8 @@ notebooks/A18831/
 notebooks/donnees_importees.tar.gz
 notebooks/donnees_importees/
 notebooks/states.mp4
-notebooks/test/
-notebooks/test_large_opti/
+notebooks/local_storage/
+notebooks/tests_fonctionnalités/
 notebooks/copernicus_credentials.txt
 notebooks/pangeo-fish-Copy1.ipynb
 pangeo_fish/test_pre_final/
@@ -52,3 +52,10 @@ extract_function_tree.py
 pangeo_fish/tests/test_helpixgeo.ipynb
 notebooks/test_helpixgeo.ipynb
 Subset_NS_EC_forTMD30_21_2_2025.nc
+notebooks/plot_glissant_tfd_A19226.html
+.gitignore
+notebooks/plot_glissant_tfd.html
+notebooks/plot_glissant.html
+notebooks/plot.py
+notebooks/plot_glissant_array.py
+notebooks/exemples_usage.py
