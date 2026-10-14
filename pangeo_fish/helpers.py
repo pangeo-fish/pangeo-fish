@@ -843,10 +843,15 @@ def regrid_dataset_hpresample(
     n_left = int((is_ocean & ~valid & ~valid_b).sum())
     print(f"cellules océan couvertes ni par CT ni par le repli : {n_left}")
 
-    def to_full(cell_data):
-        """Replace les sorties CT sur ref_cell_ids et applique le masque océan."""
+    def to_full(cell_data, variable):
+        """Align CT values, fill ocean gaps with bilinear values, and mask land."""
         out = np.full(cell_data.shape[:-1] + (ref_cell_ids.size,), np.nan)
         out[..., valid] = cell_data[..., idx[valid]]
+        fallback = is_ocean & valid_b
+        current = out[..., fallback]
+        if not np.isfinite(current).all():
+            replacement = resampler_bil.resample(variable).cell_data[..., idx_b[fallback]]
+            out[..., fallback] = np.where(np.isfinite(current), current, replacement)
         out[..., ~is_ocean] = np.nan
         return out
 
@@ -869,9 +874,9 @@ def regrid_dataset_hpresample(
     )
 
     for name, da in ds.data_vars.items():
-        # ne pas écraser ocean_mask / coordonnées déjà présentes dans new_ds
-        # if name in new_ds.variables:
-        #     continue
+        # Keep the target ocean mask and coordinates created above.
+        if name in new_ds.variables:
+            continue
         print(name, da.dims)
 
         if len(da.dims) == 3:
@@ -882,14 +887,14 @@ def regrid_dataset_hpresample(
             )
             new_ds[name] = (
                 ("time", "cells"),
-                to_full(resampler_ct.resample(variable).cell_data),
+                to_full(resampler_ct.resample(variable).cell_data, variable),
             )
 
         elif len(da.dims) == 2:
             variable = ds[name].transpose("yi", "xi").values.ravel()[valid_src]
             new_ds[name] = (
                 ("cells",),
-                to_full(resampler_ct.resample(variable).cell_data),
+                to_full(resampler_ct.resample(variable).cell_data, variable),
             )
 
     new_ds["cell_ids"].attrs.update(
