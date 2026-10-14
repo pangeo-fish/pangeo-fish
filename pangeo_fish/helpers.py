@@ -470,6 +470,62 @@ def _open_intake_catalog(yaml_url: str, chunks: dict = None):
     return model
 
 
+def _resolve_copernicus_datasets(dataset_id: str):
+    """Return temperature, SSH, static IDs and the optional static part.
+
+    Only the IBI daily reanalysis has an explicit split-product mapping;
+    other products retain the existing combined-dataset/static convention.
+    """
+    if dataset_id == "cmems_mod_ibi_phy-temp_my_0.027deg_P1D-m":
+        return (
+            dataset_id,
+            "cmems_mod_ibi_phy-ssh_my_0.027deg_P1D-m",
+            "cmems_mod_ibi_phy_my_0.027deg-3D_static",
+            "bathy",
+        )
+    return dataset_id, dataset_id, dataset_id.rsplit("_", 1)[0] + "_static", None
+
+
+def _align_copernicus_coordinates(reference, other, dataset_id):
+    """Accept roundoff only; never interpolate spatial or temporal coordinates."""
+    for name in ("latitude", "longitude", "depth", "time"):
+        if name not in reference.coords or name not in other.coords:
+            if name in ("latitude", "longitude"):
+                raise ValueError(
+                    f"Copernicus dataset {dataset_id!r} is missing {name!r}."
+                )
+            continue
+        expected, actual = reference[name], other[name]
+        if (
+            expected.dims != (name,)
+            or actual.dims != (name,)
+            or expected.shape != actual.shape
+            or not expected.size
+            or not expected.to_index().is_unique
+            or not actual.to_index().is_unique
+        ):
+            raise ValueError(
+                f"Copernicus dataset {dataset_id!r}: incompatible {name} grid."
+            )
+        if np.array_equal(expected.values, actual.values):
+            continue
+        # Horizontal tolerance is < 1.2 m, far below these model grid spacings.
+        # Depth tolerance accommodates float32/float64 encodings of model levels.
+        if name == "time" or not np.allclose(
+            expected.values,
+            actual.values,
+            rtol=1e-6 if name == "depth" else 0,
+            atol=1e-6 if name == "depth" else 1e-5,
+            equal_nan=False,
+        ):
+            raise ValueError(
+                f"Copernicus dataset {dataset_id!r}: {name} grid differs from "
+                "temperature; explicit alignment is required."
+            )
+        other = other.assign_coords({name: expected})
+    return other
+
+
 def _open_copernicus_model(
     copernicus_model_name: str,
     bbox: dict[str, tuple[float, float]],
@@ -485,7 +541,9 @@ def _open_copernicus_model(
     copernicus_model_name : str
         Copernicus Marine ``dataset_id`` for the daily-mean physics product
         (e.g. ``"cmems_mod_glo_phy_my_0.083deg_P1D-m"``). The matching static
-        product (``..._static``) is opened to retrieve ``deptho`` and ``mask``.
+        product is opened to retrieve ``deptho`` and ``mask``. IBI daily
+        reanalysis resolves separate temperature/SSH IDs and static ``bathy``
+        fields internally; callers still provide just the temperature ID.
     bbox : dict
         Spatial boundaries with keys ``longitude`` and ``latitude``.
     time_slice : slice
@@ -499,7 +557,9 @@ def _open_copernicus_model(
     model : xarray.Dataset
         Dataset with ``TEMP``, ``XE`` and ``H0`` (via :func:`prepare_dataset`).
     """
-    static_name = copernicus_model_name.rsplit("_", 1)[0] + "_static"
+    temperature_id, ssh_id, static_id, static_part = _resolve_copernicus_datasets(
+        copernicus_model_name
+    )
 
     if time_slice is not None and time_slice.start is not None:
         start_datetime = np.datetime_as_string(
@@ -512,21 +572,7 @@ def _open_copernicus_model(
     else:
         raise ValueError("Either `time_slice` or `tag_log` must be provided.")
 
-    ds_thetao_zos = copernicusmarine.open_dataset(
-        dataset_id=copernicus_model_name,
-        variables=["thetao", "zos"],
-        minimum_longitude=bbox["longitude"][0],
-        maximum_longitude=bbox["longitude"][1],
-        minimum_latitude=bbox["latitude"][0],
-        maximum_latitude=bbox["latitude"][1],
-        start_datetime=start_datetime,
-        end_datetime=end_datetime,
-        username=Username,
-        password=Password,
-    )
-    static_var = copernicusmarine.open_dataset(
-        dataset_id=static_name,
-        variables=["deptho", "mask"],
+    spatial = dict(
         minimum_longitude=bbox["longitude"][0],
         maximum_longitude=bbox["longitude"][1],
         minimum_latitude=bbox["latitude"][0],
@@ -534,8 +580,37 @@ def _open_copernicus_model(
         username=Username,
         password=Password,
     )
-    static_var = static_var.assign_coords(longitude=ds_thetao_zos["longitude"].values)
-    ds_all = xr.merge([ds_thetao_zos, static_var], compat="no_conflicts")
+    temporal = dict(start_datetime=start_datetime, end_datetime=end_datetime)
+
+    def open_fields(dataset_id, variables, **options):
+        ds = copernicusmarine.open_dataset(
+            dataset_id=dataset_id, variables=variables, **spatial, **options
+        )
+        missing = set(variables) - set(ds.data_vars)
+        if missing:
+            raise ValueError(
+                f"Copernicus dataset {dataset_id!r} is missing required variables "
+                f"{sorted(missing)}; available variables: {list(ds.data_vars)}."
+            )
+        return ds[variables]
+
+    split = temperature_id != ssh_id
+    temperature = open_fields(
+        temperature_id, ["thetao"] if split else ["thetao", "zos"], **temporal
+    )
+    datasets = [temperature]
+    if split:
+        ssh = open_fields(ssh_id, ["zos"], **temporal)
+        if "time" not in ssh.coords or "time" not in temperature.coords:
+            raise ValueError(f"Copernicus dataset {ssh_id!r}: missing time coordinate.")
+        datasets.append(_align_copernicus_coordinates(temperature, ssh, ssh_id))
+
+    # IBI 202511 catalogue: bathy contains deptho(latitude, longitude) and
+    # mask(depth, latitude, longitude), as well as unused deptho_lev.
+    static_options = {"dataset_part": static_part} if static_part else {}
+    static = open_fields(static_id, ["deptho", "mask"], **static_options)
+    datasets.append(_align_copernicus_coordinates(temperature, static, static_id))
+    ds_all = xr.merge(datasets, compat="no_conflicts", join="exact")
     ds_all = ds_all.rename({"latitude": "lat", "longitude": "lon"})
     return prepare_dataset(ds_all)
 
