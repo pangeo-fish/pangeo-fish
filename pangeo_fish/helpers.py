@@ -28,6 +28,7 @@ import xarray as xr
 import xdggs  # noqa: F401
 from healpix_resample import BilinearResampler, CloughTocherResampler
 from matplotlib.figure import Figure
+from pint_xarray import unit_registry as ureg
 from scipy import ndimage
 from toolz.dicttoolz import valfilter
 from toolz.functoolz import curry  # to change
@@ -61,6 +62,7 @@ from pangeo_fish.visualization import filter_by_states, plot_map, render_frame
 
 __all__ = [
     "to_healpix",
+    "earth_radius_from_ellipsoid",
     "reshape_to_2d",
     "load_tag",
     "update_stations",
@@ -117,10 +119,41 @@ def _plot_in_figure(ds: xr.Dataset, **plot_kwargs) -> Figure:
     return fig
 
 
+def _with_dggs_attrs(ds: xr.Dataset) -> xr.Dataset:
+    """Return ``ds`` with the DGGS grid attributes written on ``cell_ids``.
+
+    The attributes follow the Zarr DGGS convention used by xdggs (``grid_name``,
+    ``level``, ``indexing_scheme`` and ``ellipsoid``). They are taken from the
+    xdggs index when the dataset has one, else from the existing ``cell_ids``
+    attributes, so that the grid definition survives a round trip to Zarr.
+    """
+    if "cell_ids" not in ds.variables:
+        return ds
+
+    try:
+        grid_attrs = ds.dggs.grid_info.to_dict()
+    except Exception:
+        attrs = ds["cell_ids"].attrs
+        if "level" not in attrs:
+            return ds
+        grid_attrs = {
+            "grid_name": attrs.get("grid_name", "healpix"),
+            "level": int(attrs["level"]),
+            "indexing_scheme": attrs.get("indexing_scheme", "nested"),
+        }
+        if attrs.get("ellipsoid") is not None:
+            grid_attrs["ellipsoid"] = attrs["ellipsoid"]
+
+    ds = ds.copy()
+    ds["cell_ids"].attrs.update(grid_attrs)
+    return ds
+
+
 def _save_zarr(ds: xr.Dataset, path: str, storage_options=None):
     """Helper for saving a .zarr array and warning in case of failure."""
     try:
         path_to_zarr = path + ".zarr" if not path.endswith(".zarr") else path
+        ds = _with_dggs_attrs(ds)
         ds.to_zarr(path_to_zarr, mode="w", storage_options=storage_options)
     except Exception:
         warnings.warn(
@@ -181,10 +214,14 @@ def _update_params_dict(factory, params: dict):
 def to_healpix(ds: xr.Dataset) -> xr.Dataset:
     """Helper that loads a Dataset as a HEALPix grid (indexed by ``"cell_ids"``)."""
 
-    attrs_to_keep = ["level", "indexing_scheme"]
+    attrs_to_keep = ["level", "indexing_scheme", "ellipsoid"]
     cell_ids_attrs = ds["cell_ids"].attrs
 
-    attrs = {k: v for (k, v) in cell_ids_attrs.items() if k in attrs_to_keep}
+    attrs = {
+        k: v
+        for (k, v) in cell_ids_attrs.items()
+        if k in attrs_to_keep and v is not None
+    }
 
     if "indexing_scheme" not in attrs.keys():
         attrs["indexing_scheme"] = "nested"
@@ -925,7 +962,9 @@ def regrid_dataset_hpresample(
         fallback = is_ocean & valid_b
         current = out[..., fallback]
         if not np.isfinite(current).all():
-            replacement = resampler_bil.resample(variable).cell_data[..., idx_b[fallback]]
+            replacement = resampler_bil.resample(variable).cell_data[
+                ..., idx_b[fallback]
+            ]
             out[..., fallback] = np.where(np.isfinite(current), current, replacement)
         out[..., ~is_ocean] = np.nan
         return out
@@ -976,6 +1015,7 @@ def regrid_dataset_hpresample(
         indexing_scheme="nested",
         grid_name="healpix",
         level=refinement_level,
+        ellipsoid=ellipsoid,
     )
 
     attrs = ds.attrs.copy()
@@ -1520,17 +1560,72 @@ def _get_predictor_factory(
     return predictor
 
 
+def earth_radius_from_ellipsoid(ellipsoid=None) -> pint.Quantity:
+    """Return the Earth radius (in km) implied by a HEALPix ``ellipsoid``.
+
+    Parameters
+    ----------
+    ellipsoid : str, dict, xdggs.ellipsoid.Sphere or xdggs.ellipsoid.Ellipsoid, optional
+        The ellipsoid the grid was built on, as stored in the DGGS grid
+        attributes. ``None`` is taken as ``"sphere"``. Named ellipsoids are
+        resolved with :py:func:`healpix_geo.ellipsoid.resolve`.
+
+    Returns
+    -------
+    earth_radius : pint.Quantity
+        The sphere radius, or the semi-major axis for an ellipsoid. Dividing a
+        distance by the semi-major axis gives the smallest angle that distance
+        can span on the ellipsoid, so the result is a conservative bound for
+        converting displacements into angular sigma.
+    """
+    if ellipsoid is None:
+        ellipsoid = "sphere"
+    if isinstance(ellipsoid, str):
+        params = hg.ellipsoid.resolve(ellipsoid)
+    elif hasattr(ellipsoid, "to_dict"):
+        params = ellipsoid.to_dict()
+    else:
+        params = dict(ellipsoid)
+
+    radius_m = params.get("radius", params.get("semimajor_axis"))
+    if radius_m is None:
+        raise ValueError(f"cannot determine the Earth radius from {ellipsoid!r}")
+
+    return ureg.Quantity(float(radius_m), "m").to("km")
+
+
+def _earth_radius_from_grid(ds: xr.Dataset) -> pint.Quantity:
+    """Derive the Earth radius from the DGGS grid info of ``ds``."""
+    try:
+        ellipsoid = ds.dggs.grid_info.ellipsoid
+    except Exception:
+        ellipsoid = ds["cell_ids"].attrs.get("ellipsoid")
+    return earth_radius_from_ellipsoid(ellipsoid)
+
+
+def _grid_resolution_radians(ds: xr.Dataset) -> xr.DataArray:
+    """Mean HEALPix cell size in radians (square root of the cell area)."""
+    if "resolution" in ds.variables:
+        return ds["resolution"].pint.quantify()
+    nside = 2 ** int(ds.dggs.grid_info.level)
+    return xr.DataArray(
+        ureg.Quantity(np.sqrt(4 * np.pi / (12 * nside**2)), "radian"), dims=None
+    )
+
+
 def _get_max_sigma(
     ds: xr.Dataset,
-    earth_radius: pint.Quantity,
+    earth_radius: pint.Quantity | None,
     adjustment_factor: float,
     maximum_speed: pint.Quantity,
     as_radians: bool,
 ) -> float:
+    if earth_radius is None:
+        earth_radius = _earth_radius_from_grid(ds)
     earth_radius_ = xr.DataArray(earth_radius, dims=None)
 
     timedelta = temporal_resolution(ds["time"]).pint.quantify().pint.to("h")
-    grid_resolution = earth_radius_ * ds["resolution"].pint.quantify()
+    grid_resolution = earth_radius_ * _grid_resolution_radians(ds)
 
     maximum_speed_ = xr.DataArray(maximum_speed, dims=None).pint.to("km / h")
     if as_radians:
@@ -1549,11 +1644,11 @@ def _get_max_sigma(
 def optimize_pdf(
     *,
     ds: xr.Dataset,
-    earth_radius: pint.Quantity,
     adjustment_factor: float,
     truncate: float | None,
     maximum_speed: pint.Quantity,
     tolerance: float,
+    earth_radius: pint.Quantity | None = None,
     dims: list[str] = ["cells"],
     conv_method: str = "HealpixConv",
     final: bool = False,
@@ -1568,8 +1663,6 @@ def optimize_pdf(
     ----------
     ds : xarray.Dataset
         Dataset of emission probabilities
-    earth_radius : pint.Quantity
-        Radius of the Earth used for distance calculations
     adjustment_factor : float
         Factor value for the maximum fish's displacement
     truncate : float
@@ -1578,6 +1671,10 @@ def optimize_pdf(
         Maximum fish's velocity
     tolerance : float
         Tolerance level for the optimised parameter search computation
+    earth_radius : pint.Quantity, optional
+        Radius of the Earth used for distance calculations. By default it is
+        derived from the ``ellipsoid`` of the HEALPix grid (the DGGS attributes
+        of ``cell_ids``), see :py:func:`earth_radius_from_ellipsoid`.
     dims : list of str, default: ["cells"]
         The list of the dimensions. Either ``["x", "y"]`` or ``["cells"]``
     final : bool, default: False
