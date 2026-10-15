@@ -1221,6 +1221,7 @@ def compute_emission_pdf(
     emission_pdf = emission_pdf.assign_attrs(attrs)
     if "cell_ids" in diff_ds.coords and "cell_ids" in emission_pdf.coords:
         emission_pdf["cell_ids"].attrs.update(diff_ds["cell_ids"].attrs)
+    emission_pdf = _with_dggs_attrs(emission_pdf)
     emission_pdf = emission_pdf.chunk({"time": chunk_time} | {d: -1 for d in dims})
 
     if save:
@@ -1289,9 +1290,8 @@ def compute_acoustic_pdf(
     """
 
     if dims == ["cells"]:
-        lon, lat = emission_ds["cell_ids"].attrs.get("lat", 0), emission_ds[
-            "cell_ids"
-        ].attrs.get("lon", 0)
+        lat = emission_ds["cell_ids"].attrs.get("lat", 0)
+        lon = emission_ds["cell_ids"].attrs.get("lon", 0)
         emission_ds = to_healpix(emission_ds)
         # adds back "lon" and "lat" keys
         emission_ds["cell_ids"].attrs["lon"] = lon
@@ -1313,7 +1313,7 @@ def compute_acoustic_pdf(
             "receiver_buffer": str(receiver_buffer),
         }
     )
-    acoustic_pdf = acoustic_pdf.assign_attrs(attrs)
+    acoustic_pdf = _with_dggs_attrs(acoustic_pdf.assign_attrs(attrs))
 
     if save:
         _save_zarr(acoustic_pdf, f"{target_root}/acoustic.zarr", storage_options)
@@ -1408,6 +1408,7 @@ def combine_pdfs(
         if combined.coords.get("cell_ids", None) is not None:
             combined["cell_ids"].attrs.update(ds["cell_ids"].attrs)
     ds.attrs.update(_get_package_versions())
+    combined = _with_dggs_attrs(combined)
 
     figure = False
     if plot:
@@ -1503,7 +1504,7 @@ def normalize_pdf(
         for item in excluded_pdf:
             normalized = normalized.drop_vars(item)
 
-    normalized = normalized.rename({"pdf_normalized": "pdf"})
+    normalized = _with_dggs_attrs(normalized.rename({"pdf_normalized": "pdf"}))
     warnings.warn(
         f"you decided to normalize the pdf without: {excluded_pdf}, if you want to include them, change excluded_pdf ",
         UserWarning,
@@ -1978,6 +1979,7 @@ def predict_positions(
 
         sigma_var = _compute_sigma_var(sigma_indices, params["sigma"])
         states = states.assign(sigma=("time", sigma_var))
+    states = _with_dggs_attrs(states)
 
     if save:
         _save_zarr(states, f"{target_root}/states.zarr", storage_options)

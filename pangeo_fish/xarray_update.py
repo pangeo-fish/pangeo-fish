@@ -27,6 +27,12 @@ class Accessor:
         an interactive map
         """
         attrs = self._obj["cell_ids"].attrs
+        if "level" not in attrs:
+            # the grid definition may only live in the xdggs index
+            try:
+                attrs = attrs | self._obj.dggs.grid_info.to_dict()
+            except Exception:
+                pass
         if refinement_level is None:
             refinement_level = int(attrs["level"])
         if ellipsoid is None:

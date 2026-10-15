@@ -104,3 +104,35 @@ def test_get_max_sigma_without_resolution_coordinate():
 
     cell_size = 6370.997 * np.sqrt(4 * np.pi / (12 * 4**2))
     assert in_pixels == pytest.approx(60 / cell_size)
+
+
+def test_with_dggs_attrs_from_index_only():
+    ds = helpers.to_healpix(_healpix_dataset(ellipsoid="WGS84"))
+    ds["cell_ids"].attrs.clear()
+
+    attrs = helpers._with_dggs_attrs(ds)["cell_ids"].attrs
+
+    assert attrs["level"] == 2
+    assert attrs["ellipsoid"] == "WGS84"
+
+
+def test_compute_acoustic_pdf_writes_dggs_attrs():
+    from pangeo_fish.tests.test_acoustic import dummy_grid, dummy_tag
+
+    grid = dummy_grid.__wrapped__().drop_indexes("cell_ids")
+    grid["cell_ids"].attrs.update(
+        grid_name="healpix", level=1, indexing_scheme="nested", ellipsoid="WGS84"
+    )
+
+    acoustic_pdf, _ = helpers.compute_acoustic_pdf(
+        emission_ds=grid,
+        tag=dummy_tag.__wrapped__(),
+        receiver_buffer=ureg.Quantity(1000, "m"),
+        chunk_time=1,
+    )
+
+    attrs = acoustic_pdf["cell_ids"].attrs
+    assert attrs["grid_name"] == "healpix"
+    assert attrs["level"] == 1
+    assert attrs["indexing_scheme"] == "nested"
+    assert attrs["ellipsoid"] == "WGS84"
