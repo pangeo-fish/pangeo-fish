@@ -96,8 +96,10 @@ def deployment_reception_masks(
     buffer_size,
     method="recompute",
     dims=["cells"],
-    ellipsoid="sphere",
+    ellipsoid=None,
 ):
+    if ellipsoid == None:
+        ellipsoid = grid["cell_ids"].attrs.get("ellipsoid")
     rot = {
         "lat": grid["cell_ids"].attrs.get("lat", 0),
         "lon": grid["cell_ids"].attrs.get("lon", 0),
@@ -133,7 +135,6 @@ def deployment_reception_masks(
             nside=2**cell_ids.dggs.grid_info.level,
             factor=2**16,
             intersect=True,
-            ellipsoid=ellipsoid,
         )
     else:
         raise ValueError("dims should be 'cells'")
@@ -150,10 +151,9 @@ def buffer_points_cells(
     sphere_radius=6371e3,
     factor=4,
     intersect=False,
-    ellipsoid="sphere",
 ):
     """ """
-
+    ellipsoid = cell_ids.attrs.get("ellipsoid")
     def _buffer_masks(
         cell_ids, vector, nside, radius, factor=4, intersect=False, ellipsoid=ellipsoid
     ):
@@ -252,7 +252,7 @@ def emission_probability(
     cell_ids="keep",
     chunk_time=24,
     dims=["cells"],
-    ellipsoid="sphere",
+    ellipsoid=None,
 ):
     """Construct emission probability maps from acoustic detections
 
@@ -288,7 +288,8 @@ def emission_probability(
     emission : xarray.Dataset
         The resulting emission probability maps.
     """
-
+    if ellipsoid == None:
+        ellipsoid = grid["cell_ids"].attrs.get("ellipsoid")
     if dims != ["cells"]:
         raise ValueError("dims is not filed right: try 'cells' ")
 

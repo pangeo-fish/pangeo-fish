@@ -1253,7 +1253,7 @@ def compute_acoustic_pdf(
     save=False,
     target_root=".",
     storage_options: dict = None,
-    ellipsoid="sphere",
+    ellipsoid=None,
     **kwargs,
 ):
     """Compute a emission probability distribution from (acoustic) detection data.
@@ -1289,6 +1289,8 @@ def compute_acoustic_pdf(
         The plot of ``acoustic_pdf``, or None if ``plot=False``
 
     """
+    if ellipsoid==None:
+        ellipsoid = emission_ds["cell_ids"].attrs.get("ellipsoid")
 
     if dims == ["cells"]:
         lat = emission_ds["cell_ids"].attrs.get("lat", 0)
@@ -1520,12 +1522,14 @@ def _get_predictor_factory(
     dims: list[str],
     conv_method: str,
     device: str = "cpu",
-    ellipsoid="sphere",
+    ellipsoid=None,
 ):
     if dims == ["x", "y"]:
         raise ValueError("dims must be ['cells'], ['x','y'] is not used anymore")
 
     elif dims == ["cells"]:
+        if ellipsoid == None:
+            ellipsoid=ds["cell_ids"].attrs.get("ellipsoid")
         if conv_method == "HealpixConv":
             if truncate is None:
                 raise ValueError(
@@ -1656,7 +1660,7 @@ def optimize_pdf(
     earth_radius: pint.Quantity | None = None,
     dims: list[str] = ["cells"],
     conv_method: str = "HealpixConv",
-    ellipsoid: str = "sphere",
+    ellipsoid: str = None,
     final: bool = False,
     save_parameters=False,
     storage_options: dict = None,
@@ -1718,6 +1722,8 @@ def optimize_pdf(
     else:
         raise ValueError("dims must be ['cells'], ['x','y'] is not used anymore")
         as_radians = False
+    if ellipsoid == None:
+        ellipsoid=ds["cell_ids"].attrs.get("ellipsoid")
 
     max_sigma = _get_max_sigma(
         ds, earth_radius, adjustment_factor, maximum_speed, as_radians
@@ -1800,7 +1806,7 @@ def predict_positions(
     storage_options: dict,
     chunks: dict,
     track_modes=["mean", "mode"],
-    ellipsoid="sphere",
+    ellipsoid=None,
     additional_track_quantities=["speed", "distance"],
     save=True,
     **kwargs,
@@ -1870,6 +1876,8 @@ def predict_positions(
 
     if "cells" in emission.dims:
         emission = to_healpix(emission)
+        if ellipsoid is None:
+            ellipsoid = emission["cell_ids"].attrs.get("ellipsoid")
 
     with fsspec.open(
         f"{target_root}/parameters.json", mode="r", **(storage_options or {})
@@ -2377,15 +2385,15 @@ def render_distributions(
 
 def multiplot_healpix(
     datasets: list[tuple[xr.Dataset, list[str]]],
-    refinement_level: int = 8,
     alpha=0.8,
-    ellipsoid: str = "sphere",
+    
 ):
     """
-    Exemple: [(ds1, ["pdf"]), (ds2, ["pdf", "temp"])]
+    Exemple of list: [(ds1, ["pdf"]), (ds2, ["pdf", "temp"])]
     """
     plots = []
     for ds, variables in datasets:
+        ellipsoid = ds["cell_ids"].attrs.get("ellipsoid")
         for var_name in variables:
             plot = (
                 ds[var_name]
@@ -2393,7 +2401,7 @@ def multiplot_healpix(
                 .dggs.decode(
                     {
                         "grid_name": "healpix",
-                        "level": refinement_level,
+                        "level": ds["cell_ids"].attrs.get("level"),
                         "indexing_scheme": "nested",
                         "ellipsoid": ellipsoid,
                     }

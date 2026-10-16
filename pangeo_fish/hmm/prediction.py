@@ -219,7 +219,7 @@ class UpDownGaussian1DHealpix(Predictor):
     sigma: float  # en radians
     kernel_sz: int | None = None  # taille nominale du noyau (résolution fine)
     max_compact_kernel_sz: int = 7  # borne sur le noyau compact (résolution grossière)
-    ellipsoid: str = "sphere"
+    ellipsoid: str = None
     device: str = "cpu"
     dtype: any = torch.float32
 
@@ -234,7 +234,8 @@ class UpDownGaussian1DHealpix(Predictor):
         radius = int(np.ceil(3 * sigma_opt))
         if self.kernel_sz is None:
             self.kernel_sz = 2 * radius + 1
-
+        if self.ellipsoid is None:
+            self.ellipsoid = self.cell_ids.attrs.get("ellipsoid")
         # --- 1. Construction de l'opérateur multi-résolution ---
         self.layer = LargeConv(
             level=self.grid_info.level,
