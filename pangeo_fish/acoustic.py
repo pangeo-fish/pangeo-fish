@@ -154,6 +154,7 @@ def buffer_points_cells(
 ):
     """ """
     ellipsoid = cell_ids.attrs.get("ellipsoid")
+
     def _buffer_masks(
         cell_ids, vector, nside, radius, factor=4, intersect=False, ellipsoid=ellipsoid
     ):

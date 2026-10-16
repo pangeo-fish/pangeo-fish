@@ -490,7 +490,12 @@ def buffer_points(
         )
         vector_ang = [vector_ang[0][0], vector_ang[1][0]]
         selected_cells, _, _ = hpg.nested.cone_coverage(
-            vector_ang, radius_deg, depth, delta_depth=0, ellipsoid=cell_ids.attrs.get("ellipsoid"), flat=True
+            vector_ang,
+            radius_deg,
+            depth,
+            delta_depth=0,
+            ellipsoid=cell_ids.attrs.get("ellipsoid"),
+            flat=True,
         )
         return np.isin(cell_ids, selected_cells, assume_unique=True)
 

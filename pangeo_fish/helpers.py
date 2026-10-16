@@ -1289,7 +1289,7 @@ def compute_acoustic_pdf(
         The plot of ``acoustic_pdf``, or None if ``plot=False``
 
     """
-    if ellipsoid==None:
+    if ellipsoid == None:
         ellipsoid = emission_ds["cell_ids"].attrs.get("ellipsoid")
 
     if dims == ["cells"]:
@@ -1529,7 +1529,7 @@ def _get_predictor_factory(
 
     elif dims == ["cells"]:
         if ellipsoid == None:
-            ellipsoid=ds["cell_ids"].attrs.get("ellipsoid")
+            ellipsoid = ds["cell_ids"].attrs.get("ellipsoid")
         if conv_method == "HealpixConv":
             if truncate is None:
                 raise ValueError(
@@ -1723,7 +1723,7 @@ def optimize_pdf(
         raise ValueError("dims must be ['cells'], ['x','y'] is not used anymore")
         as_radians = False
     if ellipsoid == None:
-        ellipsoid=ds["cell_ids"].attrs.get("ellipsoid")
+        ellipsoid = ds["cell_ids"].attrs.get("ellipsoid")
 
     max_sigma = _get_max_sigma(
         ds, earth_radius, adjustment_factor, maximum_speed, as_radians
@@ -2386,7 +2386,6 @@ def render_distributions(
 def multiplot_healpix(
     datasets: list[tuple[xr.Dataset, list[str]]],
     alpha=0.8,
-    
 ):
     """
     Exemple of list: [(ds1, ["pdf"]), (ds2, ["pdf", "temp"])]
