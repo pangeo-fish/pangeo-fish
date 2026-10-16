@@ -56,7 +56,7 @@ def tide_behav_extr(
     df["time"] = pd.to_datetime(df["time"])
     df = df.sort_values("time")
     time = (
-        (df["time"] - df["time"].iloc[0]).dt.total_seconds() / 3600.0 /24.0
+        (df["time"] - df["time"].iloc[0]).dt.total_seconds() / 3600.0 / 24.0
     )  # en jours
     depth = df["pressure"].to_numpy()
     print(df["time"] - df["time"].iloc[0])
@@ -362,7 +362,7 @@ def plot_tide(tag_test):
     tide_found = tag_test["tide_found"].values  # 0 or 1
 
     fig, ax = plt.subplots(figsize=(15, 4))
-    
+
     ax.fill_between(
         time,
         depth.min(),
@@ -372,7 +372,7 @@ def plot_tide(tag_test):
         alpha=0.3,
         label="Marée détectée",
     )
-    
+
     ax.plot(time, depth, color="blue", label="Profondeur")
     ax.set_xlabel("Temps")
     ax.set_ylabel("Profondeur (m)")

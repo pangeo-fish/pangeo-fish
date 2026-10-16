@@ -1399,7 +1399,7 @@ def _get_predictor_factory(
     dims: list[str],
     conv_method: str,
     device: str = "cpu",
-    ellipsoid="sphere"
+    ellipsoid="sphere",
 ):
     if dims == ["x", "y"]:
         raise ValueError("dims must be ['cells'], ['x','y'] is not used anymore")
@@ -1480,7 +1480,7 @@ def optimize_pdf(
     tolerance: float,
     dims: list[str] = ["cells"],
     conv_method: str = "HealpixConv",
-    ellipsoid : str ="sphere",
+    ellipsoid: str = "sphere",
     final: bool = False,
     save_parameters=False,
     storage_options: dict = None,
@@ -1547,7 +1547,11 @@ def optimize_pdf(
     if final:
         max_sigma = 0.01
     predictor_factory = _get_predictor_factory(
-        ds=ds, truncate=truncate, dims=dims, conv_method=conv_method,ellipsoid=ellipsoid,
+        ds=ds,
+        truncate=truncate,
+        dims=dims,
+        conv_method=conv_method,
+        ellipsoid=ellipsoid,
     )
 
     estimator = EagerEstimator(sigma=None, predictor_factory=predictor_factory)
@@ -1759,20 +1763,35 @@ def predict_positions(
     cls_name = params["predictor_factory"]["class"]  # type: str
     if "Gaussian2DCartesian" in cls_name:
         predictor_factory = _get_predictor_factory(
-            emission, truncate=truncate, dims=["x", "y"], ellipsoid=ellipsoid,
+            emission,
+            truncate=truncate,
+            dims=["x", "y"],
+            ellipsoid=ellipsoid,
         )
     elif "UpDownGaussian1DHealpix" in cls_name:
         predictor_factory = _get_predictor_factory(
-            emission, truncate=truncate, conv_method="LargeHealpixConv", dims=["cells"], ellipsoid=ellipsoid,
+            emission,
+            truncate=truncate,
+            conv_method="LargeHealpixConv",
+            dims=["cells"],
+            ellipsoid=ellipsoid,
         )
 
     elif "Gaussian1DHealpix" in cls_name:
         predictor_factory = _get_predictor_factory(
-            emission, truncate=truncate, conv_method="HealpixConv", dims=["cells"], ellipsoid=ellipsoid,
+            emission,
+            truncate=truncate,
+            conv_method="HealpixConv",
+            dims=["cells"],
+            ellipsoid=ellipsoid,
         )
     elif "Foscat1DHealpix" in cls_name:
         predictor_factory = _get_predictor_factory(
-            emission, truncate=truncate, conv_method="FoscatConv", dims=["cells"], ellipsoid=ellipsoid,
+            emission,
+            truncate=truncate,
+            conv_method="FoscatConv",
+            dims=["cells"],
+            ellipsoid=ellipsoid,
         )
     else:
         raise RuntimeError("Could not infer predictor's class from the `.json` file.")
@@ -2178,7 +2197,10 @@ def render_distributions(
 
 
 def multiplot_healpix(
-    datasets: list[tuple[xr.Dataset, list[str]]], refinement_level: int = 8, alpha=0.8, ellipsoid: str ="sphere",
+    datasets: list[tuple[xr.Dataset, list[str]]],
+    refinement_level: int = 8,
+    alpha=0.8,
+    ellipsoid: str = "sphere",
 ):
     """
     Exemple: [(ds1, ["pdf"]), (ds2, ["pdf", "temp"])]
@@ -2194,7 +2216,7 @@ def multiplot_healpix(
                         "grid_name": "healpix",
                         "level": refinement_level,
                         "indexing_scheme": "nested",
-                        "ellipsoid":ellipsoid
+                        "ellipsoid": ellipsoid,
                     }
                 )
                 .dggs.explore(alpha=alpha)

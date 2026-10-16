@@ -21,6 +21,7 @@ from pangeo_fish.healpy import (
 # en haut de acoustic.py
 _WGS84_E2 = 0.00669437999014  # excentricité² de WGS84
 
+
 def _unit_vector_to_lonlat(vector, ellipsoid):
     """Vecteur cartésien (repère de la grille) -> lon/lat en degrés."""
     if isinstance(ellipsoid, str) and ellipsoid.lower() == "sphere":
@@ -38,6 +39,7 @@ def _unit_vector_to_lonlat(vector, ellipsoid):
     else:
         raise ValueError(f"unsupported ellipsoid: {ellipsoid!r}")
     return lon, lat
+
 
 def count_detections(detections, by):
     """Count the amount of detections by interval
@@ -89,7 +91,12 @@ def count_detections(detections, by):
 
 
 def deployment_reception_masks(
-    stations, grid, buffer_size, method="recompute", dims=["cells"],ellipsoid="sphere",
+    stations,
+    grid,
+    buffer_size,
+    method="recompute",
+    dims=["cells"],
+    ellipsoid="sphere",
 ):
     rot = {
         "lat": grid["cell_ids"].attrs.get("lat", 0),
@@ -143,11 +150,13 @@ def buffer_points_cells(
     sphere_radius=6371e3,
     factor=4,
     intersect=False,
-    ellipsoid="sphere"
+    ellipsoid="sphere",
 ):
     """ """
 
-    def _buffer_masks(cell_ids, vector, nside, radius, factor=4, intersect=False, ellipsoid=ellipsoid):
+    def _buffer_masks(
+        cell_ids, vector, nside, radius, factor=4, intersect=False, ellipsoid=ellipsoid
+    ):
         radius_deg = np.degrees(radius)
         depth = int(np.log2(nside))
         vector_ang = _unit_vector_to_lonlat(vector, ellipsoid)
@@ -168,11 +177,10 @@ def buffer_points_cells(
             "nside": nside,
             "factor": factor,
             "intersect": intersect,
-            "ellipsoid" :ellipsoid,
+            "ellipsoid": ellipsoid,
         },
         output_core_dims=[["cells"]],
         vectorize=True,
-        
     )
 
     return masks.assign_coords(cell_ids=cell_ids)
@@ -244,7 +252,7 @@ def emission_probability(
     cell_ids="keep",
     chunk_time=24,
     dims=["cells"],
-    ellipsoid="sphere"
+    ellipsoid="sphere",
 ):
     """Construct emission probability maps from acoustic detections
 
