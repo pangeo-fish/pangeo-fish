@@ -37,6 +37,7 @@ results/*
 .venv/
 notebooks/A19124/
 notebooks/A18831/
+notebooks/test/
 notebooks/donnees_importees.tar.gz
 notebooks/donnees_importees/
 notebooks/states.mp4
