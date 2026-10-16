@@ -219,6 +219,7 @@ class UpDownGaussian1DHealpix(Predictor):
     sigma: float  # en radians
     kernel_sz: int | None = None  # taille nominale du noyau (résolution fine)
     max_compact_kernel_sz: int = 7  # borne sur le noyau compact (résolution grossière)
+    ellipsoid: str = "sphere"
     device: str = "cpu"
     dtype: any = torch.float32
 
@@ -242,7 +243,7 @@ class UpDownGaussian1DHealpix(Predictor):
             kernel_sz=self.kernel_sz,
             max_compact_kernel_sz=self.max_compact_kernel_sz,
             cell_ids=self.cell_ids,
-            ellipsoid="sphere",
+            ellipsoid=self.ellipsoid,
             weight_norm="l1",
             up_norm="col_l1",
             device=self.device,

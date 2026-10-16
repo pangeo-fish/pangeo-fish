@@ -18,6 +18,26 @@ from pangeo_fish.healpy import (
     geographic_to_astronomic,
 )
 
+# en haut de acoustic.py
+_WGS84_E2 = 0.00669437999014  # excentricité² de WGS84
+
+def _unit_vector_to_lonlat(vector, ellipsoid):
+    """Vecteur cartésien (repère de la grille) -> lon/lat en degrés."""
+    if isinstance(ellipsoid, str) and ellipsoid.lower() == "sphere":
+        # comportement d'origine
+        lon, lat = hpg.cartesian_to_lonlat(
+            vector[0], vector[1], vector[2], ellipsoid=ellipsoid
+        )
+        return float(lon[0]), float(lat[0])
+
+    x, y, z = (float(v) for v in vector)
+    lon = np.degrees(np.arctan2(y, x))
+    lat_c = np.arcsin(np.clip(z / np.sqrt(x * x + y * y + z * z), -1.0, 1.0))
+    if isinstance(ellipsoid, str) and ellipsoid.lower() == "wgs84":
+        lat = np.degrees(np.arctan(np.tan(lat_c) / (1.0 - _WGS84_E2)))
+    else:
+        raise ValueError(f"unsupported ellipsoid: {ellipsoid!r}")
+    return lon, lat
 
 def count_detections(detections, by):
     """Count the amount of detections by interval
@@ -69,7 +89,7 @@ def count_detections(detections, by):
 
 
 def deployment_reception_masks(
-    stations, grid, buffer_size, method="recompute", dims=["cells"]
+    stations, grid, buffer_size, method="recompute", dims=["cells"],ellipsoid="sphere",
 ):
     rot = {
         "lat": grid["cell_ids"].attrs.get("lat", 0),
@@ -106,6 +126,7 @@ def deployment_reception_masks(
             nside=2**cell_ids.dggs.grid_info.level,
             factor=2**16,
             intersect=True,
+            ellipsoid=ellipsoid,
         )
     else:
         raise ValueError("dims should be 'cells'")
@@ -122,19 +143,16 @@ def buffer_points_cells(
     sphere_radius=6371e3,
     factor=4,
     intersect=False,
+    ellipsoid="sphere"
 ):
     """ """
 
-    def _buffer_masks(cell_ids, vector, nside, radius, factor=4, intersect=False):
-        ## replacement
+    def _buffer_masks(cell_ids, vector, nside, radius, factor=4, intersect=False, ellipsoid=ellipsoid):
         radius_deg = np.degrees(radius)
         depth = int(np.log2(nside))
-        vector_ang = hpg.cartesian_to_lonlat(
-            vector[0], vector[1], vector[2], ellipsoid="sphere"
-        )
-        vector_ang = [vector_ang[0][0], vector_ang[1][0]]
+        vector_ang = _unit_vector_to_lonlat(vector, ellipsoid)
         selected_cells, _, _ = hpg.nested.cone_coverage(
-            vector_ang, radius_deg, depth, delta_depth=0, ellipsoid="sphere", flat=True
+            vector_ang, radius_deg, depth, delta_depth=0, ellipsoid=ellipsoid, flat=True
         )
         return np.isin(cell_ids, selected_cells, assume_unique=True)
 
@@ -150,9 +168,11 @@ def buffer_points_cells(
             "nside": nside,
             "factor": factor,
             "intersect": intersect,
+            "ellipsoid" :ellipsoid,
         },
         output_core_dims=[["cells"]],
         vectorize=True,
+        
     )
 
     return masks.assign_coords(cell_ids=cell_ids)
@@ -224,6 +244,7 @@ def emission_probability(
     cell_ids="keep",
     chunk_time=24,
     dims=["cells"],
+    ellipsoid="sphere"
 ):
     """Construct emission probability maps from acoustic detections
 
@@ -282,6 +303,7 @@ def emission_probability(
         buffer_size,
         method=cell_ids,
         dims=dims,
+        ellipsoid=ellipsoid,
     ).chunk()  # chunks the map (to prevent autochunk which caused division by zero error)
 
     maps_index = maps.indexes["deployment_id"]

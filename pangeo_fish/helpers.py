@@ -1132,6 +1132,7 @@ def compute_acoustic_pdf(
     save=False,
     target_root=".",
     storage_options: dict = None,
+    ellipsoid="sphere",
     **kwargs,
 ):
     """Compute a emission probability distribution from (acoustic) detection data.
@@ -1186,6 +1187,7 @@ def compute_acoustic_pdf(
         cell_ids="keep",
         chunk_time=chunk_time,
         dims=dims,
+        ellipsoid=ellipsoid,
     )
     attrs = emission_ds.attrs.copy() | _get_package_versions()
     attrs.update(
@@ -1397,6 +1399,7 @@ def _get_predictor_factory(
     dims: list[str],
     conv_method: str,
     device: str = "cpu",
+    ellipsoid="sphere"
 ):
     if dims == ["x", "y"]:
         raise ValueError("dims must be ['cells'], ['x','y'] is not used anymore")
@@ -1422,6 +1425,7 @@ def _get_predictor_factory(
                 cell_ids=ds["cell_ids"].data,
                 grid_info=ds.dggs.grid_info,
                 device=device,
+                ellipsoid=ellipsoid,
             )
         elif conv_method == "FoscatConv":
             predictor = curry(
@@ -1476,6 +1480,7 @@ def optimize_pdf(
     tolerance: float,
     dims: list[str] = ["cells"],
     conv_method: str = "HealpixConv",
+    ellipsoid : str ="sphere",
     final: bool = False,
     save_parameters=False,
     storage_options: dict = None,
@@ -1542,7 +1547,7 @@ def optimize_pdf(
     if final:
         max_sigma = 0.01
     predictor_factory = _get_predictor_factory(
-        ds=ds, truncate=truncate, dims=dims, conv_method=conv_method
+        ds=ds, truncate=truncate, dims=dims, conv_method=conv_method,ellipsoid=ellipsoid,
     )
 
     estimator = EagerEstimator(sigma=None, predictor_factory=predictor_factory)
@@ -1613,6 +1618,7 @@ def predict_positions(
     storage_options: dict,
     chunks: dict,
     track_modes=["mean", "mode"],
+    ellipsoid="sphere",
     additional_track_quantities=["speed", "distance"],
     save=True,
     **kwargs,
@@ -1753,20 +1759,20 @@ def predict_positions(
     cls_name = params["predictor_factory"]["class"]  # type: str
     if "Gaussian2DCartesian" in cls_name:
         predictor_factory = _get_predictor_factory(
-            emission, truncate=truncate, dims=["x", "y"]
+            emission, truncate=truncate, dims=["x", "y"], ellipsoid=ellipsoid,
         )
     elif "UpDownGaussian1DHealpix" in cls_name:
         predictor_factory = _get_predictor_factory(
-            emission, truncate=truncate, conv_method="LargeHealpixConv", dims=["cells"]
+            emission, truncate=truncate, conv_method="LargeHealpixConv", dims=["cells"], ellipsoid=ellipsoid,
         )
 
     elif "Gaussian1DHealpix" in cls_name:
         predictor_factory = _get_predictor_factory(
-            emission, truncate=truncate, conv_method="HealpixConv", dims=["cells"]
+            emission, truncate=truncate, conv_method="HealpixConv", dims=["cells"], ellipsoid=ellipsoid,
         )
     elif "Foscat1DHealpix" in cls_name:
         predictor_factory = _get_predictor_factory(
-            emission, truncate=truncate, conv_method="FoscatConv", dims=["cells"]
+            emission, truncate=truncate, conv_method="FoscatConv", dims=["cells"], ellipsoid=ellipsoid,
         )
     else:
         raise RuntimeError("Could not infer predictor's class from the `.json` file.")
@@ -2172,7 +2178,7 @@ def render_distributions(
 
 
 def multiplot_healpix(
-    datasets: list[tuple[xr.Dataset, list[str]]], refinement_level: int = 8
+    datasets: list[tuple[xr.Dataset, list[str]]], refinement_level: int = 8, alpha=0.8, ellipsoid: str ="sphere",
 ):
     """
     Exemple: [(ds1, ["pdf"]), (ds2, ["pdf", "temp"])]
@@ -2188,9 +2194,10 @@ def multiplot_healpix(
                         "grid_name": "healpix",
                         "level": refinement_level,
                         "indexing_scheme": "nested",
+                        "ellipsoid":ellipsoid
                     }
                 )
-                .dggs.explore(alpha=0.5)
+                .dggs.explore(alpha=alpha)
             )
             plots.append(plot)
     return plots
