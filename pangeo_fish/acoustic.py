@@ -3,13 +3,12 @@ Module for computing probability distributions from acoustic detections.
 """
 
 import flox.xarray
-import healpy as hp
+import healpix_geo as hpg
 import numpy as np
 import pandas as pd
 import xarray as xr
 from tlz.itertoolz import first
 from xhealpixify.conversions import geographic_to_cartesian
-from xhealpixify.operations import buffer_points
 
 from pangeo_fish import utils
 from pangeo_fish.cf import bounds_to_bins
@@ -18,6 +17,28 @@ from pangeo_fish.healpy import (
     astronomic_to_cell_ids,
     geographic_to_astronomic,
 )
+
+# en haut de acoustic.py
+_WGS84_E2 = 0.00669437999014  # excentricité² de WGS84
+
+
+def _unit_vector_to_lonlat(vector, ellipsoid):
+    """Vecteur cartésien (repère de la grille) -> lon/lat en degrés."""
+    if isinstance(ellipsoid, str) and ellipsoid.lower() == "sphere":
+        # comportement d'origine
+        lon, lat = hpg.cartesian_to_lonlat(
+            vector[0], vector[1], vector[2], ellipsoid=ellipsoid
+        )
+        return float(lon[0]), float(lat[0])
+
+    x, y, z = (float(v) for v in vector)
+    lon = np.degrees(np.arctan2(y, x))
+    lat_c = np.arcsin(np.clip(z / np.sqrt(x * x + y * y + z * z), -1.0, 1.0))
+    if isinstance(ellipsoid, str) and ellipsoid.lower() == "wgs84":
+        lat = np.degrees(np.arctan(np.tan(lat_c) / (1.0 - _WGS84_E2)))
+    else:
+        raise ValueError(f"unsupported ellipsoid: {ellipsoid!r}")
+    return lon, lat
 
 
 def count_detections(detections, by):
@@ -70,8 +91,15 @@ def count_detections(detections, by):
 
 
 def deployment_reception_masks(
-    stations, grid, buffer_size, method="recompute", dims=["x", "y"]
+    stations,
+    grid,
+    buffer_size,
+    method="recompute",
+    dims=["cells"],
+    ellipsoid=None,
 ):
+    if ellipsoid == None:
+        ellipsoid = grid["cell_ids"].attrs.get("ellipsoid")
     rot = {
         "lat": grid["cell_ids"].attrs.get("lat", 0),
         "lon": grid["cell_ids"].attrs.get("lon", 0),
@@ -108,16 +136,8 @@ def deployment_reception_masks(
             factor=2**16,
             intersect=True,
         )
-    elif dims == ["x", "y"]:
-        masks = buffer_points(
-            cell_ids,
-            positions,
-            buffer_size=buffer_size.m_as("m"),
-            # nside=2 ** cell_ids.attrs["level"],
-            nside=2**cell_ids.dggs.grid_info.level,
-            factor=2**16,
-            intersect=True,
-        )
+    else:
+        raise ValueError("dims should be 'cells'")
 
     return masks.drop_vars(["cell_ids"])
 
@@ -133,10 +153,16 @@ def buffer_points_cells(
     intersect=False,
 ):
     """ """
+    ellipsoid = cell_ids.attrs.get("ellipsoid")
 
-    def _buffer_masks(cell_ids, vector, nside, radius, factor=4, intersect=False):
-        selected_cells = hp.query_disc(
-            nside, vector, radius, nest=True, fact=factor, inclusive=intersect
+    def _buffer_masks(
+        cell_ids, vector, nside, radius, factor=4, intersect=False, ellipsoid=ellipsoid
+    ):
+        radius_deg = np.degrees(radius)
+        depth = int(np.log2(nside))
+        vector_ang = _unit_vector_to_lonlat(vector, ellipsoid)
+        selected_cells, _, _ = hpg.nested.cone_coverage(
+            vector_ang, radius_deg, depth, delta_depth=0, ellipsoid=ellipsoid, flat=True
         )
         return np.isin(cell_ids, selected_cells, assume_unique=True)
 
@@ -152,6 +178,7 @@ def buffer_points_cells(
             "nside": nside,
             "factor": factor,
             "intersect": intersect,
+            "ellipsoid": ellipsoid,
         },
         output_core_dims=[["cells"]],
         vectorize=True,
@@ -160,7 +187,7 @@ def buffer_points_cells(
     return masks.assign_coords(cell_ids=cell_ids)
 
 
-def create_masked_fill_map(tag, grid, maps, chunk_time=24, dims=["x", "y"]):
+def create_masked_fill_map(tag, grid, maps, chunk_time=24, dims=["cells"]):
     """Create a masked fill map indicating the detection zones.
 
     The function creates a masked fill map based on the station and grid information provided. It calculates
@@ -225,7 +252,8 @@ def emission_probability(
     nondetections="ignore",
     cell_ids="keep",
     chunk_time=24,
-    dims=None,
+    dims=["cells"],
+    ellipsoid=None,
 ):
     """Construct emission probability maps from acoustic detections
 
@@ -261,8 +289,10 @@ def emission_probability(
     emission : xarray.Dataset
         The resulting emission probability maps.
     """
-    if dims is None:
-        dims = ["x", "y"]
+    if ellipsoid == None:
+        ellipsoid = grid["cell_ids"].attrs.get("ellipsoid")
+    if dims != ["cells"]:
+        raise ValueError("dims is not filed right: try 'cells' ")
 
     if "acoustic" not in tag or "stations" not in tag:
         return xr.Dataset()
@@ -283,6 +313,7 @@ def emission_probability(
         buffer_size,
         method=cell_ids,
         dims=dims,
+        ellipsoid=ellipsoid,
     ).chunk()  # chunks the map (to prevent autochunk which caused division by zero error)
 
     maps_index = maps.indexes["deployment_id"]
