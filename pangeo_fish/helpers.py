@@ -28,6 +28,7 @@ import xarray as xr
 import xdggs  # noqa: F401
 from healpix_resample import BilinearResampler, CloughTocherResampler
 from matplotlib.figure import Figure
+from pint_xarray import unit_registry as ureg
 from scipy import ndimage
 from toolz.dicttoolz import valfilter
 from toolz.functoolz import curry  # to change
@@ -61,6 +62,7 @@ from pangeo_fish.visualization import filter_by_states, plot_map, render_frame
 
 __all__ = [
     "to_healpix",
+    "earth_radius_from_ellipsoid",
     "reshape_to_2d",
     "load_tag",
     "update_stations",
@@ -117,10 +119,41 @@ def _plot_in_figure(ds: xr.Dataset, **plot_kwargs) -> Figure:
     return fig
 
 
+def _with_dggs_attrs(ds: xr.Dataset) -> xr.Dataset:
+    """Return ``ds`` with the DGGS grid attributes written on ``cell_ids``.
+
+    The attributes follow the Zarr DGGS convention used by xdggs (``grid_name``,
+    ``level``, ``indexing_scheme`` and ``ellipsoid``). They are taken from the
+    xdggs index when the dataset has one, else from the existing ``cell_ids``
+    attributes, so that the grid definition survives a round trip to Zarr.
+    """
+    if "cell_ids" not in ds.variables:
+        return ds
+
+    try:
+        grid_attrs = ds.dggs.grid_info.to_dict()
+    except Exception:
+        attrs = ds["cell_ids"].attrs
+        if "level" not in attrs:
+            return ds
+        grid_attrs = {
+            "grid_name": attrs.get("grid_name", "healpix"),
+            "level": int(attrs["level"]),
+            "indexing_scheme": attrs.get("indexing_scheme", "nested"),
+        }
+        if attrs.get("ellipsoid") is not None:
+            grid_attrs["ellipsoid"] = attrs["ellipsoid"]
+
+    ds = ds.copy()
+    ds["cell_ids"].attrs.update(grid_attrs)
+    return ds
+
+
 def _save_zarr(ds: xr.Dataset, path: str, storage_options=None):
     """Helper for saving a .zarr array and warning in case of failure."""
     try:
         path_to_zarr = path + ".zarr" if not path.endswith(".zarr") else path
+        ds = _with_dggs_attrs(ds)
         ds.to_zarr(path_to_zarr, mode="w", storage_options=storage_options)
     except Exception:
         warnings.warn(
@@ -181,10 +214,14 @@ def _update_params_dict(factory, params: dict):
 def to_healpix(ds: xr.Dataset) -> xr.Dataset:
     """Helper that loads a Dataset as a HEALPix grid (indexed by ``"cell_ids"``)."""
 
-    attrs_to_keep = ["level", "indexing_scheme"]
+    attrs_to_keep = ["level", "indexing_scheme", "ellipsoid"]
     cell_ids_attrs = ds["cell_ids"].attrs
 
-    attrs = {k: v for (k, v) in cell_ids_attrs.items() if k in attrs_to_keep}
+    attrs = {
+        k: v
+        for (k, v) in cell_ids_attrs.items()
+        if k in attrs_to_keep and v is not None
+    }
 
     if "indexing_scheme" not in attrs.keys():
         attrs["indexing_scheme"] = "nested"
@@ -470,6 +507,62 @@ def _open_intake_catalog(yaml_url: str, chunks: dict = None):
     return model
 
 
+def _resolve_copernicus_datasets(dataset_id: str):
+    """Return temperature, SSH, static IDs and the optional static part.
+
+    Only the IBI daily reanalysis has an explicit split-product mapping;
+    other products retain the existing combined-dataset/static convention.
+    """
+    if dataset_id == "cmems_mod_ibi_phy-temp_my_0.027deg_P1D-m":
+        return (
+            dataset_id,
+            "cmems_mod_ibi_phy-ssh_my_0.027deg_P1D-m",
+            "cmems_mod_ibi_phy_my_0.027deg-3D_static",
+            "bathy",
+        )
+    return dataset_id, dataset_id, dataset_id.rsplit("_", 1)[0] + "_static", None
+
+
+def _align_copernicus_coordinates(reference, other, dataset_id):
+    """Accept roundoff only; never interpolate spatial or temporal coordinates."""
+    for name in ("latitude", "longitude", "depth", "time"):
+        if name not in reference.coords or name not in other.coords:
+            if name in ("latitude", "longitude"):
+                raise ValueError(
+                    f"Copernicus dataset {dataset_id!r} is missing {name!r}."
+                )
+            continue
+        expected, actual = reference[name], other[name]
+        if (
+            expected.dims != (name,)
+            or actual.dims != (name,)
+            or expected.shape != actual.shape
+            or not expected.size
+            or not expected.to_index().is_unique
+            or not actual.to_index().is_unique
+        ):
+            raise ValueError(
+                f"Copernicus dataset {dataset_id!r}: incompatible {name} grid."
+            )
+        if np.array_equal(expected.values, actual.values):
+            continue
+        # Horizontal tolerance is < 1.2 m, far below these model grid spacings.
+        # Depth tolerance accommodates float32/float64 encodings of model levels.
+        if name == "time" or not np.allclose(
+            expected.values,
+            actual.values,
+            rtol=1e-6 if name == "depth" else 0,
+            atol=1e-6 if name == "depth" else 1e-5,
+            equal_nan=False,
+        ):
+            raise ValueError(
+                f"Copernicus dataset {dataset_id!r}: {name} grid differs from "
+                "temperature; explicit alignment is required."
+            )
+        other = other.assign_coords({name: expected})
+    return other
+
+
 def _open_copernicus_model(
     copernicus_model_name: str,
     bbox: dict[str, tuple[float, float]],
@@ -485,7 +578,9 @@ def _open_copernicus_model(
     copernicus_model_name : str
         Copernicus Marine ``dataset_id`` for the daily-mean physics product
         (e.g. ``"cmems_mod_glo_phy_my_0.083deg_P1D-m"``). The matching static
-        product (``..._static``) is opened to retrieve ``deptho`` and ``mask``.
+        product is opened to retrieve ``deptho`` and ``mask``. IBI daily
+        reanalysis resolves separate temperature/SSH IDs and static ``bathy``
+        fields internally; callers still provide just the temperature ID.
     bbox : dict
         Spatial boundaries with keys ``longitude`` and ``latitude``.
     time_slice : slice
@@ -499,7 +594,9 @@ def _open_copernicus_model(
     model : xarray.Dataset
         Dataset with ``TEMP``, ``XE`` and ``H0`` (via :func:`prepare_dataset`).
     """
-    static_name = copernicus_model_name.rsplit("_", 1)[0] + "_static"
+    temperature_id, ssh_id, static_id, static_part = _resolve_copernicus_datasets(
+        copernicus_model_name
+    )
 
     if time_slice is not None and time_slice.start is not None:
         start_datetime = np.datetime_as_string(
@@ -512,21 +609,7 @@ def _open_copernicus_model(
     else:
         raise ValueError("Either `time_slice` or `tag_log` must be provided.")
 
-    ds_thetao_zos = copernicusmarine.open_dataset(
-        dataset_id=copernicus_model_name,
-        variables=["thetao", "zos"],
-        minimum_longitude=bbox["longitude"][0],
-        maximum_longitude=bbox["longitude"][1],
-        minimum_latitude=bbox["latitude"][0],
-        maximum_latitude=bbox["latitude"][1],
-        start_datetime=start_datetime,
-        end_datetime=end_datetime,
-        username=Username,
-        password=Password,
-    )
-    static_var = copernicusmarine.open_dataset(
-        dataset_id=static_name,
-        variables=["deptho", "mask"],
+    spatial = dict(
         minimum_longitude=bbox["longitude"][0],
         maximum_longitude=bbox["longitude"][1],
         minimum_latitude=bbox["latitude"][0],
@@ -534,8 +617,37 @@ def _open_copernicus_model(
         username=Username,
         password=Password,
     )
-    static_var = static_var.assign_coords(longitude=ds_thetao_zos["longitude"].values)
-    ds_all = xr.merge([ds_thetao_zos, static_var], compat="no_conflicts")
+    temporal = dict(start_datetime=start_datetime, end_datetime=end_datetime)
+
+    def open_fields(dataset_id, variables, **options):
+        ds = copernicusmarine.open_dataset(
+            dataset_id=dataset_id, variables=variables, **spatial, **options
+        )
+        missing = set(variables) - set(ds.data_vars)
+        if missing:
+            raise ValueError(
+                f"Copernicus dataset {dataset_id!r} is missing required variables "
+                f"{sorted(missing)}; available variables: {list(ds.data_vars)}."
+            )
+        return ds[variables]
+
+    split = temperature_id != ssh_id
+    temperature = open_fields(
+        temperature_id, ["thetao"] if split else ["thetao", "zos"], **temporal
+    )
+    datasets = [temperature]
+    if split:
+        ssh = open_fields(ssh_id, ["zos"], **temporal)
+        if "time" not in ssh.coords or "time" not in temperature.coords:
+            raise ValueError(f"Copernicus dataset {ssh_id!r}: missing time coordinate.")
+        datasets.append(_align_copernicus_coordinates(temperature, ssh, ssh_id))
+
+    # IBI 202511 catalogue: bathy contains deptho(latitude, longitude) and
+    # mask(depth, latitude, longitude), as well as unused deptho_lev.
+    static_options = {"dataset_part": static_part} if static_part else {}
+    static = open_fields(static_id, ["deptho", "mask"], **static_options)
+    datasets.append(_align_copernicus_coordinates(temperature, static, static_id))
+    ds_all = xr.merge(datasets, compat="no_conflicts", join="exact")
     ds_all = ds_all.rename({"latitude": "lat", "longitude": "lon"})
     return prepare_dataset(ds_all)
 
@@ -843,10 +955,17 @@ def regrid_dataset_hpresample(
     n_left = int((is_ocean & ~valid & ~valid_b).sum())
     print(f"cellules océan couvertes ni par CT ni par le repli : {n_left}")
 
-    def to_full(cell_data):
-        """Replace les sorties CT sur ref_cell_ids et applique le masque océan."""
+    def to_full(cell_data, variable):
+        """Align CT values, fill ocean gaps with bilinear values, and mask land."""
         out = np.full(cell_data.shape[:-1] + (ref_cell_ids.size,), np.nan)
         out[..., valid] = cell_data[..., idx[valid]]
+        fallback = is_ocean & valid_b
+        current = out[..., fallback]
+        if not np.isfinite(current).all():
+            replacement = resampler_bil.resample(variable).cell_data[
+                ..., idx_b[fallback]
+            ]
+            out[..., fallback] = np.where(np.isfinite(current), current, replacement)
         out[..., ~is_ocean] = np.nan
         return out
 
@@ -869,9 +988,9 @@ def regrid_dataset_hpresample(
     )
 
     for name, da in ds.data_vars.items():
-        # ne pas écraser ocean_mask / coordonnées déjà présentes dans new_ds
-        # if name in new_ds.variables:
-        #     continue
+        # Keep the target ocean mask and coordinates created above.
+        if name in new_ds.variables:
+            continue
         print(name, da.dims)
 
         if len(da.dims) == 3:
@@ -882,20 +1001,21 @@ def regrid_dataset_hpresample(
             )
             new_ds[name] = (
                 ("time", "cells"),
-                to_full(resampler_ct.resample(variable).cell_data),
+                to_full(resampler_ct.resample(variable).cell_data, variable),
             )
 
         elif len(da.dims) == 2:
             variable = ds[name].transpose("yi", "xi").values.ravel()[valid_src]
             new_ds[name] = (
                 ("cells",),
-                to_full(resampler_ct.resample(variable).cell_data),
+                to_full(resampler_ct.resample(variable).cell_data, variable),
             )
 
     new_ds["cell_ids"].attrs.update(
         indexing_scheme="nested",
         grid_name="healpix",
         level=refinement_level,
+        ellipsoid=ellipsoid,
     )
 
     attrs = ds.attrs.copy()
@@ -1101,6 +1221,7 @@ def compute_emission_pdf(
     emission_pdf = emission_pdf.assign_attrs(attrs)
     if "cell_ids" in diff_ds.coords and "cell_ids" in emission_pdf.coords:
         emission_pdf["cell_ids"].attrs.update(diff_ds["cell_ids"].attrs)
+    emission_pdf = _with_dggs_attrs(emission_pdf)
     emission_pdf = emission_pdf.chunk({"time": chunk_time} | {d: -1 for d in dims})
 
     if save:
@@ -1170,9 +1291,8 @@ def compute_acoustic_pdf(
     """
 
     if dims == ["cells"]:
-        lon, lat = emission_ds["cell_ids"].attrs.get("lat", 0), emission_ds[
-            "cell_ids"
-        ].attrs.get("lon", 0)
+        lat = emission_ds["cell_ids"].attrs.get("lat", 0)
+        lon = emission_ds["cell_ids"].attrs.get("lon", 0)
         emission_ds = to_healpix(emission_ds)
         # adds back "lon" and "lat" keys
         emission_ds["cell_ids"].attrs["lon"] = lon
@@ -1195,7 +1315,7 @@ def compute_acoustic_pdf(
             "receiver_buffer": str(receiver_buffer),
         }
     )
-    acoustic_pdf = acoustic_pdf.assign_attrs(attrs)
+    acoustic_pdf = _with_dggs_attrs(acoustic_pdf.assign_attrs(attrs))
 
     if save:
         _save_zarr(acoustic_pdf, f"{target_root}/acoustic.zarr", storage_options)
@@ -1290,6 +1410,7 @@ def combine_pdfs(
         if combined.coords.get("cell_ids", None) is not None:
             combined["cell_ids"].attrs.update(ds["cell_ids"].attrs)
     ds.attrs.update(_get_package_versions())
+    combined = _with_dggs_attrs(combined)
 
     figure = False
     if plot:
@@ -1385,7 +1506,7 @@ def normalize_pdf(
         for item in excluded_pdf:
             normalized = normalized.drop_vars(item)
 
-    normalized = normalized.rename({"pdf_normalized": "pdf"})
+    normalized = _with_dggs_attrs(normalized.rename({"pdf_normalized": "pdf"}))
     warnings.warn(
         f"you decided to normalize the pdf without: {excluded_pdf}, if you want to include them, change excluded_pdf ",
         UserWarning,
@@ -1444,17 +1565,72 @@ def _get_predictor_factory(
     return predictor
 
 
+def earth_radius_from_ellipsoid(ellipsoid=None) -> pint.Quantity:
+    """Return the Earth radius (in km) implied by a HEALPix ``ellipsoid``.
+
+    Parameters
+    ----------
+    ellipsoid : str, dict, xdggs.ellipsoid.Sphere or xdggs.ellipsoid.Ellipsoid, optional
+        The ellipsoid the grid was built on, as stored in the DGGS grid
+        attributes. ``None`` is taken as ``"sphere"``. Named ellipsoids are
+        resolved with :py:func:`healpix_geo.ellipsoid.resolve`.
+
+    Returns
+    -------
+    earth_radius : pint.Quantity
+        The sphere radius, or the semi-major axis for an ellipsoid. Dividing a
+        distance by the semi-major axis gives the smallest angle that distance
+        can span on the ellipsoid, so the result is a conservative bound for
+        converting displacements into angular sigma.
+    """
+    if ellipsoid is None:
+        ellipsoid = "sphere"
+    if isinstance(ellipsoid, str):
+        params = hg.ellipsoid.resolve(ellipsoid)
+    elif hasattr(ellipsoid, "to_dict"):
+        params = ellipsoid.to_dict()
+    else:
+        params = dict(ellipsoid)
+
+    radius_m = params.get("radius", params.get("semimajor_axis"))
+    if radius_m is None:
+        raise ValueError(f"cannot determine the Earth radius from {ellipsoid!r}")
+
+    return ureg.Quantity(float(radius_m), "m").to("km")
+
+
+def _earth_radius_from_grid(ds: xr.Dataset) -> pint.Quantity:
+    """Derive the Earth radius from the DGGS grid info of ``ds``."""
+    try:
+        ellipsoid = ds.dggs.grid_info.ellipsoid
+    except Exception:
+        ellipsoid = ds["cell_ids"].attrs.get("ellipsoid")
+    return earth_radius_from_ellipsoid(ellipsoid)
+
+
+def _grid_resolution_radians(ds: xr.Dataset) -> xr.DataArray:
+    """Mean HEALPix cell size in radians (square root of the cell area)."""
+    if "resolution" in ds.variables:
+        return ds["resolution"].pint.quantify()
+    nside = 2 ** int(ds.dggs.grid_info.level)
+    return xr.DataArray(
+        ureg.Quantity(np.sqrt(4 * np.pi / (12 * nside**2)), "radian"), dims=None
+    )
+
+
 def _get_max_sigma(
     ds: xr.Dataset,
-    earth_radius: pint.Quantity,
+    earth_radius: pint.Quantity | None,
     adjustment_factor: float,
     maximum_speed: pint.Quantity,
     as_radians: bool,
 ) -> float:
+    if earth_radius is None:
+        earth_radius = _earth_radius_from_grid(ds)
     earth_radius_ = xr.DataArray(earth_radius, dims=None)
 
     timedelta = temporal_resolution(ds["time"]).pint.quantify().pint.to("h")
-    grid_resolution = earth_radius_ * ds["resolution"].pint.quantify()
+    grid_resolution = earth_radius_ * _grid_resolution_radians(ds)
 
     maximum_speed_ = xr.DataArray(maximum_speed, dims=None).pint.to("km / h")
     if as_radians:
@@ -1473,11 +1649,11 @@ def _get_max_sigma(
 def optimize_pdf(
     *,
     ds: xr.Dataset,
-    earth_radius: pint.Quantity,
     adjustment_factor: float,
     truncate: float | None,
     maximum_speed: pint.Quantity,
     tolerance: float,
+    earth_radius: pint.Quantity | None = None,
     dims: list[str] = ["cells"],
     conv_method: str = "HealpixConv",
     ellipsoid: str = "sphere",
@@ -1493,8 +1669,6 @@ def optimize_pdf(
     ----------
     ds : xarray.Dataset
         Dataset of emission probabilities
-    earth_radius : pint.Quantity
-        Radius of the Earth used for distance calculations
     adjustment_factor : float
         Factor value for the maximum fish's displacement
     truncate : float
@@ -1503,6 +1677,10 @@ def optimize_pdf(
         Maximum fish's velocity
     tolerance : float
         Tolerance level for the optimised parameter search computation
+    earth_radius : pint.Quantity, optional
+        Radius of the Earth used for distance calculations. By default it is
+        derived from the ``ellipsoid`` of the HEALPix grid (the DGGS attributes
+        of ``cell_ids``), see :py:func:`earth_radius_from_ellipsoid`.
     dims : list of str, default: ["cells"]
         The list of the dimensions. Either ``["x", "y"]`` or ``["cells"]``
     final : bool, default: False
@@ -1826,6 +2004,7 @@ def predict_positions(
 
         sigma_var = _compute_sigma_var(sigma_indices, params["sigma"])
         states = states.assign(sigma=("time", sigma_var))
+    states = _with_dggs_attrs(states)
 
     if save:
         _save_zarr(states, f"{target_root}/states.zarr", storage_options)
