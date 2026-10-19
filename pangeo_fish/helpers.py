@@ -1289,7 +1289,7 @@ def compute_acoustic_pdf(
         The plot of ``acoustic_pdf``, or None if ``plot=False``
 
     """
-    if ellipsoid == None:
+    if ellipsoid is None:
         ellipsoid = emission_ds["cell_ids"].attrs.get("ellipsoid")
 
     if dims == ["cells"]:
@@ -1528,7 +1528,7 @@ def _get_predictor_factory(
         raise ValueError("dims must be ['cells'], ['x','y'] is not used anymore")
 
     elif dims == ["cells"]:
-        if ellipsoid == None:
+        if ellipsoid is None:
             ellipsoid = ds["cell_ids"].attrs.get("ellipsoid")
         if conv_method == "HealpixConv":
             if truncate is None:
@@ -1722,7 +1722,7 @@ def optimize_pdf(
     else:
         raise ValueError("dims must be ['cells'], ['x','y'] is not used anymore")
         as_radians = False
-    if ellipsoid == None:
+    if ellipsoid is None:
         ellipsoid = ds["cell_ids"].attrs.get("ellipsoid")
 
     max_sigma = _get_max_sigma(

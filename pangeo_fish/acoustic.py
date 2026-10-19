@@ -111,7 +111,7 @@ def deployment_reception_masks(
     dims=["cells"],
     ellipsoid=None,
 ):
-    if ellipsoid == None:
+    if ellipsoid is None:
         ellipsoid = grid["cell_ids"].attrs.get("ellipsoid")
     rot = {
         "lat": grid["cell_ids"].attrs.get("lat", 0),
@@ -302,7 +302,7 @@ def emission_probability(
     emission : xarray.Dataset
         The resulting emission probability maps.
     """
-    if ellipsoid == None:
+    if ellipsoid is None:
         ellipsoid = grid["cell_ids"].attrs.get("ellipsoid")
     if dims != ["cells"]:
         raise ValueError("dims is not filed right: try 'cells' ")
