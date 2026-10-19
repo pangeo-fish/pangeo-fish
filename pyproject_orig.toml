@@ -1,0 +1,146 @@
+[project]
+name = "pangeo-fish"
+authors = [{ name = "TAOS" }]
+description = "Utilities for fish geolocation"
+readme = "README.md"
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+]
+dependencies = [
+  # core scientific stack
+  # xarray 2025.4.0 has a BinGrouper.factorize regression (pd.Index(None));
+  # known-good version is 2025.3.x (matches docs/environment.yaml).
+  "xarray>=2024.11.0,<2025.4",
+  "pandas",
+  "numpy",
+  "scipy",
+  "numba",
+  "sparse",
+  "opt_einsum",
+  "more_itertools",
+  "toolz",
+  # IO stack — pinned to known-working versions
+  "zarr==2.18.7",
+  "kerchunk==0.2.7",
+  "fsspec==2025.3.2",
+  "s3fs==2025.3.2",
+  "gcsfs==2025.3.2",
+  "numcodecs==0.15.1",
+  "h5netcdf",
+  "intake",
+  "intake-xarray",
+  # geographic & HEALPix
+  "healpy",
+  "cartopy",
+  "geopandas",
+  "shapely",
+  "movingpandas==0.21.3",
+  "xhealpixify",
+  "xdggs",
+  "healpix-convolution",
+  "cf_xarray>=0.10.4",
+  "pint",
+  "pint-xarray",
+  # distributed / parallel
+  "dask",
+  "distributed",
+  "flox",
+  # plotting / visualization
+  "matplotlib",
+  "hvplot",
+  "holoviews",
+  "cmocean",
+  "imageio[ffmpeg]",
+  # CLI / progress
+  "rich",
+  "rich-click",
+  "tqdm",
+  # Copernicus Marine Service client (default model loader)
+  "copernicusmarine>=2.3,<2.4",
+]
+dynamic = ["version"]
+
+[project.urls]
+"Homepage" = "https://github.com/pangeo-fish/pangeo-fish"
+
+[project.scripts]
+pangeo-fish = "pangeo_fish.cli:main"
+
+[tool.setuptools.packages.find]
+where = [""]
+include = ["pangeo_fish*"]
+namespaces = false
+
+[build-system]
+requires = [
+  "setuptools>=77.0.0",
+  "wheel",
+  "setuptools_scm[toml]>=3.4",
+]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+fallback_version = "999"
+
+[tool.coverage.run]
+source = ["pangeo_fish"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = ["pragma: no cover", "if TYPE_CHECKING"]
+
+[tool.ruff]
+builtins = ["ellipsis"]
+exclude = [
+  ".git",
+  ".eggs",
+  "build",
+  "dist",
+  "__pycache__",
+  "docs",
+]
+target-version = "py310"
+
+extend-include = ["*.ipynb"]
+line-length = 100
+
+[tool.ruff.lint]
+ignore = [
+  "E203",  # whitespace before ':' - doesn't work well with black
+  "E402",  # module level import not at top of file
+  "E501",  # line too long - let black worry about that
+  "E731",  # do not assign a lambda expression, use a def
+  "UP038", # use type union instead of tuple of types - type union is slower
+]
+select = [
+  "F",   # Pyflakes
+  "E",   # Pycodestyle
+  "I",   # isort
+  "UP",  # Pyupgrade
+  "TID", # tidy imports
+]
+extend-safe-fixes = [
+  "TID252", # absolute imports
+]
+fixable = ["I", "TID", "UP"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["pangeo_fish"]
+known-third-party = []
+
+[tool.ruff.lint.flake8-tidy-imports]
+# Disallow all relative imports.
+ban-relative-imports = "all"
+
+[tool.pytest.ini_options]
+filterwarnings = [
+  "error:::pangeo_fish.*",
+  "ignore:Missing optional dependencies. To use the trajectory smoother classes please install Stone Soup:UserWarning:movingpandas",
+  "ignore:Specifying VariableLengthTuple:DeprecationWarning:traitlets",
+]
