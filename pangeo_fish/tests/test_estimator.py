@@ -7,7 +7,7 @@ from tlz.functoolz import curry
 
 from pangeo_fish.hmm.estimator import EagerEstimator
 from pangeo_fish.hmm.optimize import EagerBoundsSearch
-from pangeo_fish.hmm.prediction import Gaussian1DHealpix
+from pangeo_fish.hmm.prediction import Foscat1DHealpix
 
 
 @pytest.fixture
@@ -42,6 +42,7 @@ def sample_dataset():
             "initial": ("cells", initial),
             "final": ("cells", final),
             "mask": ("cells", mask),
+            "predictor_index": ("time", np.zeros(num_time_steps, dtype=np.int32)),
         },
     )
     return ds.dggs.decode(
@@ -54,18 +55,23 @@ def predictor_factory(sample_dataset):
     """
     Return a configured Gaussian1DHealpix predictor factory using sample dataset parameters.
     """
+    # curry(
+    #     Gaussian1DHealpix,
+    #     cell_ids=sample_dataset["cell_ids"].data,
+    #     grid_info=sample_dataset.dggs.grid_info,
+    #     truncate=4.0,
+    #     weights_threshold=1e-8,
+    #     pad_kwargs={"mode": "constant", "constant_value": 0},
+    #     optimize_convolution=True,
+    # )
     return curry(
-        Gaussian1DHealpix,
+        Foscat1DHealpix,
         cell_ids=sample_dataset["cell_ids"].data,
         grid_info=sample_dataset.dggs.grid_info,
-        truncate=4.0,
-        weights_threshold=1e-8,
-        pad_kwargs={"mode": "constant", "constant_value": 0},
-        optimize_convolution=True,
     )
 
 
-@pytest.mark.parametrize("sigma", [0.0004, 0.0002])
+@pytest.mark.parametrize("sigma", [[0.0004], [0.0002]])
 def test_eager_estimator_score(sample_dataset, predictor_factory, sigma):
     """
     Test that the score method returns a float and meets expected criteria for given sigma values.
@@ -78,7 +84,7 @@ def test_eager_estimator_score(sample_dataset, predictor_factory, sigma):
     ), "Score should be equal to or bigger than the number of timesteps."
 
 
-@pytest.mark.parametrize("sigma", [0.0001, 0.01, 0.005, 0.02])
+@pytest.mark.parametrize("sigma", [[0.0001], [0.01], [0.005], [0.02]])
 def test_eager_estimator_predict_proba(sample_dataset, predictor_factory, sigma):
     """
     Test that `predict_proba` computes positive state probabilities summing to 1 for each time step.
@@ -118,11 +124,12 @@ def test_fit_sigma(sample_dataset, predictor_factory, tolerance):
         (1e-4, 0.0004905038455501491),
         optimizer_kwargs={"disp": 3, "xtol": tolerance},
     )
-    optimized = optimizer.fit(sample_dataset)
+    optimized = optimizer.fit_single_parameter(sample_dataset)
     print("Type of optimized:", type(optimized))
     if hasattr(optimized, "sigma"):
         result = optimized.sigma
-        if isinstance(result, np.ndarray | float | int):
-            assert not np.isnan(result).any(), "Optimized sigma is nan"
-        else:
-            raise ValueError("Optimized result is not in the expected format ")
+    if isinstance(result, (np.ndarray, float, int, list)):
+        arr = np.atleast_1d(result)
+        assert not np.isnan(arr).any(), "Optimized sigma is nan"
+    else:
+        raise ValueError("Optimized result is not in the expected format ")
