@@ -142,7 +142,6 @@ def score_final_pos(
     return loss
 
 
-
 def forward(emission, predictors, predictor_indices, initial_probability, mask=None):
     """Single pass (forwards) of the spatial HMM filter
 
@@ -214,7 +213,9 @@ def backward(states, predictions, predictors, predictor_indices, mask=None):
 
     smoothed = [states[-1, ...]]
     backward_predictions = [states[-1, ...]]
-    for time_index, predictor_index in zip(range(1, n_max), predictor_indices[: n_max - 1][::-1]):
+    for time_index, predictor_index in zip(
+        range(1, n_max), predictor_indices[: n_max - 1][::-1]
+    ):
         ratio = smoothed[time_index - 1] / (predictions[-time_index, ...] + eps)
         backward_prediction = predictors[predictor_index].predict(ratio, mask=None)
         normalized = backward_prediction / np.sum(backward_prediction)
