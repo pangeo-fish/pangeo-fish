@@ -50,7 +50,7 @@ def _unit_vector_to_lonlat(vector, ellipsoid):
         )
     else:
         raise ValueError(f"unsupported ellipsoid: {ellipsoid!r}")
-    print(lat,lat2,lat3)
+    print(lat, lat2, lat3)
     return lon, lat
 
 
