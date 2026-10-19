@@ -24,6 +24,7 @@ _WGS84_E2 = 0.00669437999014  # excentricité² de WGS84
 
 def _unit_vector_to_lonlat(vector, ellipsoid):
     """Vecteur cartésien (repère de la grille) -> lon/lat en degrés."""
+    print(ellipsoid)
     if isinstance(ellipsoid, str) and ellipsoid.lower() == "sphere":
         # comportement d'origine
         lon, lat = hpg.cartesian_to_lonlat(
@@ -32,12 +33,24 @@ def _unit_vector_to_lonlat(vector, ellipsoid):
         return float(lon[0]), float(lat[0])
 
     x, y, z = (float(v) for v in vector)
+    n = np.sqrt(x * x + y * y + z * z)
+    x, y, z = x / n, y / n, z / n
     lon = np.degrees(np.arctan2(y, x))
     lat_c = np.arcsin(np.clip(z / np.sqrt(x * x + y * y + z * z), -1.0, 1.0))
     if isinstance(ellipsoid, str) and ellipsoid.lower() == "wgs84":
+        a = 6378137.0
+        e2 = _WGS84_E2
+        scale = a / np.sqrt(x * x + y * y + (1.0 - e2) * z * z)
         lat = np.degrees(np.arctan(np.tan(lat_c) / (1.0 - _WGS84_E2)))
+        lon2, lat2 = hpg.cartesian_to_lonlat(
+            x * scale, y * scale, z * scale, ellipsoid=ellipsoid
+        )
+        lon3, lat3 = hpg.cartesian_to_lonlat(
+            vector[0], vector[1], vector[2], ellipsoid="sphere"
+        )
     else:
         raise ValueError(f"unsupported ellipsoid: {ellipsoid!r}")
+    print(lat,lat2,lat3)
     return lon, lat
 
 
