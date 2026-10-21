@@ -60,3 +60,4 @@ notebooks/plot_glissant.html
 notebooks/plot.py
 notebooks/plot_glissant_array.py
 notebooks/exemples_usage.py
+notebooks/healpix_analyse_fft.py
