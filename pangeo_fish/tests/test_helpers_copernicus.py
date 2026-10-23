@@ -11,6 +11,12 @@ IBI = "cmems_mod_ibi_phy-temp_my_0.027deg_P1D-m"
 SSH = "cmems_mod_ibi_phy-ssh_my_0.027deg_P1D-m"
 STATIC = "cmems_mod_ibi_phy_my_0.027deg-3D_static"
 GLOBAL = "cmems_mod_glo_phy_my_0.083deg_P1D-m"
+IBI_HOURLY = "cmems_mod_ibi_phy_anfc_0.027deg-3D_PT1H-m"
+IBI_HOURLY_SSH = "cmems_mod_ibi_phy_anfc_0.027deg-2D_PT1H-m"
+IBI_HOURLY_STATIC = "cmems_mod_ibi_phy_anfc_0.027deg-3D_static"
+NWS_HOURLY = "cmems_mod_nws_phy-tem_anfc_1.5km-3D_PT1H-i"
+NWS_HOURLY_SSH = "cmems_mod_nws_phy-ssh_anfc_1.5km-2D_PT1H-i"
+NWS_HOURLY_STATIC = "cmems_mod_nws_phy_anfc_1.5km_static"
 BBOX = {"latitude": [48, 49], "longitude": [-5, -4], "max_depth": 20}
 PERIOD = slice("2021-06-01", "2021-06-03")
 
@@ -64,6 +70,8 @@ def client(monkeypatch, fields):
     [
         (IBI, (IBI, SSH, STATIC, "bathy")),
         (GLOBAL, (GLOBAL, GLOBAL, "cmems_mod_glo_phy_my_0.083deg_static", None)),
+        (IBI_HOURLY, (IBI_HOURLY, IBI_HOURLY_SSH, IBI_HOURLY_STATIC, "bathy")),
+        (NWS_HOURLY, (NWS_HOURLY, NWS_HOURLY_SSH, NWS_HOURLY_STATIC, "bathy")),
         # Do not invent companions for other temperature products.
         (
             "other-temp_P1D-m",
@@ -230,3 +238,64 @@ def test_load_model_and_compute_diff(client, fields, dataset):
     )
     assert diff["diff"].dims == ("time", "lat", "lon")
     assert diff["diff"].notnull().any().compute().item()
+
+
+@pytest.mark.parametrize(
+    "temperature, ssh, static",
+    [
+        (IBI_HOURLY, IBI_HOURLY_SSH, IBI_HOURLY_STATIC),
+        (NWS_HOURLY, NWS_HOURLY_SSH, NWS_HOURLY_STATIC),
+    ],
+)
+def test_hourly_requests_use_hourly_bounds(client, fields, temperature, ssh, static):
+    mock, datasets = client
+    hours = np.arange("2021-06-03T00", "2021-06-03T03", dtype="datetime64[h]").astype(
+        "datetime64[ns]"
+    )
+    hourly = fields.isel(time=[0, 1, 2]).assign_coords(time=hours)
+    datasets[temperature] = hourly[["thetao"]]
+    datasets[ssh] = hourly[["zos"]]
+    datasets[static] = hourly[["deptho", "mask"]]
+
+    actual = helpers._open_copernicus_model(
+        temperature, BBOX, slice("2021-06-01", "2021-06-03")
+    )
+
+    xr.testing.assert_identical(
+        actual, prepare_dataset(hourly.rename(latitude="lat", longitude="lon"))
+    )
+    calls = [c.kwargs for c in mock.call_args_list]
+    assert [c["dataset_id"] for c in calls] == [temperature, ssh, static]
+    assert calls[2]["dataset_part"] == "bathy"
+    for call in calls[:2]:
+        assert call["start_datetime"] == "2021-06-01T00:00:00"
+        # a date-only stop includes the whole last day
+        assert call["end_datetime"] == "2021-06-03T23:59:59"
+
+
+def test_hourly_time_bounds_keep_explicit_timestamps():
+    start, end = helpers._copernicus_time_bounds(
+        NWS_HOURLY, slice("2025-01-01T06:00", "2025-01-02T18:00"), None
+    )
+    assert (start, end) == ("2025-01-01T06:00:00", "2025-01-02T18:00:00")
+
+
+def test_hourly_time_bounds_from_tag_log():
+    tag_log = xr.Dataset(
+        coords={
+            "time": np.array(
+                ["2025-01-01T06:30", "2025-01-02T18:15"], dtype="datetime64[ns]"
+            )
+        }
+    )
+    start, end = helpers._copernicus_time_bounds(IBI_HOURLY, None, tag_log)
+    assert (start, end) == ("2025-01-01T06:30:00", "2025-01-02T18:15:00")
+
+
+def test_daily_time_bounds_unchanged():
+    assert helpers._copernicus_time_bounds(IBI, PERIOD, None) == (
+        "2021-06-01",
+        "2021-06-03",
+    )
+    with pytest.raises(ValueError, match="time_slice"):
+        helpers._copernicus_time_bounds(IBI, None, None)
