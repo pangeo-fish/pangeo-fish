@@ -282,10 +282,7 @@ def healpix_to_grid(
         if "cells" in da.dims:
             da = da.swap_dims({"cells": "cell_ids"})
         cell_dim = "cell_ids"
-    da = da.reindex(
-        {cell_dim: cells}
-    )  # cells not in datas -> NaN (masked)
-
+    da = da.reindex({cell_dim: cells})  # cells not in datas -> NaN (masked)
 
     da = da.transpose(..., cell_dim)
     batch_dims = [d for d in da.dims if d != cell_dim]
@@ -928,7 +925,6 @@ def regrid_dataset_hpresample(
         ellipsoid=ellipsoid,
     )
 
-    
     ct_cell_ids = resampler_ct.get_cell_ids().astype("int64")  # pas de np.sort ici
     idx = pd.Index(ct_cell_ids).get_indexer(ref_cell_ids)
     valid = idx != -1
@@ -2451,7 +2447,7 @@ def multi_map_with_synced_sliders(maps, width="300px", height="400px"):
     """
     if len(maps) < 1:
         raise ValueError("Il faut au moins une map.")
-    
+
     # 1. Apply the size to each map
     for m in maps:
         m.layout.width = width

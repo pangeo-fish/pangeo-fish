@@ -266,9 +266,7 @@ def batch_compute_pdf_bathy(ds_lr, reshaped_tag, target_root: str, batch_size=50
     reference = reference.assign_coords(cells=("cell_ids", reference["cell_ids"].data))
     reference = reference.swap_dims({"cell_ids": "cells"})
 
-
-
-    reference = reference.sel(cells=common_ids) 
+    reference = reference.sel(cells=common_ids)
 
     assert np.array_equal(
         histogram_ds_subset_model.cells.values, reference.cells.values

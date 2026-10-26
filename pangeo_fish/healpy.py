@@ -475,7 +475,6 @@ def buffer_points(
     pangeo_fish.healpy.astronomic_to_cartesian
     """
 
-
     def _buffer_masks(cell_ids, vector, nside, radius, factor=4, intersect=False):
         ## replacement
         radius_deg = np.degrees(radius)

@@ -131,6 +131,7 @@ def tide_behav_extr(
     print("\nExtraction terminée ✅")
     return ds
 
+
 def convert_lon_360_to_180(ds, bbox=None):
     """
     Convert longitudes from 0-360 to -180-180,
@@ -252,8 +253,8 @@ def datalikelihood_tide_only_full_normalized(
         L = np.exp(-0.5 * ((x_mean - mu_ij) / sigma_vec) ** 2) / (
             sigma_vec * np.sqrt(2 * np.pi)
         )
-        L = L * mask 
-        s = np.nansum(L)# normalization
+        L = L * mask
+        s = np.nansum(L)  # normalization
         if s == 0:
             PDF[t, :, :] = mask / np.sum(mask)  # fallback uniforme
         else:
@@ -285,7 +286,7 @@ def tide_pdf(tide_behav, data):
 
     ds = tide_behav.copy()
 
-    time = pd.to_datetime(ds["time"].values) #shaping
+    time = pd.to_datetime(ds["time"].values)  # shaping
 
     # Temporar Dataset to ease the group gestion
     tmp_df = pd.DataFrame(

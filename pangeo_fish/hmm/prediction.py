@@ -218,7 +218,9 @@ class UpDownGaussian1DHealpix(Predictor):
 
     sigma: float  # in radians
     kernel_sz: int | None = None  # nominal kernel size (fine resolution)
-    max_compact_kernel_sz: int = 7  # upper bound on the compact kernel (coarse resolution)
+    max_compact_kernel_sz: int = (
+        7  # upper bound on the compact kernel (coarse resolution)
+    )
     ellipsoid: str = None
     device: str = "cpu"
     dtype: any = torch.float32
@@ -294,9 +296,7 @@ class UpDownGaussian1DHealpix(Predictor):
 
         # --- 4. Convert the residual (radians) -> coarse grid pixels ---
         sigma_compact = (sigma_residual_rad / np.sqrt(np.pi)) * coarse_nside
-        sigma_compact = max(
-            sigma_compact, 1e-6
-        )  # avoid division by 0 in the kernel
+        sigma_compact = max(sigma_compact, 1e-6)  # avoid division by 0 in the kernel
 
         # --- 5. Build the actual compact Gaussian kernel ---
         xx, yy = np.meshgrid(
