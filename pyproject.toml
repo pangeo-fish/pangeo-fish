@@ -152,6 +152,7 @@ known-third-party = []
 ban-relative-imports = "all"
 
 [tool.pytest.ini_options]
+testpaths = ["pangeo_fish/tests"]
 filterwarnings = [
   "error:::pangeo_fish.*",
   "ignore:Missing optional dependencies. To use the trajectory smoother classes please install Stone Soup:UserWarning:movingpandas",

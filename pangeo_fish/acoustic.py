@@ -43,10 +43,11 @@ def _unit_vector_to_lonlat(vector, ellipsoid):
         lon, lat = hpg.cartesian_to_lonlat(
             x * scale, y * scale, z * scale, ellipsoid=ellipsoid
         )
+        return float(lon[0]), float(lat[0])
 
     else:
         raise ValueError(f"unsupported ellipsoid: {ellipsoid!r}")
-    return lon, lat
+    
 
 
 def count_detections(detections, by):
