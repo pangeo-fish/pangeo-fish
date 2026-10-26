@@ -73,7 +73,6 @@ def compute_healpix_histogram_region_bin_size(
         lat_blk = np.repeat(lats[i:j], nlon)[valid]
         lon_blk = np.tile(lons, j - i)[valid]
 
-        hidx_2 = hp.ang2pix(nside, lon_blk, lat_blk, lonlat=True, nest=nest)
         depth = int(np.log2(nside))
         hidx = hpg_n.lonlat_to_healpix(
             lon_blk, lat_blk, depth=depth, ellipsoid=ellipsoid
