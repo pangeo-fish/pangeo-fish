@@ -108,7 +108,9 @@ def deployment_reception_masks(
 ):
     if ellipsoid is None:
         info = getattr(grid.dggs, "grid_info", None)
-        ellipsoid = getattr(info, "ellipsoid", None) or grid["cell_ids"].attrs.get("ellipsoid")
+        ellipsoid = getattr(info, "ellipsoid", None) or grid["cell_ids"].attrs.get(
+            "ellipsoid"
+        )
     rot = {
         "lat": grid["cell_ids"].attrs.get("lat", 0),
         "lon": grid["cell_ids"].attrs.get("lon", 0),
@@ -303,7 +305,9 @@ def emission_probability(
     """
     if ellipsoid is None:
         info = getattr(grid.dggs, "grid_info", None)
-        ellipsoid = getattr(info, "ellipsoid", None) or grid["cell_ids"].attrs.get("ellipsoid")
+        ellipsoid = getattr(info, "ellipsoid", None) or grid["cell_ids"].attrs.get(
+            "ellipsoid"
+        )
     if dims != ["cells"]:
         raise ValueError("dims is not filed right: try 'cells' ")
 

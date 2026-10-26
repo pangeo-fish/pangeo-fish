@@ -30,7 +30,12 @@ def dummy_grid():
     mask = np.full_like(cell_ids, fill_value=True, dtype=bool)
     mask[4:6] = False
 
-    grid_info = {"grid_name": "healpix", "level": level, "indexing_scheme": "nested", "ellipsoid": "sphere"}
+    grid_info = {
+        "grid_name": "healpix",
+        "level": level,
+        "indexing_scheme": "nested",
+        "ellipsoid": "sphere",
+    }
     ds = xr.Dataset(
         coords={"cell_ids": ("cells", cell_ids, grid_info), "time": ("time", time)},
         data_vars={"mask": ("cells", mask)},

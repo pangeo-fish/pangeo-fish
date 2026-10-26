@@ -1726,7 +1726,9 @@ def optimize_pdf(
         as_radians = False
     if ellipsoid is None:
         info = getattr(ds.dggs, "grid_info", None)
-        ellipsoid = getattr(info, "ellipsoid", None) or ds["cell_ids"].attrs.get("ellipsoid")
+        ellipsoid = getattr(info, "ellipsoid", None) or ds["cell_ids"].attrs.get(
+            "ellipsoid"
+        )
 
     max_sigma = _get_max_sigma(
         ds, earth_radius, adjustment_factor, maximum_speed, as_radians
@@ -1881,7 +1883,9 @@ def predict_positions(
         emission = to_healpix(emission)
         if ellipsoid is None:
             info = getattr(emission.dggs, "grid_info", None)
-            ellipsoid = getattr(info, "ellipsoid", None) or emission["cell_ids"].attrs.get("ellipsoid")
+            ellipsoid = getattr(info, "ellipsoid", None) or emission[
+                "cell_ids"
+            ].attrs.get("ellipsoid")
 
     with fsspec.open(
         f"{target_root}/parameters.json", mode="r", **(storage_options or {})
@@ -2030,6 +2034,7 @@ def predict_positions(
     )
     # --- FIX longitude [0, 360] -> [-180, 180] ---
     import movingpandas as mpd
+
     from pangeo_fish import tracks
 
     def _wrap_lon(traj):
