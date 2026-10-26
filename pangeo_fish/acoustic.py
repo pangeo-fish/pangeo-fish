@@ -47,7 +47,6 @@ def _unit_vector_to_lonlat(vector, ellipsoid):
 
     else:
         raise ValueError(f"unsupported ellipsoid: {ellipsoid!r}")
-    
 
 
 def count_detections(detections, by):
