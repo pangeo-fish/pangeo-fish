@@ -61,3 +61,8 @@ notebooks/plot.py
 notebooks/plot_glissant_array.py
 notebooks/exemples_usage.py
 notebooks/healpix_analyse_fft.py
+predict_positions_complete.py
+notebooks/pour_clement_cell_ids
+.gitignore
+notebooks/pour_clement_lat
+notebooks/pour_clement_lon
