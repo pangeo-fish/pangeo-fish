@@ -914,14 +914,13 @@ def regrid_dataset_hpresample(
     order = np.argsort(cell_ids)
     ref_cell_ids = cell_ids[order].astype("int64")
     ocean_mask_final = mask_regridded.cell_data[order]
-    print("ocean_mask_final min/max :", ocean_mask_final.min(), ocean_mask_final.max())
     is_ocean = ocean_mask_final >= mask_threshold
 
     # ------------------------------------------------------------------
     # Partie 2 : Clough-Tocher construit uniquement sur les points océan
     # (évite la propagation des NaN terre dans les gradients)
     # ------------------------------------------------------------------
-    valid_src = mask_src > 0.8
+    valid_src = mask_src > 0.5
 
     resampler_ct = CloughTocherResampler(
         lon_deg=lon[valid_src],
@@ -936,7 +935,7 @@ def regrid_dataset_hpresample(
     valid = idx != -1
 
     n_missing = int((is_ocean & ~valid).sum())
-    print(f"cellules océan non couvertes par Clough-Tocher : {n_missing}")
+    print(f"ocean cells not covered by Clough-Tocher : {n_missing}")
 
     # Repli : bilinéaire sur les seuls points océan, pour la bande côtière
     # hors de l'enveloppe convexe (CT n'extrapole pas).
@@ -953,7 +952,7 @@ def regrid_dataset_hpresample(
     )
     valid_b = idx_b != -1
     n_left = int((is_ocean & ~valid & ~valid_b).sum())
-    print(f"cellules océan couvertes ni par CT ni par le repli : {n_left}")
+    print(f"iocean cells  not covered by CT nor by rewrap : {n_left}")
 
     def to_full(cell_data, variable):
         """Align CT values, fill ocean gaps with bilinear values, and mask land."""
@@ -1290,7 +1289,10 @@ def compute_acoustic_pdf(
 
     """
     if ellipsoid is None:
-        ellipsoid = emission_ds["cell_ids"].attrs.get("ellipsoid")
+        try:
+            ellipsoid = emission_ds.dggs.grid_info.ellipsoid
+        except ValueError:
+            ellipsoid = emission_ds["cell_ids"].attrs.get("ellipsoid")
 
     if dims == ["cells"]:
         lat = emission_ds["cell_ids"].attrs.get("lat", 0)
@@ -1723,7 +1725,8 @@ def optimize_pdf(
         raise ValueError("dims must be ['cells'], ['x','y'] is not used anymore")
         as_radians = False
     if ellipsoid is None:
-        ellipsoid = ds["cell_ids"].attrs.get("ellipsoid")
+        info = getattr(ds.dggs, "grid_info", None)
+        ellipsoid = getattr(info, "ellipsoid", None) or ds["cell_ids"].attrs.get("ellipsoid")
 
     max_sigma = _get_max_sigma(
         ds, earth_radius, adjustment_factor, maximum_speed, as_radians
@@ -1877,7 +1880,8 @@ def predict_positions(
     if "cells" in emission.dims:
         emission = to_healpix(emission)
         if ellipsoid is None:
-            ellipsoid = emission["cell_ids"].attrs.get("ellipsoid")
+            info = getattr(emission.dggs, "grid_info", None)
+            ellipsoid = getattr(info, "ellipsoid", None) or emission["cell_ids"].attrs.get("ellipsoid")
 
     with fsspec.open(
         f"{target_root}/parameters.json", mode="r", **(storage_options or {})
@@ -1903,7 +1907,7 @@ def predict_positions(
             predictor_index=("time", np.zeros(emission["time"].size).astype(np.int32))
         )
         warnings.warn(
-            'A "predictor_index" entry (filled with 0) is added to the loaded `emission` dataset.',
+            'A "predictor_index" entry (filled with 0) is added to the loaded `emission` dataset. the prediction will be run with a single sigma',
             RuntimeWarning,
         )
     # more than one parameter
@@ -2024,7 +2028,23 @@ def predict_positions(
         progress=False,
         additional_quantities=additional_track_quantities,
     )
+    # --- FIX longitude [0, 360] -> [-180, 180] ---
+    import movingpandas as mpd
+    from pangeo_fish import tracks
 
+    def _wrap_lon(traj):
+        gdf = traj.df.copy()
+        gdf = gdf.drop(columns=["speed", "distance"], errors="ignore")
+        gdf["geometry"] = gdf.geometry.apply(
+            lambda p: type(p)(((p.x + 180) % 360) - 180, p.y)
+        )
+        t = mpd.Trajectory(gdf, traj.id)
+        return tracks.additional_quantities(t, quantities=additional_track_quantities)
+
+    trajectories = mpd.TrajectoryCollection(
+        [_wrap_lon(t) for t in trajectories.trajectories]
+    )
+    # ---------------------------------------------
     if save:
         save_trajectories(trajectories, target_root, storage_options, format="parquet")
 

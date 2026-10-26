@@ -24,7 +24,6 @@ _WGS84_E2 = 0.00669437999014  # excentricité² de WGS84
 
 def _unit_vector_to_lonlat(vector, ellipsoid):
     """Vecteur cartésien (repère de la grille) -> lon/lat en degrés."""
-    print(ellipsoid)
     if isinstance(ellipsoid, str) and ellipsoid.lower() == "sphere":
         # comportement d'origine
         lon, lat = hpg.cartesian_to_lonlat(
@@ -35,22 +34,18 @@ def _unit_vector_to_lonlat(vector, ellipsoid):
     x, y, z = (float(v) for v in vector)
     n = np.sqrt(x * x + y * y + z * z)
     x, y, z = x / n, y / n, z / n
-    lon = np.degrees(np.arctan2(y, x))
     lat_c = np.arcsin(np.clip(z / np.sqrt(x * x + y * y + z * z), -1.0, 1.0))
     if isinstance(ellipsoid, str) and ellipsoid.lower() == "wgs84":
         a = 6378137.0
         e2 = _WGS84_E2
         scale = a / np.sqrt(x * x + y * y + (1.0 - e2) * z * z)
         lat = np.degrees(np.arctan(np.tan(lat_c) / (1.0 - _WGS84_E2)))
-        lon2, lat2 = hpg.cartesian_to_lonlat(
+        lon, lat = hpg.cartesian_to_lonlat(
             x * scale, y * scale, z * scale, ellipsoid=ellipsoid
         )
-        lon3, lat3 = hpg.cartesian_to_lonlat(
-            vector[0], vector[1], vector[2], ellipsoid="sphere"
-        )
+
     else:
         raise ValueError(f"unsupported ellipsoid: {ellipsoid!r}")
-    print(lat, lat2, lat3)
     return lon, lat
 
 
@@ -112,7 +107,8 @@ def deployment_reception_masks(
     ellipsoid=None,
 ):
     if ellipsoid is None:
-        ellipsoid = grid["cell_ids"].attrs.get("ellipsoid")
+        info = getattr(grid.dggs, "grid_info", None)
+        ellipsoid = getattr(info, "ellipsoid", None) or grid["cell_ids"].attrs.get("ellipsoid")
     rot = {
         "lat": grid["cell_ids"].attrs.get("lat", 0),
         "lon": grid["cell_ids"].attrs.get("lon", 0),
@@ -148,6 +144,7 @@ def deployment_reception_masks(
             nside=2**cell_ids.dggs.grid_info.level,
             factor=2**16,
             intersect=True,
+            ellipsoid=ellipsoid,
         )
     else:
         raise ValueError("dims should be 'cells'")
@@ -161,12 +158,14 @@ def buffer_points_cells(
     *,
     buffer_size,
     nside,
+    ellipsoid=None,
     sphere_radius=6371e3,
     factor=4,
     intersect=False,
 ):
     """ """
-    ellipsoid = cell_ids.attrs.get("ellipsoid")
+    if ellipsoid is None:
+        ellipsoid = cell_ids.attrs.get("ellipsoid")
 
     def _buffer_masks(
         cell_ids, vector, nside, radius, factor=4, intersect=False, ellipsoid=ellipsoid
@@ -303,7 +302,8 @@ def emission_probability(
         The resulting emission probability maps.
     """
     if ellipsoid is None:
-        ellipsoid = grid["cell_ids"].attrs.get("ellipsoid")
+        info = getattr(grid.dggs, "grid_info", None)
+        ellipsoid = getattr(info, "ellipsoid", None) or grid["cell_ids"].attrs.get("ellipsoid")
     if dims != ["cells"]:
         raise ValueError("dims is not filed right: try 'cells' ")
 
