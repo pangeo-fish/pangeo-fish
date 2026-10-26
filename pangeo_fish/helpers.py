@@ -245,7 +245,7 @@ def _np(x):
 
 
 def fill_nearest(a, max_dist=None):
-    """Remplit les NaN par la valeur valide la plus proche (distance en pixels)."""
+    """Fill NaNs with the nearest valid value (distance in pixels)."""
     hole = np.isnan(a)
     if not hole.any() or hole.all():
         return a
@@ -269,10 +269,10 @@ def healpix_to_grid(
     min_weight=1e-3,
     fill_inside=True,
 ):
-    """DataArray (..., cells) sur HEALPix -> DataArray (..., latitude, longitude).
+    """DataArray (..., cells) on HEALPix -> DataArray (..., latitude, longitude).
 
-    Le masque NaN est celui de la cellule HEALPix la plus proche de chaque pixel.
-    fill_inside=True : comble seulement les NaN d'interpolation *à l'intérieur* du masque valide.
+    The NaN mask is that of the nearest HEALPix cell to each pixel.
+    fill_inside=True: fills only the interpolation NaNs *inside* the valid mask.
     """
     # 1) alignement sur les cellules du resampler
     cells = resampler.get_cell_ids().astype("int64")
@@ -284,9 +284,9 @@ def healpix_to_grid(
         cell_dim = "cell_ids"
     da = da.reindex(
         {cell_dim: cells}
-    )  # cellules absentes des données -> NaN (donc masquées)
+    )  # cells not in datas -> NaN (masked)
 
-    # 2) cellules en dernier
+
     da = da.transpose(..., cell_dim)
     batch_dims = [d for d in da.dims if d != cell_dim]
 
@@ -294,12 +294,11 @@ def healpix_to_grid(
     valid = np.isfinite(vals)
     vals = np.where(valid, vals, 0.0)
 
-    # cellule la plus proche de chaque pixel de la grille (N,)
+    # Nearest cell from each pixel of the grid (N,)
     hi0 = _np(resampler.hi)[:, 0]
     has_cell = hi0 >= 0
     hi0 = np.where(has_cell, hi0, 0)
 
-    # 3) inversion par paquets
     out = np.empty((vals.shape[0], *shape), dtype="float32")
     for i in range(0, vals.shape[0], batch):
         v = torch.as_tensor(vals[i : i + batch])
@@ -309,7 +308,7 @@ def healpix_to_grid(
 
         res = np.where(den > min_weight, num / np.maximum(den, min_weight), np.nan)
 
-        # masque d'origine : pixel valide si sa cellule la plus proche est valide
+        # original mask: a pixel is valid if its nearest cell is valid
         pix_valid = valid[i : i + batch][:, hi0] & has_cell[None, :]
         res = res.reshape(-1, *shape)
         pix_valid = pix_valid.reshape(-1, *shape)
@@ -330,7 +329,7 @@ def healpix_to_grid(
 
 
 def dataset_to_2d(ds, resampler, shape, coords, **kw):
-    """Applique la conversion à toutes les variables qui ont une dimension cellules."""
+    """Apply the conversio to every variable with cells in coordinate."""
     out = {
         name: healpix_to_grid(da, resampler, shape, coords, **kw)
         for name, da in ds.data_vars.items()
@@ -896,9 +895,9 @@ def regrid_dataset_hpresample(
     mask_src = ds.ocean_mask.values.ravel().astype("float64")
 
     # ------------------------------------------------------------------
-    # Partie 1 : ensemble de cellules HEALPix + masque océan
-    # threshold=-1 : on garde toutes les cellules atteintes par une source,
-    # la séparation terre/océan se fait ensuite avec mask_threshold.
+    # Part 1: HEALPix cell set + ocean mask
+    # threshold=-1: keep every cell reached by a source;
+    # the land/ocean separation is then done with mask_threshold.
     # ------------------------------------------------------------------
     resampler_mask = BilinearResampler(
         lon_deg=lon,
@@ -917,8 +916,8 @@ def regrid_dataset_hpresample(
     is_ocean = ocean_mask_final >= mask_threshold
 
     # ------------------------------------------------------------------
-    # Partie 2 : Clough-Tocher construit uniquement sur les points océan
-    # (évite la propagation des NaN terre dans les gradients)
+    # Part 2 : Clough-Tocher construct only on ocean cells
+    # (avoid the spread of eath mask NAN in the gradients)
     # ------------------------------------------------------------------
     valid_src = mask_src > 0.5
 
@@ -929,7 +928,7 @@ def regrid_dataset_hpresample(
         ellipsoid=ellipsoid,
     )
 
-    # alignement des cellules produites par CT sur ref_cell_ids
+    
     ct_cell_ids = resampler_ct.get_cell_ids().astype("int64")  # pas de np.sort ici
     idx = pd.Index(ct_cell_ids).get_indexer(ref_cell_ids)
     valid = idx != -1
@@ -937,8 +936,8 @@ def regrid_dataset_hpresample(
     n_missing = int((is_ocean & ~valid).sum())
     print(f"ocean cells not covered by Clough-Tocher : {n_missing}")
 
-    # Repli : bilinéaire sur les seuls points océan, pour la bande côtière
-    # hors de l'enveloppe convexe (CT n'extrapole pas).
+    # Wrap: bilinear on ocean points only, for the coastal band
+    # outside the convex hull (Clough Tocher does not extrapolate).
     resampler_bil = BilinearResampler(
         lon_deg=lon[valid_src],
         lat_deg=lat[valid_src],
@@ -969,7 +968,7 @@ def regrid_dataset_hpresample(
         return out
 
     # ------------------------------------------------------------------
-    # Assemblage du Dataset
+    # Output Dataset
     # ------------------------------------------------------------------
     lon_out, lat_out = hg.nested.healpix_to_lonlat(
         ref_cell_ids, refinement_level, ellipsoid=ellipsoid
@@ -1085,7 +1084,7 @@ def regrid_dataset(
     )
     regridded = regridder.regrid_ds(ds)
     if dims == ["x", "y"]:
-        raise ValueError("dims doit être ['cells'], ['x','y'] is not used anymore")
+        raise ValueError("dims can only be ['cells'], ['x','y'] is not used anymore")
     elif dims == ["cells"]:
         reshaped = regridded.assign_coords(
             cell_ids=lambda ds: ds.cell_ids.astype("int64")
@@ -2438,32 +2437,32 @@ def multiplot_healpix(
 
 def multi_map_with_synced_sliders(maps, width="300px", height="400px"):
     """
-    Affiche plusieurs maps côte à côte avec leur slider 'time' synchronisé.
+    Display several maps side by side with a synchronized 'time' slider.
 
-    Paramètres
+    Parameters
     ----------
     maps : list
-        Liste d'objets map (doivent avoir .map, .sliders['time'], .layout)
-    width, height : dimensions appliquées à chaque map
+        List of map objects (must have .map, .sliders['time'], .layout)
+    width, height : dimensions applied to each map
 
-    Exemple
+    Example
     -------
     multi_map_with_synced_sliders([m1, m2, m3])
     """
     if len(maps) < 1:
         raise ValueError("Il faut au moins une map.")
-
-    # 1. Appliquer la taille à chaque map
+    
+    # 1. Apply the size to each map
     for m in maps:
         m.layout.width = width
         m.layout.height = height
 
-    # 2. Synchroniser tous les sliders 'time' entre eux (lié en chaîne au 1er)
+    # 2. Synchronize all 'time' sliders with each other (each one linked to the first)
     ref_slider = maps[0].sliders["time"]
     for m in maps[1:]:
         ipw.jslink((ref_slider, "value"), (m.sliders["time"], "value"))
 
-    # 3. Construire chaque bloc (map + slider en dessous)
+    # 3. Build each block (map + slider below it)
     def map_with_slider_below(m):
         return ipw.VBox([m.map, m.sliders["time"]])
 
@@ -2652,22 +2651,22 @@ def _compute_sigma_var(indices: list[list[int]], values: list[float]):
 
 def stamp_parameter_indices_from_mask(*, pdf, mask, index_key: str = "predictor_index"):
     """
-    Ajoute un index de paramètre (0/1) basé directement sur un masque temporel binaire.
+    Add a parameter index (0/1) based on a temporal binary mask.
 
     Parameters
     ----------
     pdf : xarray.Dataset
-        Dataset ayant une dimension "time".
-    mask : array-like ou xarray.DataArray de 0/1, aligné sur "time"
+        Dataset with a dimenson "time".
+    mask : array-like or xarray.DataArray of 0/1, alligned on "time"
     index_key : str
-        Nom de la variable à ajouter.
+        Name of the index to add.
     """
     mask_arr = np.asarray(mask).astype(np.int32)
 
     if mask_arr.shape[0] != pdf.sizes["time"]:
         raise ValueError(
-            f"Le masque (taille {mask_arr.shape[0]}) ne correspond pas "
-            f"à la dimension 'time' de pdf (taille {pdf.sizes['time']})."
+            f"The mask (size {mask_arr.shape[0]}) does not match "
+            f"the 'time' dimension of pdf (size {pdf.sizes['time']})."
         )
 
     return pdf.assign(**{index_key: ("time", mask_arr)})

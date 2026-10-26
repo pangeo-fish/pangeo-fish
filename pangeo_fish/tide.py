@@ -7,22 +7,20 @@ from scipy.signal import savgol_filter
 from tqdm import tqdm
 
 #####################################################################
-#  Première partie: Extraction signal de marée par sinus
+#  First part : extraction of a tidal signal
 #####################################################################
 
 
 def lssinfit(time, depth):
     """
-    Ajuste un modèle sinusoïdal simple sur la profondeur.
-    Retourne rmse, rsquare, amplitude.
+    Fit a simple sinusoidal model on depth measure.
+    Return rmse, rsquare, amplitude.
     """
 
     depth_smoothed = savgol_filter(depth, window_length=15, polyorder=2, mode="mirror")
 
-    w = 2 * np.pi / (12.42 / 24)  # fréquence de marée (rad/jour)
+    w = 2 * np.pi / (12.42 / 24)  # tide frequency (rad/day)
     X = np.column_stack([np.ones_like(time), np.sin(w * time), np.cos(w * time)])
-    # print(depth_smoothed, X)
-    # print(len(time),len(depth_smoothed))
     coef, _, _, _ = lstsq(X, depth_smoothed, rcond=None)
     fitted = X @ coef
     residuals = depth_smoothed - fitted
@@ -45,19 +43,19 @@ def tide_behav_extr(
     dt=10,
 ):
     """
-    Traduction Python de la fonction MATLAB tidebehavextr.m
-    Entrée : CSV avec colonnes 'time', 'depth' (et éventuellement 'temp')
-    Sortie : xarray.Dataset avec résultats de classification marée / comportement
+    Traduction Python of MATLAB function tidebehavextr.m
+    Parameter : CSV with column 'time', 'depth' (and enventually 'temp')
+    Output : xarray.Dataset with result of the classification tide / behavior
     """
-    # --- Lecture des données brutes ---
+    # --- Reading of the brute datas ---
 
     if "time" not in df.columns or "pressure" not in df.columns:
-        raise ValueError("Le CSV doit contenir au moins 'time' et 'pressure'")
+        raise ValueError("'time' and 'pressure' shoud be part of the CSV")
     df["time"] = pd.to_datetime(df["time"])
     df = df.sort_values("time")
     time = (
         (df["time"] - df["time"].iloc[0]).dt.total_seconds() / 3600.0 / 24.0
-    )  # en jours
+    )  # in days
     depth = df["pressure"].to_numpy()
     print(df["time"] - df["time"].iloc[0])
     n = len(depth)
@@ -69,13 +67,12 @@ def tide_behav_extr(
     rmse_tide = np.full(n, np.nan)
     rsq_tide = np.full(n, np.nan)
     ampli_tide = np.full(n, np.nan)
-    # depth_smoothed_list = [[] for _ in range(n)]
 
     rmse_behav = np.full(n, np.nan)
     rsq_behav = np.full(n, np.nan)
     ampli_behav = np.full(n, np.nan)
 
-    # --- Boucle glissante pour marée ---
+    # --- Sliding loop for Tide ---
     print(f"Extraction du signal de marée ({tideFL} h)...")
     for i in tqdm(range(0, n - tide_window)):
         idx = slice(i, i + tide_window)
@@ -85,12 +82,12 @@ def tide_behav_extr(
         ampli_tide[i] = ampli
         # depth_smoothed_list[i] = depth_lissage
 
-    # --- Détection des intervalles de marée ---
+    # --- Tide intervals detections ---
     tide_found = (
         (rmse_tide < tideLV[0]) & (rsq_tide > tideLV[1]) & (ampli_tide > tideLV[2])
     )
 
-    # --- Boucle glissante pour comportement ---
+    # --- Sliding loop for behavior ---
     print(f"Classification comportementale ({behavFL} h)...")
     for i in tqdm(range(0, n - behav_window)):
         idx = slice(i, i + behav_window)
@@ -105,7 +102,7 @@ def tide_behav_extr(
         & (ampli_behav > behavLV[2])
     )
 
-    # --- Création du dataset de sortie ---
+    # --- Output dataset ---
     ds = xr.Dataset(
         data_vars=dict(
             depth=("time", depth),
@@ -134,17 +131,10 @@ def tide_behav_extr(
     print("\nExtraction terminée ✅")
     return ds
 
-
-#####################################################################
-# Traitement du dataset de Moko
-#####################################################################
-
-
 def convert_lon_360_to_180(ds, bbox=None):
     """
-    Convertit les longitudes d'un Dataset de 0-360 à -180-180,
-    applique une bbox, et utilise nearest si les bornes
-    exactes ne sont pas dans les coordonnées.
+    Convert longitudes from 0-360 to -180-180,
+    apply a bbox, and use nearest if the exact born does not match.
 
     Parameters
     ----------
@@ -157,12 +147,12 @@ def convert_lon_360_to_180(ds, bbox=None):
 
     ds = ds.copy()
 
-    # --- 1. Conversion lon 0–360 → –180–180 ---
+    # --- 1. 0–360 → –180–180 ---
     lon_new = ((ds.lon + 180) % 360) - 180
     ds = ds.assign_coords(lon=lon_new)
     ds = ds.sortby("lon")
 
-    # --- 2. Application bbox ---
+    # --- 2. bbox ---
     if bbox is not None:
         # -------- LATITUDE --------
         if "latitude" in bbox:
@@ -214,10 +204,10 @@ def datalikelihood_tide_only_full_normalized(
     td_depth, td_time, tidal_ds, tide_found, sigma_tid=2.0
 ):
     """
-    Calcule une PDF normalisée pour chaque instant.
-    - Si marée détectée : PDF = vraisemblance (gaussienne)
-    - Sinon : PDF uniforme sur l'océan (somme = 1)
-    Retourne un Dataset avec une PDF normalisée pour chaque (t,lat,lon).
+    Compute a normalized PDF for each steptime.
+    - If tide detected : PDF = likelihood  (gaussian)
+    - Else :  uniform PDF on the ocean (sum == 1)
+    Output: Dataset with noramlized PDF for each (t,lat,lon).
     """
     eps = 1e-200
     lat = tidal_ds.lat.values
@@ -225,7 +215,7 @@ def datalikelihood_tide_only_full_normalized(
     mask = tidal_ds.mask.values.astype(bool)  # True = océan
     n_times, n_meas = td_depth.shape
     n_lat, n_lon = len(lat), len(lon)
-    # Marée pré-calculée (uniquement les paramètres, pas la série temporelle complète)
+    # Tide parameters from the database
     amp = tidal_ds.amplitude.values
     phase = tidal_ds.phase.values
     omega = tidal_ds.omega.values
@@ -236,15 +226,15 @@ def datalikelihood_tide_only_full_normalized(
     tide_idx = np.where(tide_found == 1)[0]
     notide_idx = np.where(tide_found == 0)[0]
 
-    # --- Cas 1 : marée détectée → PDF gaussienne normalisée ---
-    for t in tqdm(tide_idx, desc="PDF avec marée détectée"):
+    # --- Case 1 : Tide found → normalized gaussian PDF ---
+    for t in tqdm(tide_idx, desc="PDF with Tide found"):
         x = td_depth[t, :]  # shape (n_meas,)
-        # Covariance empirique ou fallback si n_meas=1
+        # Empirical covariance or fallback if n_meas=1
         if n_meas == 1:
             cov = np.array([[sigma_tid**2]])
         else:
             cov = np.cov(x, rowvar=False)
-            if cov.shape == ():  # cas particulier
+            if cov.shape == ():  # particular case
                 cov = np.array([[cov]])
             else:
                 cov = np.atleast_2d(cov)
@@ -252,8 +242,7 @@ def datalikelihood_tide_only_full_normalized(
         if sigma_vec < 1e-6:  # seuil arbitraire
             sigma_vec = sigma_tid
 
-        # --- mu calculé UNIQUEMENT pour ce pas de temps t ---
-        # (au lieu de pré-calculer mu pour tous les n_times en amont)
+        # --- mu computed only for this steptime t ---
         tidal_pred_t = amp * np.cos(omega * td_time[t] + phase)  # shape (dim0, n_lon)
         tidal_sum_t = tidal_pred_t.sum(axis=0)  # shape (n_lon,)
         mu_ij = -tidal_sum_t[None, :] + depth_mean  # shape (n_lat, n_lon)
@@ -263,9 +252,8 @@ def datalikelihood_tide_only_full_normalized(
         L = np.exp(-0.5 * ((x_mean - mu_ij) / sigma_vec) ** 2) / (
             sigma_vec * np.sqrt(2 * np.pi)
         )
-        L = L * mask  # appliquer masque
-        # normalisation pour somme=1
-        s = np.nansum(L)
+        L = L * mask 
+        s = np.nansum(L)# normalization
         if s == 0:
             PDF[t, :, :] = mask / np.sum(mask)  # fallback uniforme
         else:
@@ -273,7 +261,7 @@ def datalikelihood_tide_only_full_normalized(
         PDF[t, :, :] = np.maximum(PDF[t, :, :], eps)
         PDF[t, :, :] /= np.nansum(PDF[t, :, :])
 
-    # --- Cas 2 : pas de marée détectée → PDF uniforme ---
+    # --- Cas 2 : No Tide found → uniform PDF  ---
     ocean_pixels = np.sum(mask)
     uniform_pdf = mask / ocean_pixels
     uniform_pdf = np.maximum(uniform_pdf, eps)
@@ -281,7 +269,7 @@ def datalikelihood_tide_only_full_normalized(
     for t in notide_idx:
         PDF[t, :, :] = uniform_pdf
 
-    # Construction Dataset
+    # Outpud dataset
     ds_pdf = xr.Dataset(
         {
             "pdf": (("time", "latitude", "longitude"), PDF),
@@ -297,10 +285,9 @@ def tide_pdf(tide_behav, data):
 
     ds = tide_behav.copy()
 
-    # Convertir la coordonnée 'time' en datetime pandas
-    time = pd.to_datetime(ds["time"].values)
+    time = pd.to_datetime(ds["time"].values) #shaping
 
-    # Créer un DataFrame temporaire pour manipuler facilement les regroupements
+    # Temporar Dataset to ease the group gestion
     tmp_df = pd.DataFrame(
         {
             "depth": ds["depth"].values,
@@ -308,23 +295,22 @@ def tide_pdf(tide_behav, data):
         },
         index=time,
     )
-    # Créer une colonne 'hour' arrondie à l'heure
+    # Mean column for an hour
     tmp_df["hour"] = tmp_df.index.floor("h")
 
-    # Propager tide_found à toute l'heure si détecté au moins une fois
+    # If Tide is found at least once in the column the all the values gain tide
     tmp_df["hour_include"] = tmp_df["hour"]
     for h, group in tmp_df.groupby("hour"):
         if group["tide_found"].any():
             tmp_df.loc[group.index, "hour_include"] = h
 
-    # Regrouper les mesures par "hour_include"
+    # Group by "hour_include"
     grouped_obs = {
         hour: group[["depth"]].values for hour, group in tmp_df.groupby("hour_include")
     }
-    # Trier les heures
     hours_sorted = sorted(grouped_obs.keys())
 
-    # td_time : heures depuis le début
+    # td_time : number of hour since the begining
     td_time = np.array(
         [(h - hours_sorted[0]).total_seconds() / 3600 for h in hours_sorted]
     )
@@ -337,7 +323,6 @@ def tide_pdf(tide_behav, data):
         vals = grouped_obs[h].flatten()
         td_depth[i, : len(vals)] = vals
 
-    # Création du vecteur tide_found pour chaque "heure incluse"
     tide_found_hourly = np.array(
         [tmp_df[tmp_df["hour_include"] == h]["tide_found"].any() for h in hours_sorted],
         dtype=int,

@@ -23,7 +23,7 @@ _WGS84_E2 = 0.00669437999014  # excentricité² de WGS84
 
 
 def _unit_vector_to_lonlat(vector, ellipsoid):
-    """Vecteur cartésien (repère de la grille) -> lon/lat en degrés."""
+    """Cartesian vector -> lon/lat in degrees"""
     if isinstance(ellipsoid, str) and ellipsoid.lower() == "sphere":
         # comportement d'origine
         lon, lat = hpg.cartesian_to_lonlat(

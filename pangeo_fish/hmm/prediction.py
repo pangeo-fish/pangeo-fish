@@ -120,21 +120,21 @@ class Foscat1DHealpix(Predictor):
 
         nside = 2**self.grid_info.level
 
-        # # sigma_opt : conversion de sigma (radians) vers pixels
+        # # sigma_opt: convert sigma (radians) to pixels
         sigma_opt = (
             self.sigma / np.sqrt(np.pi)
-        ) * nside  # parfois ajouter un 3* à coté de pi 3*
+        ) * nside  # sometimes add a 3* next to pi
 
         radius = int(
             np.ceil(3 * sigma_opt)
-        )  # troncature à 3 sigma, indépendant du facteur retiré ci-dessus
+        )  # truncation at 3 sigma, independent of the factor removed above
         kernel_size = 2 * radius + 1
 
         if self.max_kernel_size is not None and kernel_size > self.max_kernel_size:
             warnings.warn(
-                f"kernel_size tronqué de {kernel_size} à {self.max_kernel_size} "
-                f"(sigma_opt={sigma_opt:.2f}) : le noyau gaussien réel sera tronqué, "
-                f"le sigma effectif sera plus petit que demandé pour ce sigma.",
+                f"kernel_size truncated from {kernel_size} to {self.max_kernel_size} "
+                f"(sigma_opt={sigma_opt:.2f}): the actual Gaussian kernel will be truncated, "
+                f"so the effective sigma will be smaller than requested for this sigma.",
                 RuntimeWarning,
             )
             kernel_size = self.max_kernel_size
@@ -216,9 +216,9 @@ class UpDownGaussian1DHealpix(Predictor):
     cell_ids: _ArrayLike
     grid_info: DGGSInfo
 
-    sigma: float  # en radians
-    kernel_sz: int | None = None  # taille nominale du noyau (résolution fine)
-    max_compact_kernel_sz: int = 7  # borne sur le noyau compact (résolution grossière)
+    sigma: float  # in radians
+    kernel_sz: int | None = None  # nominal kernel size (fine resolution)
+    max_compact_kernel_sz: int = 7  # upper bound on the compact kernel (coarse resolution)
     ellipsoid: str = None
     device: str = "cpu"
     dtype: any = torch.float32
@@ -229,14 +229,14 @@ class UpDownGaussian1DHealpix(Predictor):
 
         nside = 2**self.grid_info.level
 
-        # --- sigma_opt : sigma (radians) -> pixels du grid fin ---
+        # --- sigma_opt: sigma (radians) -> fine grid pixels ---
         sigma_opt = (self.sigma / np.sqrt(np.pi)) * nside  # 3*
         radius = int(np.ceil(3 * sigma_opt))
         if self.kernel_sz is None:
             self.kernel_sz = 2 * radius + 1
         if self.ellipsoid is None:
             self.ellipsoid = self.cell_ids.attrs.get("ellipsoid")
-        # --- 1. Construction de l'opérateur multi-résolution ---
+        # --- 1. Build the multi-resolution operator ---
         self.layer = LargeConv(
             level=self.grid_info.level,
             in_channels=1,
@@ -256,7 +256,7 @@ class UpDownGaussian1DHealpix(Predictor):
         n_cells = len(self.cell_ids)
         centre_index = n_cells // 2
 
-        # --- 2. Mesure du flou introduit par Down/Up seuls (noyau compact = impulsion identité) ---
+        # --- 2. Measure the blur introduced by Down/Up alone (compact kernel = identity impulse) ---
         identity_kernel = np.zeros((1, 1, k * k), dtype=np.float32)
         identity_kernel[0, 0, k * k // 2] = 1.0
         self.layer.set_compact_kernel(
@@ -267,7 +267,7 @@ class UpDownGaussian1DHealpix(Predictor):
         impulse[centre_index] = 1.0
         response_downup_only = self.layer(impulse)
 
-        # lon, lat = hp.pix2ang(nside, self.cell_ids, nest=True, lonlat=True)  # degrés
+        # lon, lat = hp.pix2ang(nside, self.cell_ids, nest=True, lonlat=True)  # degrees
         lon, lat = hpg_n.healpix_to_lonlat(
             self.cell_ids, self.grid_info.level, ellipsoid=self.layer.ellipsoid
         )
@@ -277,28 +277,28 @@ class UpDownGaussian1DHealpix(Predictor):
         )
         sigma_downup_rad = np.radians(sigma_downup_deg)
 
-        # --- 3. Résidu en quadrature (tout en radians) ---
+        # --- 3. Residual in quadrature (everything in radians) ---
         residual2 = self.sigma**2 - sigma_downup_rad**2
         if residual2 <= 0:
-            # Down/Up floute déjà plus que ce qui est demandé : noyau compact quasi ponctuel
+            # Down/Up already blurs more than requested: near-pointwise compact kernel
             warnings.warn(
-                f"sigma demandé ({self.sigma:.2e} rad) est inférieur ou égal au flou "
-                f"intrinsèque du Down/Up ({sigma_downup_rad:.2e} rad) pour cette géométrie. "
-                f"Le noyau compact sera quasi ponctuel, le flou effectif sera dominé par "
-                f"le Down/Up et ne pourra pas être réduit davantage.",
+                f"Requested sigma ({self.sigma:.2e} rad) is less than or equal to the "
+                f"intrinsic blur of Down/Up ({sigma_downup_rad:.2e} rad) for this geometry. "
+                f"The compact kernel will be nearly pointwise; the effective blur will be "
+                f"dominated by Down/Up and cannot be reduced further.",
                 RuntimeWarning,
             )
             sigma_residual_rad = 0.0
         else:
             sigma_residual_rad = np.sqrt(residual2)
 
-        # --- 4. Conversion du résidu (radians) -> pixels du grid grossier ---
+        # --- 4. Convert the residual (radians) -> coarse grid pixels ---
         sigma_compact = (sigma_residual_rad / np.sqrt(np.pi)) * coarse_nside
         sigma_compact = max(
             sigma_compact, 1e-6
-        )  # éviter une division par 0 dans le noyau
+        )  # avoid division by 0 in the kernel
 
-        # --- 5. Construction du vrai noyau gaussien compact ---
+        # --- 5. Build the actual compact Gaussian kernel ---
         xx, yy = np.meshgrid(
             np.arange(k) - k // 2,
             np.arange(k) - k // 2,
@@ -311,7 +311,7 @@ class UpDownGaussian1DHealpix(Predictor):
             W, bias=np.zeros(1, dtype=np.float32), requires_grad=False
         )
 
-        # gardés pour diagnostic / debug après coup
+        # kept for diagnostics / debugging afterwards
         self.sigma_downup_rad = sigma_downup_rad
         self.sigma_compact_px = sigma_compact
 

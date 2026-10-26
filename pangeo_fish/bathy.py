@@ -78,8 +78,6 @@ def compute_healpix_histogram_region_bin_size(
         hidx = hpg_n.lonlat_to_healpix(
             lon_blk, lat_blk, depth=depth, ellipsoid=ellipsoid
         )
-        print("TEST")
-        print(sum(abs(hidx - hidx_2)))
         used_cells.update(np.unique(hidx))
 
     used_cells = np.array(sorted(used_cells), dtype=np.int64)
@@ -108,10 +106,8 @@ def compute_healpix_histogram_region_bin_size(
         lat_v = np.repeat(lats[i:j], nlon)[valid]
         lon_v = np.tile(lons, j - i)[valid]
 
-        hidx_2 = hp.ang2pix(nside, lon_v, lat_v, lonlat=True, nest=nest)
         depth = int(np.log2(nside))
         hidx = hpg_n.lonlat_to_healpix(lon_v, lat_v, depth=depth, ellipsoid=ellipsoid)
-        print(sum(abs(hidx - hidx_2)))
         # --- binning basé sur depth_bin_size ---
         # profondeur positive = -elev_v (elev is negative for bathy)
         depth_val = (-elev_v - depth_offset) / float(depth_bin_size)
@@ -161,9 +157,6 @@ def compute_healpix_histogram_region_bin_size(
     lon, lat = hp.pix2ang(nside, cell_ids, nest=True, lonlat=True)
     depth = int(np.log2(nside))
     lon_2, lat_2 = hpg_n.healpix_to_lonlat(cell_ids, depth, ellipsoid=ellipsoid)
-    print("TEST 3")
-    print(sum(abs(lon - lon_2)))
-    print(sum(abs(lat_2 - lat)))
     ds_out = ds_out.assign_coords(
         {"latitude": ("cells", lat), "longitude": ("cells", lon)}
     )
@@ -273,14 +266,9 @@ def batch_compute_pdf_bathy(ds_lr, reshaped_tag, target_root: str, batch_size=50
     reference = reference.assign_coords(cells=("cell_ids", reference["cell_ids"].data))
     reference = reference.swap_dims({"cell_ids": "cells"})
 
-    # diagnostic (à retirer ensuite)
-    print(
-        len(reference.cells),
-        len(common_ids),
-        np.array_equal(reference.cells.values, common_ids),
-    )
 
-    reference = reference.sel(cells=common_ids)  # la correction
+
+    reference = reference.sel(cells=common_ids) 
 
     assert np.array_equal(
         histogram_ds_subset_model.cells.values, reference.cells.values

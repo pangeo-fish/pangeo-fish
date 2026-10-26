@@ -201,12 +201,12 @@ def unique(iterable):
 def _get_interp_weights_geo(lon, lat, depth, ellipsoid):
     lon = np.asarray(lon)
     lat = np.asarray(lat)
-    shape = lon.shape  # forme d'origine (peut être () pour un scalaire)
+    shape = lon.shape  # original shape - can be () for a scalar
 
     pix, weights = hpa_hpi.get_interp_weights(
         lon.ravel(), lat.ravel(), depth, ellipsoid=ellipsoid
     )
-    # format de donnée
+    # data shape
     pix = pix.reshape(shape + (4,))
     weights = weights.reshape(shape + (4,))
     pix = np.moveaxis(pix, -1, 0)
@@ -475,11 +475,6 @@ def buffer_points(
     pangeo_fish.healpy.astronomic_to_cartesian
     """
 
-    # def _buffer_masks(cell_ids, vector, nside, radius, factor=4, intersect=False):
-    #     selected_cells = hp.query_disc(
-    #         nside, vector, radius, nest=True, fact=factor, inclusive=intersect
-    #     )
-    #     return np.isin(cell_ids, selected_cells, assume_unique=True)
 
     def _buffer_masks(cell_ids, vector, nside, radius, factor=4, intersect=False):
         ## replacement
