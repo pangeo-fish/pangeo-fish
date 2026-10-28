@@ -2646,16 +2646,38 @@ def _compute_sigma_var(indices: list[list[int]], values: list[float]):
 
 
 def stamp_parameter_indices_from_mask(*, pdf, mask, index_key: str = "predictor_index"):
-    """
-    Add a parameter index (0/1) based on a temporal binary mask.
+    """Add a per-time parameter index (0/1) to a dataset from a temporal binary mask.
+
+    The mask is converted to ``int32`` and attached to ``pdf`` as a new variable along the
+    ``time`` dimension. It is matched to ``pdf`` by position, not by label: the i-th mask
+    value is assigned to the i-th time step.
 
     Parameters
     ----------
     pdf : xarray.Dataset
-        Dataset with a dimenson "time".
-    mask : array-like or xarray.DataArray of 0/1, alligned on "time"
-    index_key : str
-        Name of the index to add.
+        Dataset with a ``time`` dimension.
+    mask : array-like or xarray.DataArray
+        Binary values (0/1 or boolean), one per time step of ``pdf``, in the same order.
+    index_key : str, optional
+        Name of the variable to add. Default is ``"predictor_index"``.
+
+    Returns
+    -------
+    xarray.Dataset
+        A new dataset (``pdf`` is not modified) identical to ``pdf`` with an additional
+        variable ``index_key`` of dtype ``int32`` and dimension ``time``. Its value is 1
+        where the mask is 1 (e.g. tide detected, so the tide likelihood applies) and 0
+        elsewhere.
+
+    Raises
+    ------
+    ValueError
+        If the length of ``mask`` differs from the size of the ``time`` dimension of ``pdf``.
+
+    Examples
+    --------
+    >>> pdf = stamp_parameter_indices_from_mask(pdf=emission, mask=tide_mask)
+    >>> pdf["predictor_index"]
     """
     mask_arr = np.asarray(mask).astype(np.int32)
 

@@ -66,3 +66,4 @@ notebooks/pour_clement_cell_ids
 .gitignore
 notebooks/pour_clement_lat
 notebooks/pour_clement_lon
+notebooks/pangeo-fish-complete.ipynb
