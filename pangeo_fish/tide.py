@@ -1,11 +1,12 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import sparse
 import xarray as xr
 from numpy.linalg import lstsq
 from scipy.signal import savgol_filter
 from tqdm import tqdm
-import sparse
+
 from pangeo_fish.helpers import regrid_dataset_hpresample
 
 #####################################################################
@@ -368,7 +369,10 @@ def tide_pdf(tide_behav, data):
         dtype=int,
     )
     behav_found_hourly = np.array(
-        [tmp_df[tmp_df["hour_include"] == h]["behav_found"].any() for h in hours_sorted],
+        [
+            tmp_df[tmp_df["hour_include"] == h]["behav_found"].any()
+            for h in hours_sorted
+        ],
         dtype=int,
     )
     Likelihood = datalikelihood_tide_only_full_normalized(
@@ -422,18 +426,21 @@ from scipy.ndimage import median_filter
 DT_TARGET = 10  # min, time step expected by tide_behav_extr
 
 TIDE_PARAMS = dict(
-    tideFL=10,                 # h, window used for tide detection
+    tideFL=10,  # h, window used for tide detection
     tideLV=[0.42, 0.85, 0.6],  # max RMSE (m), min R², min amplitude (m) (cf. Pedersen)
-    behavFL=16,                # h, window used for behavior detection
+    behavFL=16,  # h, window used for behavior detection
     behavLV=[0.42, 0.70, 0.2],
 )
+
 
 def time_step_min(da, dim="time"):
     """Time step (min) of a regular time series."""
     return float(np.median(np.diff(da[dim].values)) / np.timedelta64(1, "m"))
 
-def prepare_pressure(tag_log, var="pressure", dt_target=DT_TARGET,
-                     smooth=False, alpha=5, threshold=1.0):
+
+def prepare_pressure(
+    tag_log, var="pressure", dt_target=DT_TARGET, smooth=False, alpha=5, threshold=1.0
+):
     """Resample to dt_target if needed, optionally smooth, return a DataFrame."""
     da = tag_log[var]
     dt = time_step_min(da)
@@ -448,6 +455,7 @@ def prepare_pressure(tag_log, var="pressure", dt_target=DT_TARGET,
         da = da.where(np.abs(da - med) <= threshold, med)
 
     return da.to_dataframe().reset_index().dropna(subset=[var])
+
 
 def detect_tide(tag_log, tag_name, smooth=False, **kwargs):
     """Detect tidal and behavioral patterns from a tag pressure time series.
@@ -506,15 +514,17 @@ def detect_tide(tag_log, tag_name, smooth=False, **kwargs):
     >>> detect_tide(tag_log, "tag_01", smooth=True, tideFL=12, behavLV=[0.5, 0.7, 0.3])
     """
     df = prepare_pressure(tag_log, smooth=smooth)
-    return tide_behav_extr(df=df, tagno=tag_name, dt=DT_TARGET,
-                           **{**TIDE_PARAMS, **kwargs})
+    return tide_behav_extr(
+        df=df, tagno=tag_name, dt=DT_TARGET, **{**TIDE_PARAMS, **kwargs}
+    )
 
 
 VARS_NO_TIME = ["cell_ids", "latitude", "longitude", "resolution", "ocean_mask"]
 
 
-def tide_to_healpix(target_root, refinement_level, ellipsoid,
-                    chunk_size=2000, step=200):
+def tide_to_healpix(
+    target_root, refinement_level, ellipsoid, chunk_size=2000, step=200
+):
     """Regrid the tide likelihood to HEALPix, resample daily and save as zarr.
 
     Parameters
@@ -600,6 +610,7 @@ def tide_to_healpix(target_root, refinement_level, ellipsoid,
     print("DONE")
     return ds, tide_found_resampled, behav_found_resampled
 
+
 import xarray as xr
 
 
@@ -635,14 +646,16 @@ def merge_tide_with_total(target_root, storage_options=None):
             time=common_time
         )
 
-    merged = restrict(daily).rename({"pdf": "pdf_tide"}).merge(
-        restrict(total), compat="override", join="exact"
+    merged = (
+        restrict(daily)
+        .rename({"pdf": "pdf_tide"})
+        .merge(restrict(total), compat="override", join="exact")
     )
     merged.attrs = total.attrs.copy()
 
     tide_mask = merged["tide_found"]
     behav_mask = merged["behav_found"]
-    merged = merged.drop_vars(["tide_found", "ocean_mask","behav_found"])
+    merged = merged.drop_vars(["tide_found", "ocean_mask", "behav_found"])
 
     # Chunking for zarr and source tracking
     merged = merged.chunk({"time": 3, "cells": -1})
