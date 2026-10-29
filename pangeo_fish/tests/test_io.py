@@ -20,7 +20,7 @@ def dummy_mapper():
     2022-06-13T03:00:00+00:00,23.0,1.8
     2022-06-13T04:00:00+00:00,23.0,1.9
     """,
-        "tag_dummy/tagging_events.csv": b"""event_name,time,longitude,latitude
+        "tag_dummy/tagging_event.csv": b"""event_name,time,longitude,latitude
     release,2022-06-13T11:40:30+00:00,-5.098,48.45
     fish_death,2022-06-13T12:00:00+00:00,-5.098,48.45
     """,

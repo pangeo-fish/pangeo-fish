@@ -64,6 +64,8 @@ dependencies = [
   "altair",
   "cmocean",
   "imageio[ffmpeg]",
+  # light-based geolocation
+  "ephem",
   # CLI / progress
   "rich",
   "rich-click",
