@@ -2696,7 +2696,9 @@ def stamp_parameter_indices_from_mask(
 
     Examples
     --------
-    >>> pdf = stamp_parameter_indices_from_mask(pdf=emission, mask=tide_mask, {0:(1,2),1:(2,3)})
+    >>> pdf = stamp_parameter_indices_from_mask(
+    ...     pdf=emission, mask=tide_mask, sigma_bounds_dict={0: (1, 2), 1: (2, 3)}
+    ... )
     >>> pdf["predictor_index"]
     """
     mask_arr = np.asarray(mask).astype(np.int32)
