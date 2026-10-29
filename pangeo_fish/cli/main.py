@@ -180,7 +180,9 @@ def prepare(parameters, runtime_config, cluster_definition):
 )
 @click.argument("parameters", type=click.File(mode="r"))
 @click.argument("runtime_config", type=click.File(mode="r"))
-def estimate(parameters, runtime_config, cluster_definition, estimator, compute):
+def estimate(
+    parameters, runtime_config, cluster_definition, estimator, compute, final=False
+):
     from pangeo_fish.hmm.optimize import EagerBoundsSearch
 
     runtime_config = json.load(runtime_config)
@@ -238,7 +240,16 @@ def estimate(parameters, runtime_config, cluster_definition, estimator, compute)
         )
 
         status.update("[bold blue]searching for optimal model parameters[/]")
-        optimized = optimizer.fit(emission)
+
+        predictor_index = "predictor_index"
+        if final:
+            optimized = optimizer.fit_final_pos(emission)
+        elif predictor_index in emission:
+            optimized = optimizer.fit_multiple_single_parameters(
+                emission, predictor_index
+            )
+        else:
+            optimized = optimizer.fit_single_parameter(emission)
         console.log("model parameter: completed search")
 
         if optimized.sigma == emission.attrs["max_sigma"]:
