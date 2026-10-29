@@ -420,7 +420,6 @@ def plot_tide(tag_test):
 ### FACTORIZATION ###
 ###_______________________________________________________________________________________________________###
 
-import numpy as np
 from scipy.ndimage import median_filter
 
 DT_TARGET = 10  # min, time step expected by tide_behav_extr
@@ -611,7 +610,6 @@ def tide_to_healpix(
     return ds, tide_found_resampled, behav_found_resampled
 
 
-import xarray as xr
 
 
 def merge_tide_with_total(target_root, storage_options=None):
