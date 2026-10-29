@@ -118,7 +118,7 @@ class EagerBoundsSearch:
             If None, param_bounds is used for all dynamics.
         """
         self.estimator = estimator
-        self.param_bounds = param_bounds
+        self.param_bounds = tuple(float(v.item() if hasattr(v, 'item') else v) for v in param_bounds)
         self.optimizer_kwargs = optimizer_kwargs or {}
         self.sigma_bounds = sigma_bounds  # {group_value: (lower, upper)}
 
