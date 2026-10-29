@@ -1745,18 +1745,17 @@ def optimize_pdf(
         if speed_bounds_dict is None:
             pass
         else:
-            sigma_bounds_dict={}
+            sigma_bounds_dict = {}
             for i in speed_bounds_dict.keys():
-                maximum_speed_i=speed_bounds_dict[i][1]
-                max_sigma_i=_get_max_sigma(
-            ds, earth_radius, adjustment_factor, maximum_speed_i, as_radians
-            )
-                sigma_bounds_dict[i]=(1e-4,max_sigma_i)    
+                maximum_speed_i = speed_bounds_dict[i][1]
+                max_sigma_i = _get_max_sigma(
+                    ds, earth_radius, adjustment_factor, maximum_speed_i, as_radians
+                )
+                sigma_bounds_dict[i] = (1e-4, max_sigma_i)
             print(f"dictionnaire des vitesses:{speed_bounds_dict}")
             print(f"dictionnaire des sigma:{sigma_bounds_dict}")
     else:
         sigma_bounds_dict = None
-
 
     optimizer = EagerBoundsSearch(
         estimator,
@@ -2663,7 +2662,9 @@ def _compute_sigma_var(indices: list[list[int]], values: list[float]):
     return np.array(var_list)
 
 
-def stamp_parameter_indices_from_mask(*, pdf, mask, index_key: str = "predictor_index", sigma_bounds_dict=None):
+def stamp_parameter_indices_from_mask(
+    *, pdf, mask, index_key: str = "predictor_index", sigma_bounds_dict=None
+):
     """Add a per-time parameter index (0/1) to a dataset from a temporal binary mask.
 
     The mask is converted to ``int32`` and attached to ``pdf`` as a new variable along the

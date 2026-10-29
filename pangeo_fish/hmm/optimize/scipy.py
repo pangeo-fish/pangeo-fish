@@ -98,9 +98,11 @@ class EagerBoundsSearch:
     #             "The lower bound must be strictly lower than the upper one."
     #         )
 
-    def __init__(self, estimator, param_bounds, optimizer_kwargs=None, sigma_bounds=None):
+    def __init__(
+        self, estimator, param_bounds, optimizer_kwargs=None, sigma_bounds=None
+    ):
         """Initialize the bounds searcher.
-        
+
         Parameters
         ----------
         estimator : object
@@ -122,14 +124,14 @@ class EagerBoundsSearch:
 
     def _detect_segments(self, predictor_indices):
         """Detect continuous segments in predictor indices.
-        
+
         A new segment starts when the predictor index value changes.
-        
+
         Parameters
         ----------
         predictor_indices : array-like
             Array of predictor index values.
-        
+
         Returns
         -------
         list of tuple
@@ -137,22 +139,21 @@ class EagerBoundsSearch:
         """
         # Find positions where the predictor index changes
         changes = np.where(np.diff(predictor_indices) != 0)[0] + 1
-        
+
         # Build segment boundaries
         segment_starts = np.concatenate([[0], changes])
         segment_ends = np.concatenate([changes, [len(predictor_indices)]])
 
-        
-        
         return list(zip(segment_starts, segment_ends))
+
     def _get_bounds_for_group(self, group_value):
         """Get optimization bounds for a specific predictor group.
-        
+
         Parameters
         ----------
         group_value : int or hashable
             The predictor index value.
-        
+
         Returns
         -------
         tuple of (float, float)
@@ -166,7 +167,7 @@ class EagerBoundsSearch:
 
     def fit_single_parameter(self, X: xr.Dataset, bounds=None):
         """Optimize a single sigma parameter for a dataset segment.
-        
+
         Parameters
         ----------
         X : xarray.Dataset
@@ -174,7 +175,7 @@ class EagerBoundsSearch:
         bounds : tuple of (float, float), optional
             Optimization bounds (lower, upper).
             If None, uses self.param_bounds.
-        
+
         Returns
         -------
         estimator
@@ -182,6 +183,7 @@ class EagerBoundsSearch:
         """
         if bounds is None:
             bounds = self.param_bounds
+
         def f(sigma, X):
             # computing is important to avoid recomputing as many times as the result is used
             result = self.estimator.set_params(sigma=[sigma]).score(X)
@@ -257,75 +259,82 @@ class EagerBoundsSearch:
 
     #     estimated_params = [e.sigma for e in estimators]
     #     return self.estimator.set_params(sigma=sum(estimated_params, start=[]))
-    
+
     def fit_multiple_single_parameters(
         self, X: xr.Dataset, group_name: str = "predictor_index"
     ):
         """Optimize parameters by continuous temporal segments.
-        
+
         Each continuous segment with the same predictor index is optimized
         independently using its group-specific bounds. State is chained
         between segments to maintain temporal continuity.
-        
+
         .. note::
             Unlike the previous approach, non-consecutive indices
             (e.g., [0,0,0,1,1,1,0,0,0]) are now treated as separate
             segments, avoiding temporal discontinuities during optimization.
-        
+
         Parameters
         ----------
         X : xarray.Dataset
             The input data with "predictor_index" variable and "initial" condition.
         group_name : str, default: "predictor_index"
             Name of the variable defining predictor groups.
-        
+
         Returns
         -------
         estimator
             The unified estimator with all optimized parameters.
-        
+
         Raises
         ------
         ValueError
             If the dataset does not contain the group_name variable.
         """
-        
+
         if group_name not in X:
             raise ValueError(f'The dataset must have an entry "{group_name}".')
-        
+
         # Detect continuous segments
         predictor_indices = X[group_name].values
         segments = self._detect_segments(predictor_indices)
-        if self.sigma_bounds is not None and len(self.sigma_bounds)!=len(set(predictor_indices)):
-             raise ValueError(f'The dict for behavior speed:{len(self.sigma_bounds)} should have the same length that the number predictor_indices:{len(set(predictor_indices))}.')
+        if self.sigma_bounds is not None and len(self.sigma_bounds) != len(
+            set(predictor_indices)
+        ):
+            raise ValueError(
+                f"The dict for behavior speed:{len(self.sigma_bounds)} should have the same length that the number predictor_indices:{len(set(predictor_indices))}."
+            )
         estimators = []
         previous_initial = X["initial"]
-        
+
         # Optimize each segment sequentially
         for start, end in segments:
             # Extract the segment
             subset = X.isel(time=slice(start, end))
             group_value = predictor_indices[start]
-            
+
             # Pass the initial state from the previous segment
             subset = subset.assign(
-                    initial=previous_initial,
-                    predictor_index=("time", np.zeros(subset["time"].size).astype(np.int32))
-                )            
+                initial=previous_initial,
+                predictor_index=(
+                    "time",
+                    np.zeros(subset["time"].size).astype(np.int32),
+                ),
+            )
             # Get bounds for this group
             bounds = self._get_bounds_for_group(group_value)
 
             # Optimize this segment's parameter
             estimated = self.fit_single_parameter(subset, bounds=bounds)
             estimators.append(estimated)
-            
+
             # Update initial state for next segment using final state of current segment
             previous_initial = subset["pdf"].isel(time=-1).fillna(0)
-        
+
         # Aggregate all optimized parameters
         estimated_params = [e.sigma for e in estimators]
         return self.estimator.set_params(sigma=sum(estimated_params, start=[]))
-    
+
     def fit_final_pos(self, X):
         """Optimize sigma so that predicted final state matches the observed final value."""
 
