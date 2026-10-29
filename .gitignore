@@ -67,3 +67,4 @@ notebooks/pour_clement_cell_ids
 notebooks/pour_clement_lat
 notebooks/pour_clement_lon
 notebooks/pangeo-fish-complete.ipynb
+notebooks/diff_wgs_sphere.ipynb
