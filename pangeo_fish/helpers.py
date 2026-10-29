@@ -1740,11 +1740,29 @@ def optimize_pdf(
 
     estimator = EagerEstimator(sigma=None, predictor_factory=predictor_factory)
     # ds.attrs["max_sigma"] = max_sigma  # limitation of the helper
+    if "predictor_index" in ds:
+        speed_bounds_dict = ds.attrs.get("sigma_bounds", None)
+        if speed_bounds_dict is None:
+            pass
+        else:
+            sigma_bounds_dict={}
+            for i in speed_bounds_dict.keys():
+                maximum_speed_i=speed_bounds_dict[i][1]
+                max_sigma_i=_get_max_sigma(
+            ds, earth_radius, adjustment_factor, maximum_speed_i, as_radians
+            )
+                sigma_bounds_dict[i]=(1e-4,max_sigma_i)    
+            print(f"dictionnaire des vitesses:{speed_bounds_dict}")
+            print(f"dictionnaire des sigma:{sigma_bounds_dict}")
+    else:
+        sigma_bounds_dict = None
+
 
     optimizer = EagerBoundsSearch(
         estimator,
         (1e-4, max_sigma),
         optimizer_kwargs={"disp": 3, "xtol": tolerance},
+        sigma_bounds=sigma_bounds_dict,
     )
 
     if final:
@@ -2645,7 +2663,7 @@ def _compute_sigma_var(indices: list[list[int]], values: list[float]):
     return np.array(var_list)
 
 
-def stamp_parameter_indices_from_mask(*, pdf, mask, index_key: str = "predictor_index"):
+def stamp_parameter_indices_from_mask(*, pdf, mask, index_key: str = "predictor_index", sigma_bounds_dict=None):
     """Add a per-time parameter index (0/1) to a dataset from a temporal binary mask.
 
     The mask is converted to ``int32`` and attached to ``pdf`` as a new variable along the
@@ -2660,14 +2678,15 @@ def stamp_parameter_indices_from_mask(*, pdf, mask, index_key: str = "predictor_
         Binary values (0/1 or boolean), one per time step of ``pdf``, in the same order.
     index_key : str, optional
         Name of the variable to add. Default is ``"predictor_index"``.
-
+    sigma_bounds_dict : dict
+        dict with values for the two behavior (0, 1) {0: (min_speed1,max_speed) 1, 1: (min_speed2,max_speed_2)}
     Returns
     -------
     xarray.Dataset
         A new dataset (``pdf`` is not modified) identical to ``pdf`` with an additional
         variable ``index_key`` of dtype ``int32`` and dimension ``time``. Its value is 1
         where the mask is 1 (e.g. tide detected, so the tide likelihood applies) and 0
-        elsewhere.
+        elsewhere. Add an attribute containing the bound seed for each behavior.
 
     Raises
     ------
@@ -2676,7 +2695,7 @@ def stamp_parameter_indices_from_mask(*, pdf, mask, index_key: str = "predictor_
 
     Examples
     --------
-    >>> pdf = stamp_parameter_indices_from_mask(pdf=emission, mask=tide_mask)
+    >>> pdf = stamp_parameter_indices_from_mask(pdf=emission, mask=tide_mask, {0:(1,2),1:(2,3)})
     >>> pdf["predictor_index"]
     """
     mask_arr = np.asarray(mask).astype(np.int32)
@@ -2686,7 +2705,7 @@ def stamp_parameter_indices_from_mask(*, pdf, mask, index_key: str = "predictor_
             f"The mask (size {mask_arr.shape[0]}) does not match "
             f"the 'time' dimension of pdf (size {pdf.sizes['time']})."
         )
-
+    pdf.attrs["sigma_bounds"] = sigma_bounds_dict
     return pdf.assign(**{index_key: ("time", mask_arr)})
 
 
