@@ -610,8 +610,6 @@ def tide_to_healpix(
     return ds, tide_found_resampled, behav_found_resampled
 
 
-
-
 def merge_tide_with_total(target_root, storage_options=None):
     """Merge the daily tide likelihood with the other likelihoods on their common cells and days.
 
