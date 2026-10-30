@@ -586,6 +586,39 @@ def _align_copernicus_coordinates(reference, other, dataset_id):
     return other
 
 
+def _warn_if_period_clipped(dataset_id, times, start_datetime, end_datetime):
+    """Warn when the data returned starts later or ends earlier than requested."""
+    if not len(times):
+        return
+    first, last = times[0], times[-1]
+    # one time step of tolerance: a date-only bound need not hit a data time
+    step = times[1] - times[0] if len(times) > 1 else np.timedelta64(0, "s")
+    if (
+        first - np.datetime64(start_datetime) > step
+        or np.datetime64(end_datetime) - last > step
+    ):
+        warnings.warn(
+            f"Copernicus dataset {dataset_id!r} only covers "
+            f"{np.datetime_as_string(first, unit='s')} to "
+            f"{np.datetime_as_string(last, unit='s')}, which is narrower than the "
+            f"requested period ({start_datetime} to {end_datetime}); the model "
+            "is restricted to the period covered.",
+            category=UserWarning,
+        )
+
+
+def _mask_land_depth(static):
+    """Set ``deptho`` to NaN on land.
+
+    Some products (e.g. the North-West European Shelf analysis/forecast) store
+    a depth value on land cells, which are then masked out in ``mask`` only.
+    ``mask`` is positive on ocean cells and NaN or zero on land.
+    """
+    mask = static["mask"]
+    ocean = (mask.isel(depth=0, drop=True) if "depth" in mask.dims else mask) > 0
+    return static.assign(deptho=static["deptho"].where(ocean))
+
+
 def _open_copernicus_model(
     copernicus_model_name: str,
     bbox: dict[str, tuple[float, float]],
@@ -656,8 +689,23 @@ def _open_copernicus_model(
     )
     datasets = [temperature]
     if split:
-        ssh = open_fields(ssh_id, ["zos"], **temporal)
-        if "time" not in ssh.coords or "time" not in temperature.coords:
+        if "time" not in temperature.coords:
+            raise ValueError(
+                f"Copernicus dataset {temperature_id!r}: missing time coordinate."
+            )
+        # The temperature product may start later than the SSH one (and than the
+        # requested period): request SSH over the temperature time range only.
+        temperature_times = temperature["time"].values
+        _warn_if_period_clipped(
+            temperature_id, temperature_times, start_datetime, end_datetime
+        )
+        unit = "s" if _copernicus_is_hourly(temperature_id) else "D"
+        ssh_temporal = dict(
+            start_datetime=np.datetime_as_string(temperature_times[0], unit=unit),
+            end_datetime=np.datetime_as_string(temperature_times[-1], unit=unit),
+        )
+        ssh = open_fields(ssh_id, ["zos"], **ssh_temporal)
+        if "time" not in ssh.coords:
             raise ValueError(f"Copernicus dataset {ssh_id!r}: missing time coordinate.")
         datasets.append(_align_copernicus_coordinates(temperature, ssh, ssh_id))
 
@@ -665,6 +713,7 @@ def _open_copernicus_model(
     # mask(depth, latitude, longitude), as well as unused deptho_lev.
     static_options = {"dataset_part": static_part} if static_part else {}
     static = open_fields(static_id, ["deptho", "mask"], **static_options)
+    static = _mask_land_depth(static)
     datasets.append(_align_copernicus_coordinates(temperature, static, static_id))
     ds_all = xr.merge(datasets, compat="no_conflicts", join="exact")
     ds_all = ds_all.rename({"latitude": "lat", "longitude": "lon"})

@@ -249,10 +249,10 @@ def test_load_model_and_compute_diff(client, fields, dataset):
 )
 def test_hourly_requests_use_hourly_bounds(client, fields, temperature, ssh, static):
     mock, datasets = client
-    hours = np.arange("2021-06-03T00", "2021-06-03T03", dtype="datetime64[h]").astype(
+    hours = np.arange("2021-06-01T00", "2021-06-04T00", dtype="datetime64[h]").astype(
         "datetime64[ns]"
     )
-    hourly = fields.isel(time=[0, 1, 2]).assign_coords(time=hours)
+    hourly = fields.isel(time=[0] * hours.size).assign_coords(time=hours)
     datasets[temperature] = hourly[["thetao"]]
     datasets[ssh] = hourly[["zos"]]
     datasets[static] = hourly[["deptho", "mask"]]
@@ -267,10 +267,77 @@ def test_hourly_requests_use_hourly_bounds(client, fields, temperature, ssh, sta
     calls = [c.kwargs for c in mock.call_args_list]
     assert [c["dataset_id"] for c in calls] == [temperature, ssh, static]
     assert calls[2]["dataset_part"] == "bathy"
-    for call in calls[:2]:
-        assert call["start_datetime"] == "2021-06-01T00:00:00"
-        # a date-only stop includes the whole last day
-        assert call["end_datetime"] == "2021-06-03T23:59:59"
+    assert calls[0]["start_datetime"] == "2021-06-01T00:00:00"
+    # a date-only stop includes the whole last day
+    assert calls[0]["end_datetime"] == "2021-06-03T23:59:59"
+    # SSH is requested over the time range of the temperature
+    assert calls[1]["start_datetime"] == "2021-06-01T00:00:00"
+    assert calls[1]["end_datetime"] == "2021-06-03T23:00:00"
+
+
+@pytest.fixture
+def clipping_client(monkeypatch, fields):
+    """SSH covers 5 days, temperature only the last 3 (as for NWS/IBI hourly)."""
+    days = np.arange("2021-05-30", "2021-06-04", dtype="datetime64[D]").astype(
+        "datetime64[ns]"
+    )
+    full = fields.isel(time=[0] * days.size).assign_coords(time=days)
+    datasets = {
+        IBI: full[["thetao"]].sel(time=slice("2021-06-01", None)),
+        SSH: full[["zos"]],
+        STATIC: full[["deptho", "mask"]],
+    }
+
+    def open_dataset(**kwargs):
+        ds = datasets[kwargs["dataset_id"]]
+        if "start_datetime" in kwargs:
+            ds = ds.sel(time=slice(kwargs["start_datetime"], kwargs["end_datetime"]))
+        return ds
+
+    mock = Mock(side_effect=open_dataset)
+    monkeypatch.setattr(helpers.copernicusmarine, "open_dataset", mock)
+    return mock
+
+
+def test_ssh_clipped_to_temperature_period(clipping_client):
+    with pytest.warns(UserWarning, match="only covers 2021-06-01.*2021-06-03"):
+        actual = helpers._open_copernicus_model(
+            IBI, BBOX, slice("2021-05-30", "2021-06-03")
+        )
+    assert actual.time.size == 3
+    assert str(actual.time.values[0])[:10] == "2021-06-01"
+    ssh_call = clipping_client.call_args_list[1].kwargs
+    assert (ssh_call["start_datetime"], ssh_call["end_datetime"]) == (
+        "2021-06-01",
+        "2021-06-03",
+    )
+
+
+def test_no_warning_when_period_covered(clipping_client):
+    actual = helpers._open_copernicus_model(
+        IBI, BBOX, slice("2021-06-01", "2021-06-03")
+    )
+    assert actual.time.size == 3
+
+
+@pytest.mark.parametrize("land_value", [np.nan, 0])
+def test_land_depth_is_masked(client, fields, land_value):
+    _, datasets = client
+    static = datasets[STATIC].copy(deep=True)
+    static["deptho"] = static["deptho"].fillna(21.2)
+    static["mask"] = static["mask"].where(static["mask"] > 0, land_value)
+    datasets[STATIC] = static
+    actual = open_model()
+    assert np.isnan(actual["H0"].isel(lat=0, lon=1)).all()
+    assert (actual["H0"].isel(lat=0, lon=0) == 100.0).all()
+
+
+def test_land_depth_masked_for_legacy_product(client, fields):
+    _, datasets = client
+    key = GLOBAL.rsplit("_", 1)[0] + "_static"
+    datasets[key] = datasets[key].assign(deptho=datasets[key]["deptho"].fillna(5.0))
+    actual = open_model(GLOBAL)
+    assert np.isnan(actual["H0"].isel(lat=0, lon=1)).all()
 
 
 def test_hourly_time_bounds_keep_explicit_timestamps():
