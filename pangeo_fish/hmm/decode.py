@@ -3,7 +3,6 @@ import itertools
 import dask
 import dask.array as da
 import healpix_geo.nested as hgn
-import healpix_geo.nested as hgn
 import numba
 import numpy as np
 import xarray as xr
