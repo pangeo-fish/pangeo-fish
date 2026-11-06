@@ -7,16 +7,19 @@ import xarray as xr
 import zarr
 from tlz.functoolz import compose_left, curry, pipe
 from tlz.itertoolz import first
+from zarr.abc.store import Store
+from zarr.storage import LocalStore
 
 from pangeo_fish import tracks, utils
 from pangeo_fish.hmm.decode import mean_track, modal_track, viterbi, viterbi2
 from pangeo_fish.hmm.filter import _backward_zarr, _forward_zarr
 
-try:
-    from zarr.storage import StoreLike
-except ImportError:  # pragma: no cover
-    # fallback for zarr-python v2
-    StoreLike = zarr.storage.Store
+def _cache_store(cache):
+    if isinstance(cache, (str, os.PathLike)):
+        return LocalStore(cache)
+    if isinstance(cache, Store):
+        return cache
+    raise TypeError("cache must be a local path or a Zarr store")
 
 
 @dataclass
@@ -41,7 +44,7 @@ class CachedEstimator:
     predictor_factory: callable
     sigma: float | None = None
 
-    cache: str | os.PathLike | StoreLike = None
+    cache: str | os.PathLike | Store | None = None
     progress: bool = False
 
     def to_dict(self):
@@ -64,10 +67,7 @@ class CachedEstimator:
         if self.sigma is None:
             raise ValueError("unset sigma, cannot run the filter")
 
-        if not isinstance(cache, zarr.storage.Store):
-            raise ValueError("requires a zarr store for now")
-        else:
-            cache_store = cache
+        cache_store = _cache_store(cache)
 
         if progress is None:
             progress = self.progress
@@ -81,9 +81,9 @@ class CachedEstimator:
 
         # write the dataset to disk
         X.transpose(*dims).to_zarr(
-            cache_store, group="emission", mode="w", consolidated=True
+            cache_store, group="emission", mode="w", consolidated=False, zarr_format=2
         )
-        group = zarr.group(cache_store, overwrite=False)
+        group = zarr.open_group(cache_store, mode="a", zarr_format=2, use_consolidated=False)
         if "forward" in group:
             del group["forward"]
 
@@ -97,7 +97,7 @@ class CachedEstimator:
 
         # open and return the score
         with np.errstate(divide="ignore"):
-            value = -np.log(forward["normalizations"]).sum()
+            value = -np.log(forward["normalizations"][:]).sum()
             return value if not np.isnan(value) else np.inf
 
     def _forward_backward_algorithm(
@@ -106,10 +106,7 @@ class CachedEstimator:
         if self.sigma is None:
             raise ValueError("unset sigma, cannot run the filter")
 
-        if not isinstance(cache, zarr.storage.Store):
-            raise ValueError("requires a zarr store for now")
-        else:
-            cache_store = cache
+        cache_store = _cache_store(cache)
 
         if progress is None:
             progress = self.progress
@@ -123,11 +120,11 @@ class CachedEstimator:
 
         # write the dataset to disk
         X.transpose(*dims).to_zarr(
-            cache_store, group="emission", mode="w", consolidated=True
+            cache_store, group="emission", mode="w", consolidated=False, zarr_format=2
         )
 
         # open the root group
-        group = zarr.group(cache_store, overwrite=False)
+        group = zarr.open_group(cache_store, mode="a", zarr_format=2, use_consolidated=False)
 
         # propagate
         _forward_zarr(
@@ -144,7 +141,9 @@ class CachedEstimator:
         )
 
         # open and return a dataset
-        return xr.open_dataset(cache_store, engine="zarr", chunks={}, group="backward")
+        return xr.open_dataset(
+            cache_store, engine="zarr", chunks={}, group="backward", consolidated=False
+        )
 
     def predict_proba(
         self, X, *, cache=None, spatial_dims=None, temporal_dims=None, progress=None

@@ -156,7 +156,9 @@ def _save_zarr(ds: xr.Dataset, path: str, storage_options=None):
     try:
         path_to_zarr = path + ".zarr" if not path.endswith(".zarr") else path
         ds = _with_dggs_attrs(ds)
-        ds.to_zarr(path_to_zarr, mode="w", storage_options=storage_options)
+        ds.to_zarr(
+            path_to_zarr, mode="w", storage_options=storage_options, zarr_format=2
+        )
     except Exception:
         warnings.warn(
             f'An error occurred when saving a .zarr array to "{path_to_zarr}")',

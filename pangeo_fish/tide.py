@@ -3,11 +3,13 @@ import numpy as np
 import pandas as pd
 import sparse
 import xarray as xr
+import zarr
 from numpy.linalg import lstsq
 from scipy.signal import savgol_filter
 from tqdm import tqdm
 
-from pangeo_fish.helpers import regrid_dataset_hpresample
+from pangeo_fish.helpers import _with_dggs_attrs, regrid_dataset_hpresample
+from pangeo_fish.storage import write_time_blocks
 
 #####################################################################
 #  First part : extraction of a tidal signal
@@ -611,28 +613,20 @@ def tide_to_healpix(
 
     print("Concatenating chunks...")
     ds = xr.concat(chunks, dim="time")
-    ds = ds.drop_vars("pdf").assign(pdf=ds.pdf.chunk({"time": 10, "cells": -1}))
-    ds = ds.chunk({"time": 10})
-    for var in ds.variables:
-        ds[var].encoding.pop("chunks", None)
-
-    # Write: structure first, then time blocks, then time-independent variables
+    ds = _with_dggs_attrs(ds)
+    # Write format 2, with region boundaries aligned to the storage chunks.
     store_path = f"{target_root}/tide_pdf_healpix.zarr"
-    ds.to_zarr(store_path, mode="w", compute=False)
-
-    n_time = ds.sizes["time"]
-    for start in range(0, n_time, step):
-        end = min(start + step, n_time)
-        print(f"Writing time[{start}:{end}] / {n_time}")
-        ds.isel(time=slice(start, end)).drop_vars(VARS_NO_TIME).to_zarr(
-            store_path, mode="r+", region={"time": slice(start, end)}
-        )
-    ds[VARS_NO_TIME].to_zarr(store_path, mode="a")
+    write_time_blocks(ds.chunk({"cells": -1}), store_path, step=step)
 
     tide_found_resampled = tide_found.resample(time="1D").mean(skipna=True)
-    tide_found_resampled.sel(time=ds.time).to_zarr(store_path, mode="a")
+    tide_found_resampled.sel(time=ds.time).to_zarr(
+        store_path, mode="a", zarr_format=2, consolidated=False
+    )
     behav_found_resampled = behav_found.resample(time="1D").mean(skipna=True)
-    behav_found_resampled.sel(time=ds.time).to_zarr(store_path, mode="a")
+    behav_found_resampled.sel(time=ds.time).to_zarr(
+        store_path, mode="a", zarr_format=2, consolidated=False
+    )
+    zarr.consolidate_metadata(store_path)
     print("DONE")
     return ds, tide_found_resampled, behav_found_resampled
 
