@@ -49,7 +49,7 @@ def score(emission, predictors, predictor_indices, initial_probability, mask=Non
         normalization_factor = np.sum(updated)
         if normalization_factor == 0:
             warnings.warn(
-                f"Empty product of the prediction with the true distribution at step {time_index+1}.",
+                f"Empty product of the prediction with the true distribution at step {time_index + 1}.",
                 RuntimeWarning,
             )
             return 1e6
@@ -126,16 +126,12 @@ def score_final_pos(
 
         if norm_factor > 0:
             log_total += np.log(norm_factor)
-            previous = (
-                updated / norm_factor
-            )  # renormalisé à chaque pas -> jamais de sous-flottant
+            previous = updated / norm_factor  # renormalisé à chaque pas -> jamais de sous-flottant
         else:
             log_total += np.log(eps)
 
     final_idx_max = int(np.argmax(emission[-1, ...]))
-    state_val = float(
-        previous[final_idx_max]
-    )  # previous est ici states[-1] NORMALISÉ (somme=1)
+    state_val = float(previous[final_idx_max])  # previous est ici states[-1] NORMALISÉ (somme=1)
 
     loss = -np.log(max(state_val, eps))  # -log_total
 
@@ -172,9 +168,7 @@ def forward(emission, predictors, predictor_indices, initial_probability, mask=N
     states.append(initial_probability)
 
     for time_index, predictor_index in zip(range(1, n_max), predictor_indices):
-        prediction = predictors[predictor_index].predict(
-            states[time_index - 1], mask=mask
-        )
+        prediction = predictors[predictor_index].predict(states[time_index - 1], mask=mask)
         predictions.append(prediction)
 
         updated = prediction * emission[time_index, ...]
@@ -213,9 +207,7 @@ def backward(states, predictions, predictors, predictor_indices, mask=None):
 
     smoothed = [states[-1, ...]]
     backward_predictions = [states[-1, ...]]
-    for time_index, predictor_index in zip(
-        range(1, n_max), predictor_indices[: n_max - 1][::-1]
-    ):
+    for time_index, predictor_index in zip(range(1, n_max), predictor_indices[: n_max - 1][::-1]):
         ratio = smoothed[time_index - 1] / (predictions[-time_index, ...] + eps)
         backward_prediction = predictors[predictor_index].predict(ratio, mask=None)
         normalized = backward_prediction / np.sum(backward_prediction)
@@ -226,14 +218,10 @@ def backward(states, predictions, predictors, predictor_indices, mask=None):
 
         smoothed.append(updated_normalized)
 
-    return np.stack(backward_predictions[::-1], axis=0), np.stack(
-        smoothed[::-1], axis=0
-    )
+    return np.stack(backward_predictions[::-1], axis=0), np.stack(smoothed[::-1], axis=0)
 
 
-def forward_backward(
-    emission, predictors, predictor_indices, initial_probability, mask=None
-):
+def forward_backward(emission, predictors, predictor_indices, initial_probability, mask=None):
     """Double pass (forwards and backwards) of the spatial HMM filter
 
     Parameters
@@ -282,16 +270,24 @@ def copy_coords_of(arr, source, dest):
         if name in source:
             coord = source[name]
             dest.create_array(
-                name, data=coord[...], chunks=coord.chunks,
-                fill_value=coord.fill_value, attributes=dict(coord.attrs),
+                name,
+                data=coord[...],
+                chunks=coord.chunks,
+                fill_value=coord.fill_value,
+                attributes=dict(coord.attrs),
             )
 
 
 def empty_like(group, name, arr, **kwargs):
     # Zeros are valid probabilities, not missing values. Preserve CF dimensions.
     return group.create_array(
-        name, shape=arr.shape, dtype=arr.dtype, chunks=arr.chunks,
-        fill_value=None, attributes=dict(arr.attrs), **kwargs,
+        name,
+        shape=arr.shape,
+        dtype=arr.dtype,
+        chunks=arr.chunks,
+        fill_value=None,
+        attributes=dict(arr.attrs),
+        **kwargs,
     )
 
 
@@ -346,9 +342,7 @@ def _forward_zarr(ingroup, outgroup, predictor, progress=False):
     normalizations[0] = 1  # this is constant, so doesn't make a difference
 
     n_max = emission.shape[0]
-    for index in track(
-        range(1, n_max), description="forwards filter", display=progress
-    ):
+    for index in track(range(1, n_max), description="forwards filter", display=progress):
         prediction = predictor.predict(
             states[index - 1, ...], mask=None if mask is None else mask[...]
         )
@@ -395,9 +389,7 @@ def _backward_zarr(ingroup, outgroup, predictor, progress=False):
     backward_pred[-1, ...] = states[-1, ...]
 
     n_max = states.shape[0]
-    for index in track(
-        range(1, n_max), description="backwards filter", display=progress
-    ):
+    for index in track(range(1, n_max), description="backwards filter", display=progress):
         ratio = smoothed[-index, ...] / (predictions[-index, ...] + eps)
         backward_prediction = predictor.predict(ratio, mask=None)
         normalized = backward_prediction / np.sum(backward_prediction)

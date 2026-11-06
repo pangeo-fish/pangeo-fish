@@ -57,6 +57,7 @@ from pangeo_fish.io import (
     save_trajectories,
 )
 from pangeo_fish.pdf import combine_emission_pdf, normal
+from pangeo_fish.storage import _with_dggs_attrs
 from pangeo_fish.tags import adapt_model_time, reshape_by_bins, to_time_slice
 from pangeo_fish.utils import haversine_distance, temporal_resolution
 from pangeo_fish.visualization import filter_by_states, plot_map, render_frame
@@ -119,36 +120,6 @@ def _plot_in_figure(ds: xr.Dataset, **plot_kwargs) -> Figure:
     fig, ax = plt.subplots()
     ds.plot(**(plot_kwargs | {"ax": ax}))
     return fig
-
-
-def _with_dggs_attrs(ds: xr.Dataset) -> xr.Dataset:
-    """Return ``ds`` with the DGGS grid attributes written on ``cell_ids``.
-
-    The attributes follow the Zarr DGGS convention used by xdggs (``grid_name``,
-    ``level``, ``indexing_scheme`` and ``ellipsoid``). They are taken from the
-    xdggs index when the dataset has one, else from the existing ``cell_ids``
-    attributes, so that the grid definition survives a round trip to Zarr.
-    """
-    if "cell_ids" not in ds.variables:
-        return ds
-
-    try:
-        grid_attrs = ds.dggs.grid_info.to_dict()
-    except Exception:
-        attrs = ds["cell_ids"].attrs
-        if "level" not in attrs:
-            return ds
-        grid_attrs = {
-            "grid_name": attrs.get("grid_name", "healpix"),
-            "level": int(attrs["level"]),
-            "indexing_scheme": attrs.get("indexing_scheme", "nested"),
-        }
-        if attrs.get("ellipsoid") is not None:
-            grid_attrs["ellipsoid"] = attrs["ellipsoid"]
-
-    ds = ds.copy()
-    ds["cell_ids"].attrs.update(grid_attrs)
-    return ds
 
 
 def _save_zarr(ds: xr.Dataset, path: str, storage_options=None):
@@ -2697,7 +2668,7 @@ def _find_time_intervals(df: pd.DataFrame, min_time: pd.Timedelta, min_dist: flo
             'The dataframe must have the columns "id", "longitude" and "latitude".'
         )
 
-    time_delta = pd.Timedelta(0)
+    time_delta = pd.Timedelta(seconds=0)
     first_row = df.iloc[0]
     last_time = first_row.name  # type: pd.Timestamp
     last_point = (
@@ -2713,12 +2684,12 @@ def _find_time_intervals(df: pd.DataFrame, min_time: pd.Timedelta, min_dist: flo
         if _is_far_enough(*last_point, row.longitude, row.latitude, min_dist):
             times.append(last_time)
             times.append(curr_time)
-            time_delta = pd.Timedelta(0)
+            time_delta = pd.Timedelta(seconds=0)
 
             last_point = (row.longitude, row.latitude)
         if time_delta > min_time:
             times.append(curr_time)
-            time_delta = pd.Timedelta(0)
+            time_delta = pd.Timedelta(seconds=0)
 
             last_point = (row.longitude, row.latitude)
 
@@ -2729,7 +2700,7 @@ def _find_time_intervals(df: pd.DataFrame, min_time: pd.Timedelta, min_dist: flo
 def compute_detection_time_intervals(
     *,
     tag: xr.DataTree,
-    min_time: pd.Timedelta = pd.Timedelta("4days"),
+    min_time: pd.Timedelta = pd.Timedelta(days=4),
     min_dist: float = 17.0,
     **kwargs,
 ):
@@ -2740,7 +2711,7 @@ def compute_detection_time_intervals(
     tag : xarray.DataTree
         The fish tag, assumed to have an entry "acoustic".
     min_time : pandas.Timedelta, optional
-        Minimum time length for the intervals (defaults to ``pd.Timedelta("4days")``).
+        Minimum time length for the intervals (defaults to ``pd.Timedelta(days=4)``).
     min_dist : float, default: 17.0
         Minimum distance between the detections to set apart different intervals, in kilometers.
     Returns
@@ -2767,7 +2738,7 @@ def compute_detection_time_intervals(
         raise ValueError(
             f'The minimum distance must be strictly positive (received: "{min_dist}").'
         )
-    if min_time <= pd.Timedelta(0):
+    if min_time <= pd.Timedelta(seconds=0):
         raise ValueError(
             f'The minimum interval time must be strictly positive (received: "{min_time}").'
         )

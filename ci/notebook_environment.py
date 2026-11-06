@@ -9,9 +9,7 @@ from pathlib import Path
 
 
 def snapshot(path):
-    check = subprocess.run(
-        [sys.executable, "-m", "pip", "check"], text=True, capture_output=True
-    )
+    check = subprocess.run([sys.executable, "-m", "pip", "check"], text=True, capture_output=True)
     if check.returncode not in (0, 1) or (check.returncode == 1 and not check.stdout.strip()):
         raise RuntimeError(f"pip check failed to run: {check.stderr}")
     result = {
@@ -30,10 +28,29 @@ def snapshot(path):
 
 
 PROTECTED = {
-    "xarray", "zarr", "numpy", "scipy", "pandas", "numba", "numcodecs",
-    "dask", "distributed", "fsspec", "s3fs", "gcsfs", "kerchunk",
-    "aiohttp", "aiobotocore", "boto3", "botocore", "click", "torch",
-    "argopy", "icechunk", "rioxarray", "virtualizarr",
+    "xarray",
+    "zarr",
+    "numpy",
+    "scipy",
+    "pandas",
+    "numba",
+    "numcodecs",
+    "dask",
+    "distributed",
+    "fsspec",
+    "s3fs",
+    "gcsfs",
+    "kerchunk",
+    "aiohttp",
+    "aiobotocore",
+    "boto3",
+    "botocore",
+    "click",
+    "torch",
+    "argopy",
+    "icechunk",
+    "rioxarray",
+    "virtualizarr",
 }
 
 
