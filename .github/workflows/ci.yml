@@ -93,4 +93,14 @@ jobs:
 
       - name: Run tests
         run: |
-          python -m pytest --cov=pangeo_fish
+          if [ '${{ runner.os }}' = macOS ]; then
+            # The unchanged release also crashes in native foscat/PyTorch after
+            # earlier test modules on macOS. Isolate native library state while
+            # retaining every test and accumulating coverage across processes.
+            python -m coverage erase
+            for test_file in pangeo_fish/tests/test_*.py; do
+              python -m pytest --cov=pangeo_fish --cov-append "$test_file"
+            done
+          else
+            python -m pytest --cov=pangeo_fish
+          fi
