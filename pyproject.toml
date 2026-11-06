@@ -15,7 +15,7 @@ classifiers = [
 dependencies = [
   # core scientific stack
   # Modern BinGrouper and Zarr-Python 3 integration; exercised in container CI.
-  "xarray>=2025.6.1,<2027",
+  "xarray>=2025.7.1,<2027",
   "pandas",
   "numpy",
   "scipy",

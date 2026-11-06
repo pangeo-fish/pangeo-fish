@@ -1,5 +1,5 @@
 # Exercise the lower bounds of the migrated interfaces together on Python 3.11.
-xarray==2025.6.1
+xarray==2025.7.1
 zarr==3.1.2
 kerchunk==0.2.9
 fsspec==2025.7.0
