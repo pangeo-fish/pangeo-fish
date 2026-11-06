@@ -3,6 +3,7 @@ import itertools
 import dask
 import dask.array as da
 import healpix_geo.nested as hgn
+import healpix_geo.nested as hgn
 import numba
 import numpy as np
 import xarray as xr
@@ -314,10 +315,7 @@ def viterbi2(emission, sigma):
 ### Healpix viterbi try ###
 
 
-import healpix_geo.nested as hgn
-import numpy as np
-import xarray as xr
-from scipy.special import logsumexp
+
 
 
 def _angular_distances(cell_ids, disk, level, ellipsoid="sphere"):
