@@ -85,7 +85,9 @@ class CachedEstimator:
         _with_dggs_attrs(X).transpose(*dims).to_zarr(
             cache_store, group="emission", mode="w", consolidated=False, zarr_format=2
         )
-        group = zarr.open_group(cache_store, mode="a", zarr_format=2, use_consolidated=False)
+        group = zarr.open_group(
+            cache_store, mode="a", zarr_format=2, use_consolidated=False
+        )
         if "forward" in group:
             del group["forward"]
 
@@ -126,7 +128,9 @@ class CachedEstimator:
         )
 
         # open the root group
-        group = zarr.open_group(cache_store, mode="a", zarr_format=2, use_consolidated=False)
+        group = zarr.open_group(
+            cache_store, mode="a", zarr_format=2, use_consolidated=False
+        )
 
         # propagate
         _forward_zarr(
@@ -147,7 +151,9 @@ class CachedEstimator:
             cache_store, engine="zarr", chunks={}, group="backward", consolidated=False
         )
 
-    def predict_proba(self, X, *, cache=None, spatial_dims=None, temporal_dims=None, progress=None):
+    def predict_proba(
+        self, X, *, cache=None, spatial_dims=None, temporal_dims=None, progress=None
+    ):
         """Predict the state probabilities
 
         This is done by applying the forward-backward algorithm to the data.
@@ -193,7 +199,9 @@ class CachedEstimator:
         )
         return state.where(X["mask"])
 
-    def score(self, X, *, cache=None, spatial_dims=None, temporal_dims=None, progress=None):
+    def score(
+        self, X, *, cache=None, spatial_dims=None, temporal_dims=None, progress=None
+    ):
         """Score the fit of the selected model to the data
 
         Apply the forward-backward algorithm to the given data, then return the
@@ -287,7 +295,9 @@ class CachedEstimator:
             X, states = data
 
             if states is None:
-                return self.predict_proba(X, spatial_dims=spatial_dims, temporal_dims=temporal_dims)
+                return self.predict_proba(
+                    X, spatial_dims=spatial_dims, temporal_dims=temporal_dims
+                )
 
             return states
 

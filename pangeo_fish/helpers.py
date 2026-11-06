@@ -2668,7 +2668,7 @@ def _find_time_intervals(df: pd.DataFrame, min_time: pd.Timedelta, min_dist: flo
             'The dataframe must have the columns "id", "longitude" and "latitude".'
         )
 
-    time_delta = pd.Timedelta(seconds=0)
+    time_delta = pd.Timedelta(np.timedelta64(0, "s"))
     first_row = df.iloc[0]
     last_time = first_row.name  # type: pd.Timestamp
     last_point = (
@@ -2684,12 +2684,12 @@ def _find_time_intervals(df: pd.DataFrame, min_time: pd.Timedelta, min_dist: flo
         if _is_far_enough(*last_point, row.longitude, row.latitude, min_dist):
             times.append(last_time)
             times.append(curr_time)
-            time_delta = pd.Timedelta(seconds=0)
+            time_delta = pd.Timedelta(np.timedelta64(0, "s"))
 
             last_point = (row.longitude, row.latitude)
         if time_delta > min_time:
             times.append(curr_time)
-            time_delta = pd.Timedelta(seconds=0)
+            time_delta = pd.Timedelta(np.timedelta64(0, "s"))
 
             last_point = (row.longitude, row.latitude)
 
@@ -2700,7 +2700,7 @@ def _find_time_intervals(df: pd.DataFrame, min_time: pd.Timedelta, min_dist: flo
 def compute_detection_time_intervals(
     *,
     tag: xr.DataTree,
-    min_time: pd.Timedelta = pd.Timedelta(days=4),
+    min_time: pd.Timedelta = pd.Timedelta(np.timedelta64(4, "D")),
     min_dist: float = 17.0,
     **kwargs,
 ):
@@ -2711,7 +2711,7 @@ def compute_detection_time_intervals(
     tag : xarray.DataTree
         The fish tag, assumed to have an entry "acoustic".
     min_time : pandas.Timedelta, optional
-        Minimum time length for the intervals (defaults to ``pd.Timedelta(days=4)``).
+        Minimum time length for the intervals (defaults to ``pd.Timedelta(np.timedelta64(4, "D"))``).
     min_dist : float, default: 17.0
         Minimum distance between the detections to set apart different intervals, in kilometers.
     Returns
@@ -2738,7 +2738,7 @@ def compute_detection_time_intervals(
         raise ValueError(
             f'The minimum distance must be strictly positive (received: "{min_dist}").'
         )
-    if min_time <= pd.Timedelta(seconds=0):
+    if min_time <= pd.Timedelta(np.timedelta64(0, "s")):
         raise ValueError(
             f'The minimum interval time must be strictly positive (received: "{min_time}").'
         )

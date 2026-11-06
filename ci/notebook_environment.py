@@ -9,8 +9,12 @@ from pathlib import Path
 
 
 def snapshot(path):
-    check = subprocess.run([sys.executable, "-m", "pip", "check"], text=True, capture_output=True)
-    if check.returncode not in (0, 1) or (check.returncode == 1 and not check.stdout.strip()):
+    check = subprocess.run(
+        [sys.executable, "-m", "pip", "check"], text=True, capture_output=True
+    )
+    if check.returncode not in (0, 1) or (
+        check.returncode == 1 and not check.stdout.strip()
+    ):
         raise RuntimeError(f"pip check failed to run: {check.stderr}")
     result = {
         "python": sys.version,
@@ -74,4 +78,8 @@ if __name__ == "__main__":
     if len(sys.argv) == 2:
         snapshot(sys.argv[1])
     else:
-        sys.exit(0 if compare(*(json.loads(Path(p).read_text()) for p in sys.argv[1:])) else 1)
+        sys.exit(
+            0
+            if compare(*(json.loads(Path(p).read_text()) for p in sys.argv[1:]))
+            else 1
+        )

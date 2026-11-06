@@ -37,7 +37,11 @@ def emissions():
         {
             "pdf": (
                 ("time", "cells"),
-                [[1.0, 0.0, 0.0, np.nan], [0.2, 0.6, 0.2, np.nan], [0.1, 0.2, 0.7, np.nan]],
+                [
+                    [1.0, 0.0, 0.0, np.nan],
+                    [0.2, 0.6, 0.2, np.nan],
+                    [0.1, 0.2, 0.7, np.nan],
+                ],
             ),
             "initial": ("cells", [1.0, 0.0, 0.0, 0.0]),
             "mask": ("cells", [True, True, True, False]),
@@ -61,7 +65,9 @@ def enumerated_posterior(ds):
     for path in product(range(3), repeat=3):
         weight = float(ds.initial[path[0]])
         for t in (1, 2):
-            weight *= TRANSITION[path[t], path[t - 1]] * float(ds.pdf.fillna(0)[t, path[t]])
+            weight *= TRANSITION[path[t], path[t - 1]] * float(
+                ds.pdf.fillna(0)[t, path[t]]
+            )
         total += weight
         for t, cell in enumerate(path):
             joint[t, cell] += weight
@@ -70,7 +76,9 @@ def enumerated_posterior(ds):
 
 @pytest.mark.parametrize("kind", ["path", "string", "local", "memory"])
 @pytest.mark.parametrize("missing_ocean_observation", [False, True])
-def test_cached_posterior_roundtrip(tmp_path, emissions, kind, missing_ocean_observation):
+def test_cached_posterior_roundtrip(
+    tmp_path, emissions, kind, missing_ocean_observation
+):
     path = tmp_path / "cache.zarr"
     cache = {
         "path": lambda: path,
@@ -179,7 +187,9 @@ def test_tide_writer(tmp_path, monkeypatch, step):
             },
             coords={"time": ds.time, "cell_ids": ("cells", np.arange(4))},
         )
-        out.cell_ids.attrs.update(grid_name="healpix", level=0, indexing_scheme="nested")
+        out.cell_ids.attrs.update(
+            grid_name="healpix", level=0, indexing_scheme="nested"
+        )
         return out, None
 
     monkeypatch.setattr(tide, "regrid_dataset_hpresample", regrid)

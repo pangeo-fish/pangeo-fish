@@ -35,15 +35,15 @@ is committed in `ci/baselines/pangeo-notebook-2026-11-06.json`.
 It was collected by actually running the image in GitHub Actions; a local Mac
 environment was not used as a substitute.
 
-| Component | Pristine image |
-| --- | --- |
-| Python | 3.13.16 |
-| Xarray | 2026.9.0 |
-| Zarr | 3.4.1 |
-| Dask / distributed | 2026.8.0 |
-| fsspec / s3fs | 2026.9.0 |
-| gcsfs | 2026.10.1 |
-| NumPy / Pandas | 2.5.4 / 2.3.3 |
+| Component          | Pristine image |
+| ------------------ | -------------- |
+| Python             | 3.13.16        |
+| Xarray             | 2026.9.0       |
+| Zarr               | 3.4.1          |
+| Dask / distributed | 2026.8.0       |
+| fsspec / s3fs      | 2026.9.0       |
+| gcsfs              | 2026.10.1      |
+| NumPy / Pandas     | 2.5.4 / 2.3.3  |
 
 The image already has two `pip check` conflicts: `python-lsp-ruff` requires
 missing `ruff`, and `xmip` requires `xgcm<0.7.0` but the image has `0.10.1`.
