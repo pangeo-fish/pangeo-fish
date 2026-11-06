@@ -41,6 +41,7 @@ from pangeo_fish.diff import diff_z
 from pangeo_fish.grid import center_longitude
 from pangeo_fish.hmm.estimator import EagerEstimator
 from pangeo_fish.hmm.optimize import EagerBoundsSearch
+from pangeo_fish.hmm.optimize.scipy import detect_segments, group_sigma_indices
 from pangeo_fish.hmm.prediction import (
     Foscat1DHealpix,
     Gaussian1DHealpix,
@@ -59,7 +60,6 @@ from pangeo_fish.pdf import combine_emission_pdf, normal
 from pangeo_fish.tags import adapt_model_time, reshape_by_bins, to_time_slice
 from pangeo_fish.utils import haversine_distance, temporal_resolution
 from pangeo_fish.visualization import filter_by_states, plot_map, render_frame
-from pangeo_fish.hmm.optimize.scipy import detect_segments, group_sigma_indices
 
 __all__ = [
     "to_healpix",
@@ -1028,14 +1028,14 @@ def regrid_dataset_hpresample(
             )
             new_ds[name] = (
                 ("time", "cells"),
-                to_full(resampler_ct.resample(variable).cell_data,variable),
+                to_full(resampler_ct.resample(variable).cell_data, variable),
             )
 
         elif len(da.dims) == 2:
             variable = ds[name].transpose("yi", "xi").values.ravel()[valid_src]
             new_ds[name] = (
                 ("cells",),
-                to_full(resampler_ct.resample(variable).cell_data,variable),
+                to_full(resampler_ct.resample(variable).cell_data, variable),
             )
 
     new_ds["cell_ids"].attrs.update(
@@ -1366,6 +1366,7 @@ def compute_acoustic_pdf(
             )
     return acoustic_pdf, figure
 
+
 ############### Useless function normalize do the same better (because we now merge all pdfs before)
 def combine_pdfs(
     *,
@@ -1678,6 +1679,8 @@ def _get_max_sigma(
     max_sigma = max_grid_displacement.pint.to("dimensionless").pint.magnitude
 
     return max_sigma.item()
+
+
 def _get_speed(
     ds: xr.Dataset,
     sigma: float,
@@ -1701,6 +1704,7 @@ def _get_speed(
 
     return max_speed.pint.to("km / h")
 
+
 def optimize_pdf(
     *,
     ds: xr.Dataset,
@@ -1714,7 +1718,7 @@ def optimize_pdf(
     ellipsoid: str = None,
     final: bool = False,
     single_behav: bool = True,
-    multivariate : bool = False,
+    multivariate: bool = False,
     save_parameters=False,
     storage_options: dict = None,
     target_root=".",
@@ -1722,51 +1726,51 @@ def optimize_pdf(
 ) -> dict:
     """Optimize a temporal probability distribution.
 
-    Parameters
-    ----------
-    ds : xarray.Dataset
-        Dataset of emission probabilities
-    adjustment_factor : float
-        Factor value for the maximum fish's displacement
-    truncate : float
-        Truncating factor for convolution process
-    maximum_speed : pint.Quantity
-        Maximum fish's velocity
-    tolerance : float
-        Tolerance level for the optimised parameter search computation
-    earth_radius : pint.Quantity, optional
-        Radius of the Earth used for distance calculations. By default it is
-        derived from the ``ellipsoid`` of the HEALPix grid (the DGGS attributes
-        of ``cell_ids``), see :py:func:`earth_radius_from_ellipsoid`.
-    dims : list of str, default: ["cells"]
-        The list of the dimensions. Either ``["x", "y"]`` or ``["cells"]``
-    final : bool, default: False
-        If True, optimize sigma by matching the predicted final state to the
-        observed final position (``score_final_pos``) instead of the standard
-        forward log-likelihood. Not currently supported together with
-        multi-sigma optimization (``predictor_index`` in ``ds``).
-   single_behav : bool, default: True
-       Only used in multi-sigma mode when not multivariate. If False, one sigma
-       per continuous segment. If True, one sigma per predictor value, optimized
-       on the summed score of its segments.
-   multivariate : bool, default: False
-       Only used in multi-sigma mode. If True, optimize all sigmas jointly with
-       scipy.optimize.minimize on the whole sequence (one sigma per predictor
-       value), and ignore single_behav. If False, use the per-segment or
-       per-value sequential optimization selected by single_behav.
-    save_parameters : bool, default: False
-        Whether to save the results under ``{target_root}/parameters.json``
-    target_root : str, default: "."
-        Root of the folder to save the results as a json file ``parameters.json``
-        Only used if ``save_parameters=True``
-    storage_options : dict, optional
-        Dictionary containing storage options for connecting to the S3 bucket.
-        Only used if ``save_parameters=True`` and that the saving is done on a S3 bucket.
+     Parameters
+     ----------
+     ds : xarray.Dataset
+         Dataset of emission probabilities
+     adjustment_factor : float
+         Factor value for the maximum fish's displacement
+     truncate : float
+         Truncating factor for convolution process
+     maximum_speed : pint.Quantity
+         Maximum fish's velocity
+     tolerance : float
+         Tolerance level for the optimised parameter search computation
+     earth_radius : pint.Quantity, optional
+         Radius of the Earth used for distance calculations. By default it is
+         derived from the ``ellipsoid`` of the HEALPix grid (the DGGS attributes
+         of ``cell_ids``), see :py:func:`earth_radius_from_ellipsoid`.
+     dims : list of str, default: ["cells"]
+         The list of the dimensions. Either ``["x", "y"]`` or ``["cells"]``
+     final : bool, default: False
+         If True, optimize sigma by matching the predicted final state to the
+         observed final position (``score_final_pos``) instead of the standard
+         forward log-likelihood. Not currently supported together with
+         multi-sigma optimization (``predictor_index`` in ``ds``).
+    single_behav : bool, default: True
+        Only used in multi-sigma mode when not multivariate. If False, one sigma
+        per continuous segment. If True, one sigma per predictor value, optimized
+        on the summed score of its segments.
+    multivariate : bool, default: False
+        Only used in multi-sigma mode. If True, optimize all sigmas jointly with
+        scipy.optimize.minimize on the whole sequence (one sigma per predictor
+        value), and ignore single_behav. If False, use the per-segment or
+        per-value sequential optimization selected by single_behav.
+     save_parameters : bool, default: False
+         Whether to save the results under ``{target_root}/parameters.json``
+     target_root : str, default: "."
+         Root of the folder to save the results as a json file ``parameters.json``
+         Only used if ``save_parameters=True``
+     storage_options : dict, optional
+         Dictionary containing storage options for connecting to the S3 bucket.
+         Only used if ``save_parameters=True`` and that the saving is done on a S3 bucket.
 
-    Returns
-    -------
-    params : dict
-        A dictionary containing the optimization results (mainly, the sigma value of the Brownian movement model)
+     Returns
+     -------
+     params : dict
+         A dictionary containing the optimization results (mainly, the sigma value of the Brownian movement model)
     """
     predictor_index = "predictor_index"
 
@@ -1924,6 +1928,8 @@ def _load_emission(ds, target_root, storage_options, chunks):
         emission = ds
 
     return emission.compute()
+
+
 def _compute_predictor_indices(indices: list[list[int]]):
     # TODO: input checking...
     size = sum([len(sub_list) for sub_list in indices])
@@ -1935,6 +1941,7 @@ def _compute_predictor_indices(indices: list[list[int]]):
 
     assert all([s is not None for s in acc])
     return np.array(acc).astype(np.int32)
+
 
 def _build_estimator(emission, target_root, storage_options, ellipsoid=None):
     """Build the ``EagerEstimator`` from ``parameters.json`` and the emission.
@@ -2972,7 +2979,6 @@ def create_parameters(
             },
         }
 
-
     if sigma_indices is None:
         if predictor_indices is not None:
             sigma_indices = group_sigma_indices(
@@ -3027,7 +3033,7 @@ def hand_test_parameter(
     emission: xr.Dataset = None,
     sigma_tested: list = [0.004],
     sigma_indices: list[list[int]] = None,
-    single_behav= True,
+    single_behav=True,
     Conv_method: str = "Foscat1DHealpix",
     target_root: str = ".",
     saving_root: str = "/hand_sigma",
@@ -3101,22 +3107,22 @@ def hand_test_parameter(
     Path(f"{target_root}{saving_root}").mkdir(parents=True, exist_ok=True)
 
     n_steps = emission.sizes["time"]
-    params = create_parameters(                
-                sigma=sigma_tested,
-                sigma_indices=sigma_indices,
-                predictor_indices=(
-                                    emission["predictor_index"].values
-                                    if sigma_indices is None and "predictor_index" in emission
-                                    else None
-                                ),
-                n_steps=n_steps,
-                single_behav=single_behav,
-                class_name=Conv_method,
-                target_root=f"{target_root}{saving_root}",  # stayconsistent here
-                save_parameters=True,
-                storage_options=storage_options,
-                )   
- 
+    params = create_parameters(
+        sigma=sigma_tested,
+        sigma_indices=sigma_indices,
+        predictor_indices=(
+            emission["predictor_index"].values
+            if sigma_indices is None and "predictor_index" in emission
+            else None
+        ),
+        n_steps=n_steps,
+        single_behav=single_behav,
+        class_name=Conv_method,
+        target_root=f"{target_root}{saving_root}",  # stayconsistent here
+        save_parameters=True,
+        storage_options=storage_options,
+    )
+
     # Create a new folder
     emission.to_zarr(
         f"{target_root}{saving_root}/combined.zarr",

@@ -12,7 +12,8 @@ except ImportError:
 
     def track(iterable, **kwargs):
         return iterable
-    
+
+
 def detect_segments(predictor_indices):
     """Return (start, end) for each continuous run of identical predictor indices.
 
@@ -60,6 +61,7 @@ def group_sigma_indices(predictor_indices, *, single_behav):
         indices = np.flatnonzero(values == value).tolist()
         sigma_indices.append(indices)
     return sigma_indices
+
 
 class GridSearch:
     """
@@ -170,8 +172,6 @@ class EagerBoundsSearch:
         )
         self.optimizer_kwargs = optimizer_kwargs or {}
         self.sigma_bounds = sigma_bounds  # {group_value: (lower, upper)}
-
-
 
     def _get_bounds_for_group(self, group_value):
         """Get optimization bounds for a specific predictor group.
@@ -291,11 +291,20 @@ class EagerBoundsSearch:
 
         estimator = self.estimator
         if method == "Powell":
-            options={'xtol': self.optimizer_kwargs["xtol"], "maxfev": maxfev, "disp": bool(disp) }
+            options = {
+                "xtol": self.optimizer_kwargs["xtol"],
+                "maxfev": maxfev,
+                "disp": bool(disp),
+            }
         if method == "Nelder-Mead":
-            options={'xatol': self.optimizer_kwargs["xtol"], "maxfev": maxfev, "disp": bool(disp) }
+            options = {
+                "xatol": self.optimizer_kwargs["xtol"],
+                "maxfev": maxfev,
+                "disp": bool(disp),
+            }
 
         history = []
+
         def f(sigmas):
             result = estimator.set_params(sigma=list(sigmas)).score(X)
             value = float(result.compute() if hasattr(result, "compute") else result)
@@ -319,10 +328,11 @@ class EagerBoundsSearch:
         self.multivariate_history = history
         return estimator.set_params(sigma=best_sigmas.tolist()), sigma_indices
 
-
-
     def fit_multiple_single_parameters(
-        self, X: xr.Dataset, group_name: str = "predictor_index", single_behav: bool = True,
+        self,
+        X: xr.Dataset,
+        group_name: str = "predictor_index",
+        single_behav: bool = True,
     ):
         """Optimize parameters by continuous temporal segments.
 
@@ -399,7 +409,10 @@ class EagerBoundsSearch:
 
             # Aggregate all optimized parameters
             estimated_params = [e.sigma for e in estimators]
-            return (self.estimator.set_params(sigma=sum(estimated_params, start=[])),[list(range(start, end)) for start, end in segments],)
+            return (
+                self.estimator.set_params(sigma=sum(estimated_params, start=[])),
+                [list(range(start, end)) for start, end in segments],
+            )
 
         # One sigma per predictor value, optimized on the summed log-likelihood
         # of all segments sharing that value. Each segment is initialized with
@@ -422,11 +435,20 @@ class EagerBoundsSearch:
                 for start, end in group_segments:
                     subset = X.isel(time=slice(start, end))
                     subset = subset.assign(
-                        initial=X["initial"] if start == 0 else X["pdf"].isel(time=start - 1).fillna(0),
-                        predictor_index=("time", np.zeros(subset["time"].size).astype(np.int32)),
+                        initial=(
+                            X["initial"]
+                            if start == 0
+                            else X["pdf"].isel(time=start - 1).fillna(0)
+                        ),
+                        predictor_index=(
+                            "time",
+                            np.zeros(subset["time"].size).astype(np.int32),
+                        ),
                     )
                     result = self.estimator.set_params(sigma=[sigma]).score(subset)
-                    total += float(result.compute() if hasattr(result, "compute") else result)
+                    total += float(
+                        result.compute() if hasattr(result, "compute") else result
+                    )
                 return total
 
             lower, upper = bounds
@@ -443,8 +465,7 @@ class EagerBoundsSearch:
         return (
             self.estimator.set_params(sigma=sigmas),
             group_indices,
-            )
-
+        )
 
     def fit_final_pos(self, X):
         """Optimize sigma so that predicted final state matches the observed final value."""

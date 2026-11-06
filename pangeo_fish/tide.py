@@ -531,7 +531,12 @@ VARS_NO_TIME = ["cell_ids", "latitude", "longitude", "resolution", "ocean_mask"]
 
 
 def tide_to_healpix(
-    target_root, refinement_level, ellipsoid, chunk_size=2000, step=200, dataset =None,
+    target_root,
+    refinement_level,
+    ellipsoid,
+    chunk_size=2000,
+    step=200,
+    dataset=None,
 ):
     """Regrid the tide likelihood to HEALPix, resample daily and save as zarr.
 
@@ -558,7 +563,9 @@ def tide_to_healpix(
     ds : xarray.dataset dataset with the pdf from tide and healpix coordinate
     """
     if dataset is None:
-        lik_full = xr.open_dataset(f"{target_root}/tide_pdf.zarr", engine="zarr", chunks={})
+        lik_full = xr.open_dataset(
+            f"{target_root}/tide_pdf.zarr", engine="zarr", chunks={}
+        )
     else:
         lik_full = dataset.copy()
     lik_full = lik_full.rename({"mask": "ocean_mask"})
@@ -575,10 +582,8 @@ def tide_to_healpix(
     n_time = len(times)
     days = times.normalize()
 
-
     day_starts = np.flatnonzero(np.r_[True, days[1:] != days[:-1]])
 
-    
     boundaries = [0]
     for s in day_starts:
         if s - boundaries[-1] >= chunk_size:
@@ -595,10 +600,10 @@ def tide_to_healpix(
                 longitude=(("yi", "xi"), lon2d.values),
                 latitude=(("yi", "xi"), lat2d.values),
             )
-            )
+        )
         reshaped, _ = regrid_dataset_hpresample(
             ds=prepped, refinement_level=refinement_level, ellipsoid=ellipsoid
-            )
+        )
         mask = reshaped["ocean_mask"].compute()
         if isinstance(mask.data, sparse.SparseArray):
             reshaped["ocean_mask"] = mask.copy(data=mask.data.todense())
@@ -630,8 +635,6 @@ def tide_to_healpix(
     behav_found_resampled.sel(time=ds.time).to_zarr(store_path, mode="a")
     print("DONE")
     return ds, tide_found_resampled, behav_found_resampled
-
-
 
 
 def merge_tide_with_total(target_root, storage_options=None):

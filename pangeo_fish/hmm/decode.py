@@ -2,11 +2,11 @@ import itertools
 
 import dask
 import dask.array as da
+import healpix_geo.nested as hgn
 import numba
 import numpy as np
 import xarray as xr
 from scipy.special import logsumexp
-import healpix_geo.nested as hgn
 
 from pangeo_fish.distributions import gaussian_kernel
 
@@ -310,12 +310,13 @@ def viterbi2(emission, sigma):
         emission[["time", "latitude", "longitude"]].isel(x=x, y=y).drop_vars("cell_ids")
     )
 
+
 ### Healpix viterbi try ###
 
 
+import healpix_geo.nested as hgn
 import numpy as np
 import xarray as xr
-import healpix_geo.nested as hgn
 from scipy.special import logsumexp
 
 
@@ -462,7 +463,7 @@ def build_transitions(cell_ids, level, sigmas, truncate=4.0, ellipsoid="sphere")
     return np.stack(all_nbr), np.stack(all_logT)
 
 
-def viterbi_healpix(emission, sigmas, truncate=4.0, ellipsoid="sphere",level=None):
+def viterbi_healpix(emission, sigmas, truncate=4.0, ellipsoid="sphere", level=None):
     """
     Viterbi decoding on a HEALPix grid, with a sigma that may change per time step.
 
@@ -522,7 +523,9 @@ def viterbi_healpix(emission, sigmas, truncate=4.0, ellipsoid="sphere",level=Non
     print(f"nombre de sigmas demandés : {len(sigmas)}")
     print(f"sigmas uniques utilisés   : {len(unique_vals)}")
     print(f"valeurs                   : {unique_vals}")
-    print(f"pas par sigma            : {np.bincount(sig_idx_u, minlength=len(unique_vals))}")
+    print(
+        f"pas par sigma            : {np.bincount(sig_idx_u, minlength=len(unique_vals))}"
+    )
     print(f"n={n}, T={T}, level={level}")
     neighbors, logT = build_transitions(
         cell_ids, level, unique_vals, truncate=truncate, ellipsoid=ellipsoid

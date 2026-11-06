@@ -313,7 +313,9 @@ class EagerEstimator:
             "mode": compose_left(maybe_compute_states, modal_track),
             # TODO: not supported with multiple sigma
             "viterbi": compose_left(first, curry(viterbi, sigma=self.sigma)),
-            "viterbi_healpix" : compose_left(first, curry(viterbi_healpix, sigmas=self.sigma)),
+            "viterbi_healpix": compose_left(
+                first, curry(viterbi_healpix, sigmas=self.sigma)
+            ),
         }
         if not isinstance(mode, list):
             modes = [mode]
@@ -337,6 +339,7 @@ class EagerEstimator:
                 return modes
 
             return utils.progress_status(modes)
+
         print("début")
         decoded = [
             pipe(
