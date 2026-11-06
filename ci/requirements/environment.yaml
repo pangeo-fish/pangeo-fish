@@ -1,60 +1,10 @@
+# Runtime requirements come from pyproject.toml (installed by CI with dependencies).
 channels:
   - conda-forge
+  - nodefaults
 dependencies:
+  - python>=3.11
+  - pip
   - pytest
   - pytest-cov
-  - tqdm
-  # I/O
-  - fsspec
-  - h5netcdf
-  - intake-xarray
-  - zstandard
-  # units, bounds, and cf-conventions
-  - cf_xarray>=0.10.4
-  - duckdb
-  - pint-xarray
-  # plotting
-  - cmocean
-  - holoviews
-  - hvplot
-  - geoviews
-  # general computing
-  - flox
-  - xarray>=2024.11.0,<2025.04.0
-  - zarr==2.18.7
-  - more-itertools
-  - cytoolz
-  - toolz
-  - scipy
-  - opt_einsum
-  - sparse
-  # geographic manipulations
-  - movingpandas<=0.21.3
-  - geopandas
-  - cartopy
-  - healpy
-  - scikit-learn
-  - astropy
-  - pytorch
-  # video processing
   - ffmpeg
-  - xmovie
-  # distributed computing
-  - dask
-  # code formatting
-  - rich
-  - rich-click
-  - pip
-  - pip:
-      - cdshealpix
-      - xdggs
-      - healpix-convolution>=0.1.2
-      - healpix-geo
-      - dask-hpcconfig
-      - imageio[ffmpeg]
-      # - git+https://github.com/iaocea/xarray-healpy.git@0ffca6058f4008f4f22f076e2d60787fcf32ac82
-      - xhealpixify
-      - git+https://github.com/GRID4EARTH/healpix-analyse.git
-      - git+https://github.com/GRID4EARTH/healpix-resample.git
-      - foscat
-      - copernicusmarine==2.3.*

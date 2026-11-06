@@ -43,6 +43,7 @@ dependencies = [
   "xhealpixify",
   "xdggs==0.6.0",
   "healpix-convolution",
+  "foscat>=2026.6.1,<2027",
   "cf_xarray>=0.10.4",
   "pint",
   "pint-xarray",
