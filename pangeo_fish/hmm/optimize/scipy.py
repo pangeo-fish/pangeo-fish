@@ -12,7 +12,54 @@ except ImportError:
 
     def track(iterable, **kwargs):
         return iterable
+    
+def detect_segments(predictor_indices):
+    """Return (start, end) for each continuous run of identical predictor indices.
 
+    Parameters
+    ----------
+    predictor_indices : array-like of int
+        One predictor index per time step.
+
+    Returns
+    -------
+    list of tuple of (int, int)
+        Half-open (start, end) bounds of each segment.
+    """
+    predictor_indices = np.asarray(predictor_indices)
+    changes = np.where(np.diff(predictor_indices) != 0)[0] + 1
+    starts = np.concatenate([[0], changes])
+    ends = np.concatenate([changes, [len(predictor_indices)]])
+    return list(zip(starts.tolist(), ends.tolist()))
+
+
+def group_sigma_indices(predictor_indices, *, single_behav):
+    """Build the time indices associated with each sigma.
+
+    Parameters
+    ----------
+    predictor_indices : array-like of int
+        One predictor index per time step.
+    single_behav : bool
+        If False, one list of time indices per continuous segment.
+        If True, one list of time indices per predictor value, sorted by value.
+
+    Returns
+    -------
+    list of list of int
+        The sigma time indices, aligned with the sigma list.
+    """
+    segments = detect_segments(predictor_indices)
+
+    if not single_behav:
+        return [list(range(start, end)) for start, end in segments]
+
+    values = np.asarray(predictor_indices)
+    sigma_indices = []
+    for value in sorted(set(values.tolist())):
+        indices = np.flatnonzero(values == value).tolist()
+        sigma_indices.append(indices)
+    return sigma_indices
 
 class GridSearch:
     """
@@ -124,29 +171,7 @@ class EagerBoundsSearch:
         self.optimizer_kwargs = optimizer_kwargs or {}
         self.sigma_bounds = sigma_bounds  # {group_value: (lower, upper)}
 
-    def _detect_segments(self, predictor_indices):
-        """Detect continuous segments in predictor indices.
 
-        A new segment starts when the predictor index value changes.
-
-        Parameters
-        ----------
-        predictor_indices : array-like
-            Array of predictor index values.
-
-        Returns
-        -------
-        list of tuple
-            List of (start_idx, end_idx) for each segment.
-        """
-        # Find positions where the predictor index changes
-        changes = np.where(np.diff(predictor_indices) != 0)[0] + 1
-
-        # Build segment boundaries
-        segment_starts = np.concatenate([[0], changes])
-        segment_ends = np.concatenate([changes, [len(predictor_indices)]])
-
-        return list(zip(segment_starts, segment_ends))
 
     def _get_bounds_for_group(self, group_value):
         """Get optimization bounds for a specific predictor group.
@@ -209,61 +234,95 @@ class EagerBoundsSearch:
 
         return self.estimator.set_params(sigma=[result.item()])
 
-    def fit_multivariate_parameter(self, X: xr.Dataset):
+    def fit_multivariate_parameter(
+        self,
+        X: xr.Dataset,
+        group_name: str = "predictor_index",
+        x0=None,
+        method: str = "Powell",
+        maxfev: int = 20,
+        disp: int = 1,
+    ):
+        """Optimize one sigma per predictor value jointly on the whole sequence.
+
+        All sigmas are optimized at once with ``scipy.optimize.minimize``. The
+        objective is the total negative log-likelihood of the sequence, where each
+        transition uses the sigma of its predictor index and states are chained
+        across segments.
+
+        .. note::
+            ``single_behav`` has no effect in this mode: the number of sigmas is
+            always the number of predictor values.
+
+        Parameters
+        ----------
+        X : xarray.Dataset
+            Dataset with ``pdf``, ``mask``, ``initial`` and ``group_name``.
+        group_name : str, default: "predictor_index"
+            Name of the variable holding the predictor index per time step.
+        x0 : sequence of float, optional
+            Starting sigmas, one per predictor value (sorted). Defaults to the
+            middle of each bound.
+        method : str, default: "Powell"
+            Optimization method passed to ``scipy.optimize.minimize``. Use a
+            method that does not require gradients.
+        maxfev : int, default: 20
+            Maximum number of evaluations of the objective.
+        disp : int, default: 0
+            Verbosity passed to ``scipy.optimize.minimize``.
+
+        Returns
+        -------
+        estimator
+            The estimator with the optimized sigmas, ordered by predictor value.
+        sigma_indices : list of list of int
+            Time indices associated with each sigma, aligned with ``sigma``.
         """
-        .. warning::
-            Not implemented yet.
-        """
-        raise NotImplementedError()
+        if group_name not in X:
+            raise ValueError(f'The dataset must have an entry "{group_name}".')
 
-    # def fit_multiple_single_parameters(
-    #     self, X: xr.Dataset, group_name: str = "predictor_index"
-    # ):  # , time_slice_indices: list[int | None]):
-    #     """Optimize the score of the estimator.
-    #     .. warning::
-    #         Each parameter ``sigma`` is individually optimized with a subset of ``X`` defined by the entry ``X.groupby(group_name)``.
-    #         As such, it is **not** a single, multivariate search.
-    #     Parameters
-    #     ----------
-    #     X : xarray.Dataset
-    #         The input data.
-    #     group_name : str, default: "predictor_index"
-    #         Name of the variable for groupying ``X``. For each group, a single-parameter Estimator is optimized.
-    #     Returns
-    #     -------
-    #     estimator
-    #         The unified estimator with all the optimized parameters found for the groups.
-    #     See Also
-    #     --------
-    #     EagerBoundsSearch.fit_multivariate_parameter
-    #     """
+        predictor_indices = X[group_name].values
+        sigma_indices = group_sigma_indices(predictor_indices, single_behav=True)
 
-    #     if group_name not in X:
-    #         raise ValueError(f'The dataset must have an entry "{group_name}".')
+        unique_values = sorted(set(predictor_indices.tolist()))
+        bounds = [self.sigma_bounds[v] for v in unique_values]
+        if x0 is None:
+            x0 = [np.mean(b) for b in bounds]
 
-    #     estimators = []
+        estimator = self.estimator
+        if method == "Powell":
+            options={'xtol': self.optimizer_kwargs["xtol"], "maxfev": maxfev, "disp": bool(disp) }
+        if method == "Nelder-Mead":
+            options={'xatol': self.optimizer_kwargs["xtol"], "maxfev": maxfev, "disp": bool(disp) }
 
-    #     for i, (group_value, group_ds) in enumerate(X.groupby(group_name)):
-    #         subset = group_ds.drop_vars(["initial", group_name], errors="ignore")
-    #         estimated = self.fit_single_parameter(
-    #             subset.assign(
-    #                 initial=(
-    #                     X["initial"] if i == 0 else subset["pdf"].isel(time=0).fillna(0)
-    #                 ),
-    #                 # it is important to replace (or set) the current predictor's index by 0
-    #                 predictor_index=(
-    #                     "time",
-    #                     np.zeros(subset["time"].size).astype(np.int32),
-    #                 ),
-    #             )
-    #         )
-    #         estimators.append(estimated)
+        history = []
+        def f(sigmas):
+            result = estimator.set_params(sigma=list(sigmas)).score(X)
+            value = float(result.compute() if hasattr(result, "compute") else result)
+            print(f"sigmas = {sigmas}    score = {result}")
+            history.append((np.asarray(sigmas, dtype=float), value))
 
-    #     estimated_params = [e.sigma for e in estimators]
-    #     return self.estimator.set_params(sigma=sum(estimated_params, start=[]))
+            return value
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            result = scipy.optimize.minimize(
+                f,
+                x0=x0,
+                bounds=bounds,
+                method=method,
+                options=options,
+            )
+        best_sigmas, best_score = min(history, key=lambda h: h[1])
+
+        self.multivariate_result = result
+        self.multivariate_history = history
+        return estimator.set_params(sigma=best_sigmas.tolist()), sigma_indices
+
+
 
     def fit_multiple_single_parameters(
-        self, X: xr.Dataset, group_name: str = "predictor_index"
+        self, X: xr.Dataset, group_name: str = "predictor_index", single_behav: bool = True,
     ):
         """Optimize parameters by continuous temporal segments.
 
@@ -282,12 +341,14 @@ class EagerBoundsSearch:
             The input data with "predictor_index" variable and "initial" condition.
         group_name : str, default: "predictor_index"
             Name of the variable defining predictor groups.
-
+        single_behav : bool, default: True
+            Define how behavior is treated (one behavior per values or one per segments)
         Returns
         -------
         estimator
             The unified estimator with all optimized parameters.
-
+        segments
+            The list of indices per segments
         Raises
         ------
         ValueError
@@ -299,43 +360,91 @@ class EagerBoundsSearch:
 
         # Detect continuous segments
         predictor_indices = X[group_name].values
-        segments = self._detect_segments(predictor_indices)
+        segments = detect_segments(predictor_indices)
         if self.sigma_bounds is not None and len(self.sigma_bounds) != len(
             set(predictor_indices)
         ):
             raise ValueError(
                 f"The dict for behavior speed:{len(self.sigma_bounds)} should have the same length that the number predictor_indices:{len(set(predictor_indices))}."
             )
-        estimators = []
-        previous_initial = X["initial"]
+        if not single_behav:
+            # One sigma per continuous segment, each optimized independently
 
-        # Optimize each segment sequentially
-        for start, end in segments:
-            # Extract the segment
-            subset = X.isel(time=slice(start, end))
-            group_value = predictor_indices[start]
+            estimators = []
+            previous_initial = X["initial"]
 
-            # Pass the initial state from the previous segment
-            subset = subset.assign(
-                initial=previous_initial,
-                predictor_index=(
-                    "time",
-                    np.zeros(subset["time"].size).astype(np.int32),
-                ),
-            )
-            # Get bounds for this group
+            # Optimize each segment sequentially
+            for start, end in segments:
+                # Extract the segment
+                subset = X.isel(time=slice(start, end))
+                group_value = predictor_indices[start]
+
+                # Pass the initial state from the previous segment
+                subset = subset.assign(
+                    initial=previous_initial,
+                    predictor_index=(
+                        "time",
+                        np.zeros(subset["time"].size).astype(np.int32),
+                    ),
+                )
+                # Get bounds for this group
+                bounds = self._get_bounds_for_group(group_value)
+
+                # Optimize this segment's parameter
+                estimated = self.fit_single_parameter(subset, bounds=bounds)
+                estimators.append(estimated)
+
+                # Update initial state for next segment using final state of current segment
+                previous_initial = subset["pdf"].isel(time=-1).fillna(0)
+
+            # Aggregate all optimized parameters
+            estimated_params = [e.sigma for e in estimators]
+            return (self.estimator.set_params(sigma=sum(estimated_params, start=[])),[list(range(start, end)) for start, end in segments],)
+
+        # One sigma per predictor value, optimized on the summed log-likelihood
+        # of all segments sharing that value. Each segment is initialized with
+        # the observed pdf at its first time step.
+        unique_values = sorted(set(predictor_indices[start] for start, _ in segments))
+        print(unique_values)
+        sigmas = []
+        group_indices = []
+
+        for group_value in unique_values:
+            group_segments = [
+                (start, end)
+                for start, end in segments
+                if predictor_indices[start] == group_value
+            ]
             bounds = self._get_bounds_for_group(group_value)
 
-            # Optimize this segment's parameter
-            estimated = self.fit_single_parameter(subset, bounds=bounds)
-            estimators.append(estimated)
+            def total_score(sigma, group_segments=group_segments):
+                total = 0.0
+                for start, end in group_segments:
+                    subset = X.isel(time=slice(start, end))
+                    subset = subset.assign(
+                        initial=X["initial"] if start == 0 else X["pdf"].isel(time=start - 1).fillna(0),
+                        predictor_index=("time", np.zeros(subset["time"].size).astype(np.int32)),
+                    )
+                    result = self.estimator.set_params(sigma=[sigma]).score(subset)
+                    total += float(result.compute() if hasattr(result, "compute") else result)
+                return total
 
-            # Update initial state for next segment using final state of current segment
-            previous_initial = subset["pdf"].isel(time=-1).fillna(0)
+            lower, upper = bounds
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                best = scipy.optimize.fminbound(
+                    total_score, lower, upper, **self.optimizer_kwargs
+                )
 
-        # Aggregate all optimized parameters
-        estimated_params = [e.sigma for e in estimators]
-        return self.estimator.set_params(sigma=sum(estimated_params, start=[]))
+            sigmas.append(float(best))
+            group_indices.append(
+                [i for start, end in group_segments for i in range(start, end)]
+            )
+        return (
+            self.estimator.set_params(sigma=sigmas),
+            group_indices,
+            )
+
 
     def fit_final_pos(self, X):
         """Optimize sigma so that predicted final state matches the observed final value."""

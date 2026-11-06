@@ -393,7 +393,7 @@ def plot_tide(tag_test):
     time = tag_test["time"].values
     depth = tag_test["depth"].values
     tide_found = tag_test["tide_found"].values  # 0 or 1
-
+    behav_found = tag_test["behav_found"].values
     fig, ax = plt.subplots(figsize=(15, 4))
 
     ax.fill_between(
@@ -404,6 +404,15 @@ def plot_tide(tag_test):
         color="green",
         alpha=0.3,
         label="Marée détectée",
+    )
+    ax.fill_between(
+        time,
+        depth.min(),
+        depth.max(),
+        where=(behav_found == 1),
+        color="red",
+        alpha=0.3,
+        label="Comportement détecté",
     )
 
     ax.plot(time, depth, color="blue", label="Profondeur")
@@ -522,7 +531,7 @@ VARS_NO_TIME = ["cell_ids", "latitude", "longitude", "resolution", "ocean_mask"]
 
 
 def tide_to_healpix(
-    target_root, refinement_level, ellipsoid, chunk_size=2000, step=200
+    target_root, refinement_level, ellipsoid, chunk_size=2000, step=200, dataset =None,
 ):
     """Regrid the tide likelihood to HEALPix, resample daily and save as zarr.
 
@@ -538,7 +547,8 @@ def tide_to_healpix(
         Time steps regridded at once (limits resampler memory). Default is 2000.
     step : int, optional
         Daily time steps written at once to zarr. Default is 200.
-
+    dataset : xarray dataset, optional
+        avoid to use open_dataset by passing directly in argument the dataset
     Returns
     -------
     tide_found_resampled : xarray.DataArray
@@ -547,7 +557,10 @@ def tide_to_healpix(
         Daily mean of ``behav_found``, also written to the zarr store.
     ds : xarray.dataset dataset with the pdf from tide and healpix coordinate
     """
-    lik_full = xr.open_dataset(f"{target_root}/tide_pdf.zarr", engine="zarr", chunks={})
+    if dataset is None:
+        lik_full = xr.open_dataset(f"{target_root}/tide_pdf.zarr", engine="zarr", chunks={})
+    else:
+        lik_full = dataset.copy()
     lik_full = lik_full.rename({"mask": "ocean_mask"})
     lik_full["ocean_mask"] = lik_full["ocean_mask"].compute()
     tide_found = lik_full["tide_found"]
@@ -558,12 +571,23 @@ def tide_to_healpix(
     lat2d = lat2d.transpose("latitude", "longitude")
 
     # Regrid by temporal chunks to limit memory
-    n_time = lik_full.sizes["time"]
-    chunks = []
-    for start in range(0, n_time, chunk_size):
-        end = min(start + chunk_size, n_time)
-        print(f"Processing time chunk [{start}:{end}] / {n_time}")
+    times = lik_full.time.to_index()
+    n_time = len(times)
+    days = times.normalize()
 
+
+    day_starts = np.flatnonzero(np.r_[True, days[1:] != days[:-1]])
+
+    
+    boundaries = [0]
+    for s in day_starts:
+        if s - boundaries[-1] >= chunk_size:
+            boundaries.append(int(s))
+    boundaries.append(n_time)
+
+    chunks = []
+    for start, end in zip(boundaries[:-1], boundaries[1:]):
+        print(f"Processing time chunk [{start}:{end}] / {n_time}")
         prepped = (
             lik_full.isel(time=slice(start, end))
             .rename({"latitude": "yi", "longitude": "xi"})
@@ -571,15 +595,13 @@ def tide_to_healpix(
                 longitude=(("yi", "xi"), lon2d.values),
                 latitude=(("yi", "xi"), lat2d.values),
             )
-        )
+            )
         reshaped, _ = regrid_dataset_hpresample(
             ds=prepped, refinement_level=refinement_level, ellipsoid=ellipsoid
-        )
-
+            )
         mask = reshaped["ocean_mask"].compute()
-        if isinstance(mask.data, sparse.SparseArray):  # densify if sparse
+        if isinstance(mask.data, sparse.SparseArray):
             reshaped["ocean_mask"] = mask.copy(data=mask.data.todense())
-
         chunks.append(reshaped.resample(time="1D").mean(skipna=True))
 
     print("Concatenating chunks...")
@@ -608,6 +630,8 @@ def tide_to_healpix(
     behav_found_resampled.sel(time=ds.time).to_zarr(store_path, mode="a")
     print("DONE")
     return ds, tide_found_resampled, behav_found_resampled
+
+
 
 
 def merge_tide_with_total(target_root, storage_options=None):

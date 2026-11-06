@@ -59,6 +59,7 @@ from pangeo_fish.pdf import combine_emission_pdf, normal
 from pangeo_fish.tags import adapt_model_time, reshape_by_bins, to_time_slice
 from pangeo_fish.utils import haversine_distance, temporal_resolution
 from pangeo_fish.visualization import filter_by_states, plot_map, render_frame
+from pangeo_fish.hmm.optimize.scipy import detect_segments, group_sigma_indices
 
 __all__ = [
     "to_healpix",
@@ -78,10 +79,11 @@ __all__ = [
     "normalize_pdf",
     "stamp_parameter_indices",
     "stamp_parameter_indices_from_mask",
-    "test_parameter",
+    "hand_test_parameter",
     "create_parameters",
     "optimize_pdf",
-    "predict_positions",
+    "decode_trajectories",
+    "compute_states",
     "plot_trajectories",
     "open_distributions",
     "plot_distributions",
@@ -949,17 +951,48 @@ def regrid_dataset_hpresample(
     n_left = int((is_ocean & ~valid & ~valid_b).sum())
     print(f"iocean cells  not covered by CT nor by rewrap : {n_left}")
 
+    # def to_full(cell_data, variable):
+    #     """Align CT values, fill ocean gaps with bilinear values, and mask land."""
+    #     out = np.full(cell_data.shape[:-1] + (ref_cell_ids.size,), np.nan)
+    #     out[..., valid] = cell_data[..., idx[valid]]
+    #     fallback = is_ocean & valid_b
+    #     current = out[..., fallback]
+    #     if not np.isfinite(current).all():
+    #         replacement = resampler_bil.resample(variable).cell_data[
+    #             ..., idx_b[fallback]
+    #         ]
+    #         out[..., fallback] = np.where(np.isfinite(current), current, replacement)
+    #     out[..., ~is_ocean] = np.nan
+    #     return out
+    # def to_full_bil(cell_data):
+    #     """Test only: place bilinear values using bilinear indices."""
+    #     out = np.full(cell_data.shape[:-1] + (ref_cell_ids.size,), np.nan)
+    #     out[..., valid_b] = cell_data[..., idx_b[valid_b]]
+    #     out[..., ~is_ocean] = np.nan
+    #     return out
     def to_full(cell_data, variable):
-        """Align CT values, fill ocean gaps with bilinear values, and mask land."""
+        """Align CT values, fill gaps with bilinear, replace CT negatives, mask land."""
         out = np.full(cell_data.shape[:-1] + (ref_cell_ids.size,), np.nan)
         out[..., valid] = cell_data[..., idx[valid]]
+
+        # Compute bilinear values once, aligned on all HEALPix cells
+        bil = resampler_bil.resample(variable).cell_data
+        bil_full = np.full(out.shape, np.nan)
+        bil_full[..., valid_b] = bil[..., idx_b[valid_b]]
+
+        # Fill CT gaps with bilinear values (original behaviour)
         fallback = is_ocean & valid_b
-        current = out[..., fallback]
-        if not np.isfinite(current).all():
-            replacement = resampler_bil.resample(variable).cell_data[
-                ..., idx_b[fallback]
-            ]
-            out[..., fallback] = np.where(np.isfinite(current), current, replacement)
+        gap = fallback & ~np.isfinite(out)
+        out = np.where(gap, bil_full, out)
+
+        # CT negative overshoots: replace with bilinear where available
+        neg = np.isfinite(out) & (out < 0)
+        out = np.where(neg & np.isfinite(bil_full), bil_full, out)
+
+        # Remaining negatives outside bilinear coverage: set to zero
+        out = np.where(np.isfinite(out) & (out < 0), 0.0, out)
+
+        # Mask land cells
         out[..., ~is_ocean] = np.nan
         return out
 
@@ -995,14 +1028,14 @@ def regrid_dataset_hpresample(
             )
             new_ds[name] = (
                 ("time", "cells"),
-                to_full(resampler_ct.resample(variable).cell_data, variable),
+                to_full(resampler_ct.resample(variable).cell_data,variable),
             )
 
         elif len(da.dims) == 2:
             variable = ds[name].transpose("yi", "xi").values.ravel()[valid_src]
             new_ds[name] = (
                 ("cells",),
-                to_full(resampler_ct.resample(variable).cell_data, variable),
+                to_full(resampler_ct.resample(variable).cell_data,variable),
             )
 
     new_ds["cell_ids"].attrs.update(
@@ -1333,7 +1366,7 @@ def compute_acoustic_pdf(
             )
     return acoustic_pdf, figure
 
-
+############### Useless function normalize do the same better (because we now merge all pdfs before)
 def combine_pdfs(
     *,
     emission_ds: xr.Dataset,
@@ -1645,7 +1678,28 @@ def _get_max_sigma(
     max_sigma = max_grid_displacement.pint.to("dimensionless").pint.magnitude
 
     return max_sigma.item()
+def _get_speed(
+    ds: xr.Dataset,
+    sigma: float,
+    earth_radius: pint.Quantity | None,
+    adjustment_factor: float,
+    as_radians: bool,
+) -> pint.Quantity:
+    if earth_radius is None:
+        earth_radius = _earth_radius_from_grid(ds)
+    earth_radius_ = xr.DataArray(earth_radius, dims=None)
 
+    timedelta = temporal_resolution(ds["time"]).pint.quantify().pint.to("h")
+
+    if as_radians:
+        # sigma = speed * dt * adj / R
+        max_speed = sigma * earth_radius_ / (timedelta * adjustment_factor)
+    else:  # sigma en pixels
+        # sigma = speed * dt * adj / (R * res)
+        grid_resolution = earth_radius_ * _grid_resolution_radians(ds)
+        max_speed = sigma * grid_resolution / (timedelta * adjustment_factor)
+
+    return max_speed.pint.to("km / h")
 
 def optimize_pdf(
     *,
@@ -1659,6 +1713,8 @@ def optimize_pdf(
     conv_method: str = "HealpixConv",
     ellipsoid: str = None,
     final: bool = False,
+    single_behav: bool = True,
+    multivariate : bool = False,
     save_parameters=False,
     storage_options: dict = None,
     target_root=".",
@@ -1689,6 +1745,15 @@ def optimize_pdf(
         observed final position (``score_final_pos``) instead of the standard
         forward log-likelihood. Not currently supported together with
         multi-sigma optimization (``predictor_index`` in ``ds``).
+   single_behav : bool, default: True
+       Only used in multi-sigma mode when not multivariate. If False, one sigma
+       per continuous segment. If True, one sigma per predictor value, optimized
+       on the summed score of its segments.
+   multivariate : bool, default: False
+       Only used in multi-sigma mode. If True, optimize all sigmas jointly with
+       scipy.optimize.minimize on the whole sequence (one sigma per predictor
+       value), and ignore single_behav. If False, use the per-segment or
+       per-value sequential optimization selected by single_behav.
     save_parameters : bool, default: False
         Whether to save the results under ``{target_root}/parameters.json``
     target_root : str, default: "."
@@ -1766,8 +1831,14 @@ def optimize_pdf(
 
     if final:
         optimized = optimizer.fit_final_pos(ds)
+    elif multivariate and predictor_index in ds:
+        optimized, sigma_indices = optimizer.fit_multivariate_parameter(
+            ds, predictor_index
+        )
     elif predictor_index in ds:
-        optimized = optimizer.fit_multiple_single_parameters(ds, predictor_index)
+        optimized, sigma_indices = optimizer.fit_multiple_single_parameters(
+            ds, predictor_index, single_behav=single_behav
+        )
     else:
         optimized = optimizer.fit_single_parameter(ds)
 
@@ -1786,10 +1857,6 @@ def optimize_pdf(
 
     # adds sigma time indices in `params` in case of multi-sigma minimization
     if predictor_index in ds:
-        sigma_indices = [
-            list(group_indices)
-            for group_indices in ds.groupby(predictor_index).groups.values()
-        ]
         params["sigma_indices"] = sigma_indices
 
     if save_parameters:
@@ -1816,69 +1883,36 @@ def optimize_pdf(
     return params, ds
 
 
-def predict_positions(
-    *,
-    ds: xr.Dataset | None = None,
-    target_root: str | None = None,
-    storage_options: dict,
-    chunks: dict,
-    track_modes=["mean", "mode"],
-    ellipsoid=None,
-    additional_track_quantities=["speed", "distance"],
-    save=True,
-    **kwargs,
-):
-    """High-level helper function for predicting fish's positions and generating the consequent trajectories.
-    It futhermore saves the latter under ``states.zarr`` and ``trajectories.parq``.
-
-    .. warning::
-        ``target_root`` must not end with "/".
-
-    .. note::
-        If the estimator to load has multiple sigma values, their indices are
-        expected to be defined in the entry "predictor_index"
-        (``emission["predictor_index"]``), or restorable from
-        ``params["sigma_indices"]``.
+def _load_emission(ds, target_root, storage_options, chunks):
+    """Load and compute the emission dataset.
 
     Parameters
     ----------
-    ds : xarray.Dataset, optional
+    ds : xarray.Dataset or None
         Already-loaded emission dataset. If provided, it is used instead of
         reloading ``{target_root}/combined.zarr``.
-    target_root : str
-        Path to a folder that must contain a folder ``combined.zarr`` and the file ``parameters.json``
-    storage_options : dict
-        Additional information for ``xarray`` to open the ``.zarr`` array
+    target_root : str or None
+        Path to a folder containing ``combined.zarr``. Required if ``ds`` is None.
+    storage_options : dict or None
+        Additional information for ``xarray`` to open the ``.zarr`` array.
     chunks : dict
-        Chunk size to load the xarray.Dataset ``combined.zarr``
-    track_modes : list of str, default: ["mean", "mode"]
-        Options for decoding trajectories.
-    additional_track_quantities : list of str, default: ["speed", "distance"]
-        Additional quantities to compute from the decoded tracks.
-    save : bool, default: True
-        Whether to save the ``states`` distribution and the trajectories.
+        Chunk size used to load the dataset.
 
     Returns
     -------
-    states : xarray.Dataset
-        The positional temporal probabilities. In case of multi-sigma
-        optimization, it also adds the variable "sigma".
-    trajectories : movingpandas.TrajectoryCollection
-        The tracks decoded from `states`
+    xarray.Dataset
+        The computed emission dataset.
 
-    See Also
-    --------
-    pangeo_fish.hmm.estimator.EagerEstimator.decode
+    Raises
+    ------
+    ValueError
+        If neither ``ds`` nor ``target_root`` is provided.
     """
-
-    predictor_index = "predictor_index"
-
     if ds is None:
         if target_root is None:
             raise ValueError(
                 "You must provide either `ds` or `target_root` to load the dataset."
             )
-
         emission = xr.open_dataset(
             f"{target_root}/combined.zarr",
             engine="zarr",
@@ -1886,10 +1920,58 @@ def predict_positions(
             inline_array=True,
             storage_options=storage_options,
         ).chunk(chunks)
-        emission = emission.compute()
     else:
         emission = ds
-        emission = emission.compute()
+
+    return emission.compute()
+def _compute_predictor_indices(indices: list[list[int]]):
+    # TODO: input checking...
+    size = sum([len(sub_list) for sub_list in indices])
+    acc = [None for _ in range(size)]
+
+    for i in range(len(indices)):
+        for index in indices[i]:
+            acc[index] = i
+
+    assert all([s is not None for s in acc])
+    return np.array(acc).astype(np.int32)
+
+def _build_estimator(emission, target_root, storage_options, ellipsoid=None):
+    """Build the ``EagerEstimator`` from ``parameters.json`` and the emission.
+
+    Converts the emission to HEALPix if needed, makes sure the
+    ``predictor_index`` entry is present for multi-sigma estimators, and
+    creates the predictor factory.
+
+    Parameters
+    ----------
+    emission : xarray.Dataset
+        Computed emission dataset (as returned by ``_load_emission``).
+    target_root : str
+        Path to a folder containing ``parameters.json``.
+    storage_options : dict or None
+        Additional information for ``fsspec`` to open ``parameters.json``.
+    ellipsoid : optional
+        Ellipsoid used by the HEALPix grid. Inferred from the emission if None.
+
+    Returns
+    -------
+    estimator : EagerEstimator
+        The estimator, ready for ``predict_proba`` and ``decode``.
+    emission : xarray.Dataset
+        The emission dataset, converted to HEALPix and with ``predictor_index``
+        ensured when several sigma values are used.
+    params : dict
+        The content of ``parameters.json``.
+
+    Raises
+    ------
+    ValueError
+        If ``predictor_index`` is missing and cannot be restored from ``params``.
+    RuntimeError
+        If the predictor class is not recognized.
+    """
+    predictor_index = "predictor_index"
 
     if "cells" in emission.dims:
         emission = to_healpix(emission)
@@ -1904,20 +1986,7 @@ def predict_positions(
     ) as f:
         params = json.load(f)
 
-    def _compute_predictor_indices(indices: list[list[int]]):
-        # TODO: input checking...
-        size = sum([len(sub_list) for sub_list in indices])
-        acc = [None for _ in range(size)]
-
-        for i in range(len(indices)):
-            for index in indices[i]:
-                acc[index] = i
-
-        assert all([s is not None for s in acc])
-        return np.array(acc).astype(np.int32)
-
-    ## deals with the different possible data sources of the "predictor_index" integer values
-    # one parameter
+    # one sigma value: every time step uses the same predictor
     if len(params["sigma"]) == 1:
         emission = emission.assign(
             predictor_index=("time", np.zeros(emission["time"].size).astype(np.int32))
@@ -1926,9 +1995,8 @@ def predict_positions(
             'A "predictor_index" entry (filled with 0) is added to the loaded `emission` dataset. the prediction will be run with a single sigma',
             RuntimeWarning,
         )
-    # more than one parameter
+    # several sigma values: find or restore the predictor index
     else:
-        # in the input dataset
         if predictor_index in emission:
             index_data_type = emission[predictor_index].dtype
             if index_data_type != np.int32:
@@ -1937,7 +2005,6 @@ def predict_positions(
                     f'Entry "predictor_index" in the loaded `emission` dataset is cast to `np.int32` (found "{index_data_type}").',
                     RuntimeWarning,
                 )
-        # last attempt before raising an error: restore the predictor_index from the dictionary of parameters
         elif "sigma_indices" in params:
             try:
                 emission = emission.assign(
@@ -1959,20 +2026,14 @@ def predict_positions(
                 'The time indices for each sigma value is not defined in the `emission` (entry "predictor_index" is missing) and no indices found in the dictionary `params` (entry "sigma_indices" is missing).'
             )
 
-    # do not account for the other kwargs...
-    # not very robust yet...
     predictor_kwargs = params["predictor_factory"].get("kwargs", {})
-
     truncate_raw = predictor_kwargs.get("truncate")
     truncate = float(truncate_raw) if truncate_raw is not None else None
 
     cls_name = params["predictor_factory"]["class"]  # type: str
     if "Gaussian2DCartesian" in cls_name:
         predictor_factory = _get_predictor_factory(
-            emission,
-            truncate=truncate,
-            dims=["x", "y"],
-            ellipsoid=ellipsoid,
+            emission, truncate=truncate, dims=["x", "y"], ellipsoid=ellipsoid
         )
     elif "UpDownGaussian1DHealpix" in cls_name:
         predictor_factory = _get_predictor_factory(
@@ -1982,7 +2043,6 @@ def predict_positions(
             dims=["cells"],
             ellipsoid=ellipsoid,
         )
-
     elif "Gaussian1DHealpix" in cls_name:
         predictor_factory = _get_predictor_factory(
             emission,
@@ -2002,11 +2062,69 @@ def predict_positions(
     else:
         raise RuntimeError("Could not infer predictor's class from the `.json` file.")
 
-    optimized = EagerEstimator(
+    estimator = EagerEstimator(
         sigma=params["sigma"], predictor_factory=predictor_factory
     )
+    return estimator, emission, params
 
-    states = optimized.predict_proba(emission)  # type: xr.DataArray
+
+def compute_states(
+    *,
+    ds=None,
+    target_root=None,
+    storage_options=None,
+    chunks,
+    ellipsoid=None,
+    save=True,
+    **kwargs,
+):
+    """Compute the positional temporal probabilities (states) of the fish.
+
+    Loads the emission dataset, builds the estimator, runs ``predict_proba``
+    and optionally saves the result under ``states.zarr``.
+
+    .. warning::
+        ``target_root`` must not end with "/".
+
+    .. note::
+        If the estimator to load has multiple sigma values, their indices are
+        expected to be defined in the entry "predictor_index"
+        (``emission["predictor_index"]``), or restorable from
+        ``params["sigma_indices"]``.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset, optional
+        Already-loaded emission dataset. If provided, it is used instead of
+        reloading ``{target_root}/combined.zarr``.
+    target_root : str
+        Path to a folder that must contain a folder ``combined.zarr`` and the file ``parameters.json``.
+    storage_options : dict
+        Additional information for ``xarray`` and ``fsspec`` to access the data.
+    chunks : dict
+        Chunk size to load the xarray.Dataset ``combined.zarr``.
+    ellipsoid : optional
+        Ellipsoid used by the HEALPix grid. Inferred from the emission if None.
+    save : bool, default: True
+        Whether to save the ``states`` distribution under ``states.zarr``.
+
+    Returns
+    -------
+    states : xarray.Dataset
+        The positional temporal probabilities. In case of multi-sigma
+        optimization, it also adds the variable "sigma".
+
+    See Also
+    --------
+    decode_trajectories
+    pangeo_fish.hmm.estimator.EagerEstimator.predict_proba
+    """
+    emission = _load_emission(ds, target_root, storage_options, chunks)
+    estimator, emission, params = _build_estimator(
+        emission, target_root, storage_options, ellipsoid
+    )
+
+    states = estimator.predict_proba(emission)  # type: xr.DataArray
     states = (
         states.to_dataset()
         .chunk(chunks)
@@ -2017,38 +2135,111 @@ def predict_positions(
 
     # adds the variable `sigma` (per time step) to `states`
     if len(params["sigma"]) > 1:
-        # from the indices in emission
-        if predictor_index in emission:
-            sigma_indices = [
-                list(group_indices)
-                for group_indices in emission.groupby(predictor_index).groups.values()
-            ]
-        elif "sigma_indices" in params:
-            sigma_indices = _compute_predictor_indices(params["sigma_indices"])
-        else:
-            raise RuntimeError(
-                "Failed to add the variable `sigma` to `states` (it should never happen.)"
-            )
-
+        sigma_indices = [
+            list(group_indices)
+            for group_indices in emission.groupby("predictor_index").groups.values()
+        ]
         sigma_var = _compute_sigma_var(sigma_indices, params["sigma"])
         states = states.assign(sigma=("time", sigma_var))
+
     states = _with_dggs_attrs(states)
 
     if save:
         _save_zarr(states, f"{target_root}/states.zarr", storage_options)
 
-    trajectories = optimized.decode(
-        emission,
-        states.fillna(0),
-        mode=track_modes,
-        progress=False,
-        additional_quantities=additional_track_quantities,
-    )
-    # --- FIX longitude [0, 360] -> [-180, 180] ---
+    return states
+
+
+def decode_trajectories(
+    *,
+    ds=None,
+    target_root=None,
+    states=None,
+    storage_options=None,
+    chunks,
+    track_modes=["mean", "mode"],
+    ellipsoid=None,
+    additional_track_quantities=["speed", "distance"],
+    save=True,
+    **kwargs,
+):
+    """Decode the trajectories from the states of the fish.
+
+    If ``states`` is not provided, it is loaded from ``{target_root}/states.zarr``.
+    The longitudes are wrapped from [0, 360] to [-180, 180], and the
+    trajectories are optionally saved as ``trajectories.parq``.
+
+    .. warning::
+        ``target_root`` must not end with "/".
+
+    Parameters
+    ----------
+    ds : xarray.Dataset, optional
+        Already-loaded emission dataset. If provided, it is used instead of
+        reloading ``{target_root}/combined.zarr``.
+    target_root : str
+        Path to a folder that must contain ``combined.zarr``, ``parameters.json``
+        and, if ``states`` is None, ``states.zarr``.
+    states : xarray.Dataset, optional
+        The positional temporal probabilities, as returned by ``compute_states``.
+        If None, they are loaded from ``{target_root}/states.zarr``.
+    storage_options : dict
+        Additional information for ``xarray`` and ``fsspec`` to access the data.
+    chunks : dict
+        Chunk size to load the datasets.
+    track_modes : list of str, default: ["mean", "mode"]
+        Options for decoding trajectories.
+    ellipsoid : optional
+        Ellipsoid used by the HEALPix grid. Inferred from the emission if None.
+    additional_track_quantities : list of str, default: ["speed", "distance"]
+        Additional quantities to compute from the decoded tracks.
+    save : bool, default: True
+        Whether to save the trajectories under ``trajectories.parq``.
+
+    Returns
+    -------
+    trajectories : movingpandas.TrajectoryCollection
+        The tracks decoded from ``states``.
+
+    Raises
+    ------
+    ValueError
+        If ``states`` is None and ``target_root`` is not provided.
+
+    See Also
+    --------
+    compute_states
+    pangeo_fish.hmm.estimator.EagerEstimator.decode
+    """
     import movingpandas as mpd
 
     from pangeo_fish import tracks
 
+    emission = _load_emission(ds, target_root, storage_options, chunks)
+    estimator, emission, _ = _build_estimator(
+        emission, target_root, storage_options, ellipsoid
+    )
+    print(emission)
+    needs_states = not set(track_modes) <= {"viterbi", "viterbi_healpix"}
+    print(needs_states)
+    if states is None and needs_states:
+        if target_root is None:
+            raise ValueError(
+                "You must provide either `states` or `target_root` to load the states."
+            )
+        states = xr.open_zarr(
+            f"{target_root}/states.zarr", storage_options=storage_options
+        ).chunk(chunks)
+
+    trajectories = estimator.decode(
+        emission,
+        states.fillna(0) if states is not None else None,
+        mode=track_modes,
+        progress=False,
+        additional_quantities=additional_track_quantities,
+    )
+
+    # --- FIX longitude [0, 360] -> [-180, 180] ---
     def _wrap_lon(traj):
         gdf = traj.df.copy()
         gdf = gdf.drop(columns=["speed", "distance"], errors="ignore")
@@ -2062,10 +2253,11 @@ def predict_positions(
         [_wrap_lon(t) for t in trajectories.trajectories]
     )
     # ---------------------------------------------
+
     if save:
         save_trajectories(trajectories, target_root, storage_options, format="parquet")
 
-    return states, trajectories
+    return trajectories
 
 
 def plot_trajectories(
@@ -2715,6 +2907,9 @@ def stamp_parameter_indices_from_mask(
 def create_parameters(
     sigma,
     sigma_indices=None,
+    predictor_indices=None,
+    n_steps=None,
+    single_behav=True,
     predictor_factory=None,
     predictors=None,
     class_name="Foscat1DHealpix",
@@ -2732,7 +2927,14 @@ def create_parameters(
     sigma : list[float]
         List of sigma values.
     sigma_indices : list[list[int]], optional
-        Time indices associated with each sigma.
+        Time indices associated with each sigma. If None, they are computed
+        from ``predictor_indices``. Takes precedence over ``predictor_indices``.
+    predictor_indices : array-like of int, optional
+        One predictor index per time step, used to build ``sigma_indices``
+        when it is not provided.
+    single_behav : bool, default=True
+        Only used when ``sigma_indices`` is None. If False, one list of time
+        indices per continuous segment. If True, one list per predictor value.
     predictor_factory : dict, optional
         Predictor factory description.
     predictors : optional
@@ -2769,16 +2971,32 @@ def create_parameters(
                 "kernel_size": None,
             },
         }
+
+
+    if sigma_indices is None:
+        if predictor_indices is not None:
+            sigma_indices = group_sigma_indices(
+                predictor_indices, single_behav=single_behav
+            )
+        elif n_steps is not None and len(sigma) == 1:
+            sigma_indices = [list(range(n_steps))]
+        else:
+            raise ValueError(
+                "Provide sigma_indices or predictor_indices, or n_steps with a single sigma."
+            )
+    if len(sigma) != len(sigma_indices):
+        raise ValueError(
+            f"Got {len(sigma)} sigma value(s) for {len(sigma_indices)} sigma index group(s). "
+            "With single_behav=False there must be one sigma per continuous segment; "
+            "use single_behav=True for one sigma per predictor value."
+        )
     params = {
         "sigma": sigma,
+        "sigma_indices": sigma_indices,
         "predictors": predictors,
         "predictor_factory": predictor_factory,
         "comment": comment,
     }
-
-    if sigma_indices is not None:
-        params["sigma_indices"] = sigma_indices
-
     if save_parameters:
         try:
             path_to_json = Path(target_root) / "parameters.json"
@@ -2805,10 +3023,11 @@ def create_parameters(
     return params
 
 
-def test_parameter(
+def hand_test_parameter(
     emission: xr.Dataset = None,
     sigma_tested: list = [0.004],
     sigma_indices: list[list[int]] = None,
+    single_behav= True,
     Conv_method: str = "Foscat1DHealpix",
     target_root: str = ".",
     saving_root: str = "/hand_sigma",
@@ -2833,7 +3052,11 @@ def test_parameter(
     sigma_tested : list[float], default=[0.004]
         List of sigma values to test.
     sigma_indices : list[list[int]], optional
-        Time indices associated with each sigma.
+        Time indices associated with each sigma. If None, they are computed
+        from ``predictor_indices``. Takes precedence over ``predictor_indices``.
+    single_behav : bool, default=True
+        Only used when ``sigma_indices`` is None. If False, one list of time
+        indices per continuous segment. If True, one list per predictor value.
     Conv_method : str, default="Foscat1DHealpix"
         Convolution class name used to build the predictor factory
         (see `create_parameters`). Expected values are
@@ -2857,6 +3080,11 @@ def test_parameter(
     dict
         Parameters dictionary, as returned by `create_parameters`, also
         saved as `{target_root}{saving_root}/parameters.json`.
+    Raises
+    ------
+    ValueError
+        If neither ``sigma_indices`` nor ``predictor_indices`` is provided,
+        or if ``class_name`` is unknown.
     """
     # Open the distributions
     emission = (
@@ -2870,7 +3098,25 @@ def test_parameter(
         if emission is None
         else emission
     )
+    Path(f"{target_root}{saving_root}").mkdir(parents=True, exist_ok=True)
 
+    n_steps = emission.sizes["time"]
+    params = create_parameters(                
+                sigma=sigma_tested,
+                sigma_indices=sigma_indices,
+                predictor_indices=(
+                                    emission["predictor_index"].values
+                                    if sigma_indices is None and "predictor_index" in emission
+                                    else None
+                                ),
+                n_steps=n_steps,
+                single_behav=single_behav,
+                class_name=Conv_method,
+                target_root=f"{target_root}{saving_root}",  # stayconsistent here
+                save_parameters=True,
+                storage_options=storage_options,
+                )   
+ 
     # Create a new folder
     emission.to_zarr(
         f"{target_root}{saving_root}/combined.zarr",
@@ -2878,13 +3124,5 @@ def test_parameter(
         consolidated=True,
         storage_options=storage_options,
         zarr_format=2,
-    )
-    params = create_parameters(
-        sigma=sigma_tested,
-        sigma_indices=sigma_indices,
-        class_name=Conv_method,
-        target_root=f"{target_root}{saving_root}",  # stayconsistent here
-        save_parameters=True,
-        storage_options=storage_options,
     )
     return params

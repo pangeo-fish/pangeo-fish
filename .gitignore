@@ -68,3 +68,7 @@ notebooks/pour_clement_lat
 notebooks/pour_clement_lon
 notebooks/pangeo-fish-complete.ipynb
 notebooks/diff_wgs_sphere.ipynb
+viterbi_complete.py
+.gitignore
+viterbi2_complete.py
+notebooks/DEV_TESTER.ipynb

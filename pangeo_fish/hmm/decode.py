@@ -5,6 +5,8 @@ import dask.array as da
 import numba
 import numpy as np
 import xarray as xr
+from scipy.special import logsumexp
+import healpix_geo.nested as hgn
 
 from pangeo_fish.distributions import gaussian_kernel
 
@@ -306,4 +308,257 @@ def viterbi2(emission, sigma):
 
     return (
         emission[["time", "latitude", "longitude"]].isel(x=x, y=y).drop_vars("cell_ids")
+    )
+
+### Healpix viterbi try ###
+
+
+import numpy as np
+import xarray as xr
+import healpix_geo.nested as hgn
+from scipy.special import logsumexp
+
+
+def _angular_distances(cell_ids, disk, level, ellipsoid="sphere"):
+    """
+    Angular distances (radians) between each cell centre and its neighbourhood.
+
+    Parameters
+    ----------
+    cell_ids : numpy.ndarray of uint64, shape (n,)
+        Source cell indexes at depth `level`.
+    disk : numpy.ndarray of int64, shape (n, M)
+        Neighbourhood of each source cell, as returned by `kth_neighbourhood`.
+        Entries equal to -1 are padding.
+    level : int
+        HEALPix depth of the cells.
+    ellipsoid : str, default "sphere"
+        Reference ellipsoid.
+
+    Returns
+    -------
+    numpy.ndarray of float, shape (n, M)
+        Distances in radians, NaN where `disk` is padding.
+    """
+    valid = disk >= 0
+
+    if ellipsoid == "sphere":
+        return np.asarray(hgn.angular_distances(cell_ids, disk, level))
+
+    # Ellipsoid case: geocentric angle between the centre vectors.
+    # This is not the geodesic distance on the ellipsoid; the difference is
+    # small but grows at high latitude.
+    ids = np.where(valid, disk, 0).astype(np.uint64)
+
+    depth_c = np.full(cell_ids.size, level, dtype=np.uint8)
+    depth_d = np.full(ids.size, level, dtype=np.uint8)
+
+    # centre vectors of the sources, shape (n, 3)
+    pc = np.stack(
+        hgn.healpix_to_cartesian(cell_ids, depth_c, ellipsoid=ellipsoid), axis=-1
+    )
+    # centre vectors of the neighbours, shape (n, M, 3)
+    pd = np.stack(
+        hgn.healpix_to_cartesian(ids.ravel(), depth_d, ellipsoid=ellipsoid), axis=-1
+    ).reshape(ids.shape + (3,))
+
+    nc = np.linalg.norm(pc, axis=-1)  # (n,)
+    nd = np.linalg.norm(pd, axis=-1)  # (n, M)
+    dot = np.einsum("nmk,nk->nm", pd, pc)
+
+    cosang = dot / (nd * nc[:, None])
+    d = np.arccos(np.clip(cosang, -1.0, 1.0))
+
+    return np.where(valid, d, np.nan)
+
+
+def build_transitions(cell_ids, level, sigmas, truncate=4.0, ellipsoid="sphere"):
+    """
+    Neighbours and log-transition weights for each sigma (radians).
+
+    Returns
+    -------
+    neighbors : numpy.ndarray of int, shape (n_sigma, n, K)
+        Local indices (0..n-1) of the predecessors j of each cell i.
+        Padding entries point to i itself.
+    logT : numpy.ndarray of float, shape (n_sigma, n, K)
+        log P(i | j) for j = neighbors[s, i, k].
+        Padding entries are -inf.
+
+    Notes
+    -----
+    Pull convention: for each destination i, we list its predecessors j.
+    P(i | j) = exp(w(i, j)) / Z_j, where Z_j sums over the whole disk of j,
+    including cells outside the domain. This matches the normalisation used
+    by Gaussian1DHealpix, where mass leaving the domain is not renormalised.
+    """
+    if ellipsoid is None:
+        ellipsoid = "sphere"
+
+    cell_ids = np.asarray(cell_ids, dtype=np.uint64)
+    n = cell_ids.size
+
+    # sorted lookup table, to map a HEALPix index to a local index
+    order = np.argsort(cell_ids)
+    sorted_ids = cell_ids[order]
+
+    # approximate cell size (radians), used to choose the number of rings
+    pix_size = np.sqrt(np.pi / 3) / (2**level)
+
+    all_nbr, all_logT = [], []
+
+    for sigma in np.atleast_1d(np.asarray(sigmas, dtype=float)):
+        radius = truncate * sigma
+        # kth_neighbourhood(ring=k) returns the full disk of radius k cells
+        rings = int(np.ceil(radius / pix_size)) + 1
+
+        # full disk around each cell, shape (n, M), -1 is padding
+        disk = np.asarray(
+            hgn.kth_neighbourhood(cell_ids, level, rings, num_threads=0),
+            dtype=np.int64,
+        )
+        valid_hp = disk >= 0
+
+        # angular distances, NaN on padding
+        d = _angular_distances(cell_ids, disk, level, ellipsoid=ellipsoid)
+
+        # Gaussian log-weights, -inf outside the radius and on padding
+        inside = valid_hp & np.isfinite(d) & (d <= radius)
+        w = np.where(inside, -(np.nan_to_num(d) ** 2) / (2.0 * sigma**2), -np.inf)
+
+        # normalisation over the whole disk of each source (outside cells included)
+        logZ = logsumexp(w, axis=1)  # (n,)
+
+        # padding replaced by 0 so that searchsorted never sees -1
+        ids = np.where(valid_hp, disk, 0).astype(np.uint64)
+
+        # keep only neighbours that belong to the domain, and map them to local indices
+        pos = np.searchsorted(sorted_ids, ids.ravel()).reshape(ids.shape)
+        pos = np.clip(pos, 0, n - 1)
+        in_dom = (sorted_ids[pos] == ids) & np.isfinite(w)
+        loc = order[pos]
+
+        # compact each row so the valid entries come first
+        perm = np.argsort(~in_dom, axis=1, kind="stable")
+        in_dom_s = np.take_along_axis(in_dom, perm, axis=1)
+        w_s = np.take_along_axis(w, perm, axis=1)
+        loc_s = np.take_along_axis(loc, perm, axis=1)
+
+        # trim to the maximum number of valid neighbours
+        K = max(int(in_dom.sum(axis=1).max()), 1)
+        print(
+            f"sigma={sigma:.4g} rad | rings={rings} | "
+            f"M(candidats)={disk.shape[1]} | K(valides)={K} | "
+            f"taille table ~{n * K * (4 + 4) / 1e6:.0f} Mo"
+        )
+        in_dom_s, w_s, loc_s = in_dom_s[:, :K], w_s[:, :K], loc_s[:, :K]
+
+        nbr = np.where(in_dom_s, loc_s, np.arange(n)[:, None])
+        logT = np.where(in_dom_s, w_s - logZ[nbr], -np.inf)
+
+        all_nbr.append(nbr)
+        all_logT.append(logT)
+
+    return np.stack(all_nbr), np.stack(all_logT)
+
+
+def viterbi_healpix(emission, sigmas, truncate=4.0, ellipsoid="sphere",level=None):
+    """
+    Viterbi decoding on a HEALPix grid, with a sigma that may change per time step.
+
+    Parameters
+    ----------
+    emission : xarray.Dataset
+        Dimensions (time, cells) for 'pdf'; 'initial' on cells;
+        'mask' on cells (True = ocean); 'predictor_index' on time
+        (index into `sigmas` used for the transition into each step);
+        and 'cell_ids'.
+    sigmas : sequence of float
+        Standard deviations in radians.
+    truncate : float, default 4.0
+        Truncation radius in units of sigma.
+    ellipsoid : str, default "sphere"
+        Reference ellipsoid.
+
+    Returns
+    -------
+    xarray.Dataset
+        Most probable track, with 'cell_ids', 'longitude' and 'latitude' on time.
+    """
+    if ellipsoid is None:
+        ellipsoid = "sphere"
+    if level is None:
+        level = emission.dggs.grid_info.level
+
+    sigmas = np.atleast_1d(np.asarray(sigmas, dtype=float))
+    cell_ids = np.asarray(emission["cell_ids"].values, dtype=np.uint64)
+
+    pdf = emission["pdf"].transpose("time", "cells").values
+    initial = emission["initial"].transpose("cells").values
+    ocean = np.asarray(emission["mask"].transpose("cells").values, dtype=bool)
+    sig_idx = np.asarray(emission["predictor_index"].values, dtype=int)
+
+    T, n = pdf.shape
+    print(f"T={T},n={n}")
+    if sig_idx.min() < 0 or sig_idx.max() >= len(sigmas):
+        raise ValueError("predictor_index is out of range of the sigma list")
+
+    # emissions in log space; the first step uses the initial distribution
+    with np.errstate(divide="ignore"):
+        logE = np.log(np.nan_to_num(pdf, nan=0.0))
+        logE[0] = np.log(np.nan_to_num(initial, nan=0.0))
+    print("début neighbors")
+    # sigmas arrondis pour éviter les doublons dus au flottant
+    sigmas_r = np.array([float(f"{s:.10g}") for s in sigmas])
+
+    # sigmas réellement utilisés par predictor_index, sans doublons
+    used = np.unique(sig_idx)
+    unique_vals, inverse = np.unique(sigmas_r[used], return_inverse=True)
+
+    # nouvel index de chaque pas, dans la liste réduite
+    remap = np.full(len(sigmas), -1, dtype=int)
+    remap[used] = inverse
+    sig_idx_u = remap[sig_idx]
+    print(f"nombre de sigmas demandés : {len(sigmas)}")
+    print(f"sigmas uniques utilisés   : {len(unique_vals)}")
+    print(f"valeurs                   : {unique_vals}")
+    print(f"pas par sigma            : {np.bincount(sig_idx_u, minlength=len(unique_vals))}")
+    print(f"n={n}, T={T}, level={level}")
+    neighbors, logT = build_transitions(
+        cell_ids, level, unique_vals, truncate=truncate, ellipsoid=ellipsoid
+    )
+    print("fin neighbors")
+    rows = np.arange(n)
+    M = np.where(ocean, logE[0], -np.inf)
+    back = np.zeros((T, n), dtype=np.int32)
+
+    # forward pass
+    for t in range(1, T):
+        s = sig_idx_u[t]
+        nbr = neighbors[s]
+        cand = M[nbr] + logT[s]  # (n, K): score of each predecessor
+        k = np.argmax(cand, axis=1)
+        best = cand[rows, k]
+        back[t] = nbr[rows, k]
+        M = np.where(ocean, best + logE[t], -np.inf)
+
+    if not np.isfinite(M).any():
+        raise ValueError("no feasible path: all final scores are zero")
+
+    # backtracking
+    path = np.empty(T, dtype=np.int64)
+    path[-1] = np.argmax(M)
+    for t in range(T - 1, 0, -1):
+        path[t - 1] = back[t, path[t]]
+
+    cell_path = cell_ids[path]
+    lon, lat = hgn.healpix_to_lonlat(cell_path, level, ellipsoid=ellipsoid)
+
+    return xr.Dataset(
+        {
+            "cell_ids": ("time", cell_path),
+            "longitude": ("time", np.asarray(lon)),
+            "latitude": ("time", np.asarray(lat)),
+        },
+        coords={"time": emission["time"].values},
     )

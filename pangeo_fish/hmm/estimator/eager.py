@@ -3,9 +3,10 @@ from dataclasses import asdict, dataclass, field, replace
 import movingpandas as mpd
 import numpy as np
 from tlz.functoolz import compose_left, curry, pipe
+from tlz.itertoolz import first
 
 from pangeo_fish import tracks, utils
-from pangeo_fish.hmm.decode import mean_track, modal_track
+from pangeo_fish.hmm.decode import mean_track, modal_track, viterbi, viterbi_healpix
 from pangeo_fish.hmm.filter import forward_backward, score, score_final_pos
 from pangeo_fish.hmm.prediction import Predictor
 
@@ -311,10 +312,9 @@ class EagerEstimator:
             "mean": compose_left(maybe_compute_states, mean_track),
             "mode": compose_left(maybe_compute_states, modal_track),
             # TODO: not supported with multiple sigma
-            # "viterbi": compose_left(first, curry(viterbi, sigma=self.sigma)),
-            # "viterbi2": compose_left(first, curry(viterbi2, sigma=self.sigma)),
+            "viterbi": compose_left(first, curry(viterbi, sigma=self.sigma)),
+            "viterbi_healpix" : compose_left(first, curry(viterbi_healpix, sigmas=self.sigma)),
         }
-
         if not isinstance(mode, list):
             modes = [mode]
         else:
@@ -337,7 +337,7 @@ class EagerEstimator:
                 return modes
 
             return utils.progress_status(modes)
-
+        print("début")
         decoded = [
             pipe(
                 [X, states],
@@ -348,7 +348,7 @@ class EagerEstimator:
             )
             for mode in maybe_show_progress(modes)
         ]
-
+        print("fin")
         if len(decoded) > 1:
             return mpd.TrajectoryCollection(decoded)
 
