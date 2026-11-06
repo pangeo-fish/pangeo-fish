@@ -5,6 +5,7 @@ Welcome to pangeo-fish's documentation!
     :maxdepth: 1
 
     installation
+   pangeo-notebook
     format
     notebook
     api
