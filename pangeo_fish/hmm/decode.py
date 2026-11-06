@@ -315,9 +315,6 @@ def viterbi2(emission, sigma):
 ### Healpix viterbi try ###
 
 
-
-
-
 def _angular_distances(cell_ids, disk, level, ellipsoid="sphere"):
     """
     Angular distances (radians) between each cell centre and its neighbourhood.
