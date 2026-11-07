@@ -13,6 +13,38 @@ import nbformat
 from nbclient import NotebookClient
 
 
+def check_saved_states(work):
+    import numpy as np
+    import xarray as xr
+    import zarr
+
+    results = []
+    for path in sorted(work.rglob("states.zarr")):
+        with (
+            xr.open_zarr(path) as states,
+            xr.open_zarr(path.parent / "combined.zarr") as emission,
+        ):
+            probabilities = states["states"]
+            spatial = [dim for dim in probabilities.dims if dim != "time"]
+            totals = probabilities.sum(spatial).compute().values
+            np.testing.assert_allclose(totals, 1, atol=1e-6, rtol=1e-6)
+            assert not bool(
+                (probabilities < -1e-12).any().compute()
+            ), "negative probability"
+            xr.testing.assert_identical(states.time, emission.time)
+            np.testing.assert_array_equal(states.cell_ids, emission.cell_ids)
+            if "mask" in emission:
+                land = probabilities.where(~emission["mask"].astype(bool)).fillna(0)
+                np.testing.assert_allclose(land.compute(), 0, atol=1e-12)
+            assert zarr.open_group(path).metadata.zarr_format == 2
+            results.append(
+                {"store": str(path.relative_to(work)), "timesteps": len(totals)}
+            )
+    if not results:
+        raise AssertionError("No saved state probabilities were produced")
+    return results
+
+
 def main(name):
     if name not in {"base", "complete"}:
         raise ValueError("Only base and complete demos are supported")
@@ -79,6 +111,7 @@ def main(name):
     start = time.monotonic()
     try:
         client.execute()
+        summary["saved_states_checks"] = check_saved_states(work)
         summary["status"] = "passed"
     except Exception as error:
         summary["status"] = "failed"
