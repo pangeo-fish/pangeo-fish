@@ -22,6 +22,23 @@ TRANSITION = np.array(
 )
 
 
+def test_hand_sigma_copy_rechunked_multisigma_data(tmp_path, emissions):
+    from pangeo_fish.helpers import hand_test_parameter
+
+    source = emissions.assign(predictor_index=("time", [0, 1, 1]))
+    source.to_zarr(tmp_path / "combined.zarr", mode="w", zarr_format=2)
+    params = hand_test_parameter(
+        target_root=str(tmp_path),
+        saving_root="/manual",
+        sigma_tested=[0.03],
+        default_chunk_dims={"time": 1, "cells": -1},
+    )
+    assert params["sigma"] == [0.03]
+    assert params["sigma_indices"] == [[0, 1, 2]]
+    with xr.open_zarr(tmp_path / "manual/combined.zarr") as actual:
+        xr.testing.assert_identical(actual.load(), source)
+
+
 class MatrixPredictor:
     def __init__(self, sigma):
         self.sigma = sigma

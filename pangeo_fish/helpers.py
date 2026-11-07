@@ -3070,10 +3070,10 @@ def hand_test_parameter(
         xr.open_dataset(
             f"{target_root}/combined.zarr",
             engine="zarr",
-            chunks=default_chunk_dims,
+            chunks={},
             inline_array=True,
             storage_options=storage_options,
-        )
+        ).chunk(default_chunk_dims or {})
         if emission is None
         else emission
     )
@@ -3085,7 +3085,9 @@ def hand_test_parameter(
         sigma_indices=sigma_indices,
         predictor_indices=(
             emission["predictor_index"].values
-            if sigma_indices is None and "predictor_index" in emission
+            if sigma_indices is None
+            and len(sigma_tested) > 1
+            and "predictor_index" in emission
             else None
         ),
         n_steps=n_steps,
@@ -3097,6 +3099,11 @@ def hand_test_parameter(
     )
 
     # Create a new folder
+    # A rechunked read retains the source store's encoding. For this new store,
+    # derive safe storage chunks from the current Dask layout instead.
+    emission = emission.copy(deep=False)
+    for name in emission.variables:
+        emission[name].encoding.pop("chunks", None)
     emission.to_zarr(
         f"{target_root}{saving_root}/combined.zarr",
         mode="w",
