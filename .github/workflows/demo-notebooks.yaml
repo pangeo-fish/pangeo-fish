@@ -2,13 +2,24 @@ name: Execute base and complete demo notebooks
 
 on:
   push:
-    branches: ["fix/pangeo-notebook-compat"]
+    branches: ["feat/parameterized-demo-ci"]
     paths:
       - ".github/workflows/demo-notebooks.yaml"
       - "ci/run_demo_notebook.py"
+      - "ci/demo_configuration.py"
+      - "ci/check_papermill.py"
+      - "ci/run_demo_notebook.sh"
+      - "ci/notebook_environment.py"
+      - "pyproject.toml"
       - "notebooks/pangeo-fish-base-demo.ipynb"
       - "notebooks/pangeo-fish-complete-demo.ipynb"
   workflow_dispatch:
+    inputs:
+      dataset_case:
+        description: A18828 is a base-demo-only bounded manual trial
+        type: choice
+        options: [A19124-both, A18828-base]
+        default: A19124-both
 
 permissions:
   contents: read
@@ -16,17 +27,19 @@ permissions:
 jobs:
   demo:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: ${{ inputs.dataset_case == 'A18828-base' && 55 || 180 }}
     strategy:
       fail-fast: false
       matrix:
-        notebook: [base, complete]
+        notebook: ${{ fromJSON(inputs.dataset_case == 'A18828-base' && '["base"]' || '["base", "complete"]') }}
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - name: Run the original demo in the pinned Notebook image
+      - name: Run the parameterized demo in the pinned Notebook image
+        timeout-minutes: ${{ inputs.dataset_case == 'A18828-base' && 45 || 160 }}
         env:
+          DEMO_TAG_NAME: ${{ inputs.dataset_case == 'A18828-base' && 'A18828' || 'A19124' }}
           COPERNICUS_CREDENTIALS_FILE_CONTENT: ${{ secrets.DEMO_COPERNICUS_CREDENTIALS }}
         run: |
           python - <<'PY'
@@ -49,11 +62,21 @@ jobs:
           docker pull "$image"
           docker image inspect "$image" > demo-results/image.json
           docker run --rm --user root --entrypoint bash \
-            -e HOME=/tmp -e COPERNICUS_CREDENTIALS_FILE_CONTENT -e MPLBACKEND=Agg \
+            -e HOME=/tmp -e COPERNICUS_CREDENTIALS_FILE_CONTENT -e MPLBACKEND=Agg -e DEMO_TAG_NAME \
             -e NUMBA_NUM_THREADS=2 -e OMP_NUM_THREADS=2 -e CUDA_VISIBLE_DEVICES= \
             -v "$PWD:/work" -w /work "$image" -c \
-            'python -m pip install -e . && python ci/run_demo_notebook.py "$1"' \
+            'bash ci/run_demo_notebook.sh "$1"' \
             bash '${{ matrix.notebook }}'
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: demo-${{ matrix.notebook }}-summary
+          path: |
+            demo-results/image.json
+            demo-results/${{ matrix.notebook }}/summary.json
+            demo-results/${{ matrix.notebook }}/before.json
+            demo-results/${{ matrix.notebook }}/after.json
+            demo-results/${{ matrix.notebook }}/comparison.json
       - uses: actions/upload-artifact@v6
         if: always()
         with:
@@ -61,4 +84,7 @@ jobs:
           path: |
             demo-results/image.json
             demo-results/${{ matrix.notebook }}/summary.json
+            demo-results/${{ matrix.notebook }}/before.json
+            demo-results/${{ matrix.notebook }}/after.json
+            demo-results/${{ matrix.notebook }}/comparison.json
             demo-results/${{ matrix.notebook }}/executed.ipynb
