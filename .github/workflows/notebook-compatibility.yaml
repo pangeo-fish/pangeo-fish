@@ -1,0 +1,59 @@
+name: Pangeo Notebook compatibility
+
+on:
+  pull_request:
+    branches: [main, release]
+  push:
+    branches: [main, release, "fix/pangeo-notebook-compat"]
+  schedule:
+    - cron: "23 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      baseline_only:
+        description: Record a pristine image without installing Pangeo-Fish
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  notebook:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [pinned, latest]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'schedule' && 'release' || '' }}
+      - name: Resolve and record the image
+        id: image
+        shell: bash
+        run: |
+          mkdir -p compatibility-results
+          if [ '${{ matrix.image }}' = pinned ]; then
+            image=$(cat ci/notebook-image.txt)
+          else
+            image=quay.io/pangeo/pangeo-notebook:latest
+          fi
+          docker pull "$image"
+          docker image inspect "$image" > compatibility-results/image.json
+          image_id=$(docker image inspect --format '{{.Id}}' "$image")
+          echo "id=$image_id" >> "$GITHUB_OUTPUT"
+      - name: Install and test in the clean image
+        env:
+          BASELINE_ONLY: ${{ inputs.baseline_only || 'false' }}
+        run: |
+          docker run --rm --user root --entrypoint bash \
+            -e HOME=/tmp -e BASELINE_ONLY \
+            -v "$PWD:/work" -w /work '${{ steps.image.outputs.id }}' \
+            ci/run_notebook_compatibility.sh
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: notebook-${{ matrix.image }}
+          path: compatibility-results/

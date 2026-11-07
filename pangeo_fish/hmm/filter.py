@@ -49,7 +49,7 @@ def score(emission, predictors, predictor_indices, initial_probability, mask=Non
         normalization_factor = np.sum(updated)
         if normalization_factor == 0:
             warnings.warn(
-                f"Empty product of the prediction with the true distribution at step {time_index+1}.",
+                f"Empty product of the prediction with the true distribution at step {time_index + 1}.",
                 RuntimeWarning,
             )
             return 1e6
@@ -273,16 +273,34 @@ def forward_backward(
 
 
 def copy_coords_of(arr, source, dest):
-    for name in arr.attrs["coordinates"].split():
-        dest[name] = source[name]
-        dest[name].attrs.update(source[name].attrs)
+    # Dimension coordinates are not included in Xarray's "coordinates" attribute.
+    names = set(arr.attrs.get("coordinates", "").split())
+    names.update(arr.attrs["_ARRAY_DIMENSIONS"])
+    names.update(source.attrs.get("coordinates", "").split())
+    dest.attrs.update(source.attrs)
+    for name in sorted(names):
+        if name in source:
+            coord = source[name]
+            dest.create_array(
+                name,
+                data=coord[...],
+                chunks=coord.chunks,
+                fill_value=coord.fill_value,
+                attributes=dict(coord.attrs),
+            )
 
 
 def empty_like(group, name, arr, **kwargs):
-    new = group.empty_like(name, arr, **kwargs)
-    new.attrs.update(arr.attrs)
-
-    return new
+    # Zeros are valid probabilities, not missing values. Preserve CF dimensions.
+    return group.create_array(
+        name,
+        shape=arr.shape,
+        dtype=arr.dtype,
+        chunks=arr.chunks,
+        fill_value=None,
+        attributes=dict(arr.attrs),
+        **kwargs,
+    )
 
 
 def track(sequence, *, display=False, **kwargs):
@@ -326,20 +344,25 @@ def _forward_zarr(ingroup, outgroup, predictor, progress=False):
 
     predictions = empty_like(outgroup, "predictions", emission)
     states = empty_like(outgroup, "states", emission)
-    normalizations = outgroup.empty(
-        "normalizations", dtype=emission.dtype, shape=emission.shape[:1]
+    normalizations = outgroup.create_array(
+        "normalizations",
+        dtype=emission.dtype,
+        shape=emission.shape[:1],
+        fill_value=None,
     )
     normalizations.attrs["_ARRAY_DIMENSIONS"] = emission.attrs["_ARRAY_DIMENSIONS"][:1]
 
-    predictions[0, ...] = initial_probability
-    states[0, ...] = initial_probability
+    predictions[0, ...] = initial_probability[...]
+    states[0, ...] = initial_probability[...]
     normalizations[0] = 1  # this is constant, so doesn't make a difference
 
     n_max = emission.shape[0]
     for index in track(
         range(1, n_max), description="forwards filter", display=progress
     ):
-        prediction = predictor.predict(states[index - 1, ...], mask=mask)
+        prediction = predictor.predict(
+            states[index - 1, ...], mask=None if mask is None else mask[...]
+        )
         predictions[index, ...] = prediction
 
         updated = prediction * emission[index, ...]

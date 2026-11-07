@@ -34,11 +34,7 @@ def maybe_compute(ds, compute):
 
 
 def create_cached_estimator(cache_path, **kwargs):
-    import zarr
-
-    cache_store = zarr.storage.DirectoryStore(cache_path)
-
-    return CachedEstimator(cache=cache_store, **kwargs)
+    return CachedEstimator(cache=cache_path, **kwargs)
 
 
 @click.group()
@@ -93,7 +89,10 @@ def prepare(parameters, runtime_config, cluster_definition):
         )
         differences = subtract_data(tag, model, parameters)
         differences.chunk({"time": 1, "lat": -1, "lon": -1}).to_zarr(
-            f"{target_root}/diff.zarr", mode="w", consolidated=True
+            f"{target_root}/diff.zarr",
+            mode="w",
+            consolidated=True,
+            zarr_format=2,
         )
         console.log("stored temperature differences")
 
@@ -122,6 +121,7 @@ def prepare(parameters, runtime_config, cluster_definition):
             f"{target_root}/diff-regridded.zarr",
             mode="w",
             consolidated=True,
+            zarr_format=2,
         )
         console.log("finished regridding")
 
@@ -136,6 +136,7 @@ def prepare(parameters, runtime_config, cluster_definition):
             f"{target_root}/emission.zarr",
             mode="w",
             consolidated=True,
+            zarr_format=2,
         )
         console.log("finished constructing emission matrices from temperature data")
 
@@ -157,7 +158,10 @@ def prepare(parameters, runtime_config, cluster_definition):
         )
 
         combined.chunk({"x": -1, "y": -1, "time": 1}).to_zarr(
-            f"{target_root}/emission-acoustic.zarr", mode="w", consolidated=True
+            f"{target_root}/emission-acoustic.zarr",
+            mode="w",
+            consolidated=True,
+            zarr_format=2,
         )
         console.log("finished writing emission matrices from acoustic detections")
 
@@ -322,7 +326,10 @@ def decode(parameters, runtime_config, cluster_definition, estimator):
         states = optimized.predict_proba(emission)
         console.log("constructed task graph")
         states.chunk({"time": 1, "x": -1, "y": -1}).to_zarr(
-            f"{target_root}/states.zarr", mode="w", consolidated=True
+            f"{target_root}/states.zarr",
+            mode="w",
+            consolidated=True,
+            zarr_format=2,
         )
         console.log("finished writing the state probabilities")
 

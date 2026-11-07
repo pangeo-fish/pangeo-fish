@@ -1,0 +1,64 @@
+name: Execute base and complete demo notebooks
+
+on:
+  push:
+    branches: ["fix/pangeo-notebook-compat"]
+    paths:
+      - ".github/workflows/demo-notebooks.yaml"
+      - "ci/run_demo_notebook.py"
+      - "notebooks/pangeo-fish-base-demo.ipynb"
+      - "notebooks/pangeo-fish-complete-demo.ipynb"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  demo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        notebook: [base, complete]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Run the original demo in the pinned Notebook image
+        env:
+          COPERNICUS_CREDENTIALS_FILE_CONTENT: ${{ secrets.DEMO_COPERNICUS_CREDENTIALS }}
+        run: |
+          python - <<'PY'
+          import base64, configparser, os
+          def mask(value):
+              if isinstance(value, dict):
+                  for item in value.values():
+                      mask(item)
+              elif isinstance(value, str) and value:
+                  escaped = value.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+                  print(f'::add-mask::{escaped}')
+          content = os.environ.get('COPERNICUS_CREDENTIALS_FILE_CONTENT', '')
+          if content:
+              config = configparser.RawConfigParser()
+              config.read_string(base64.standard_b64decode(content).decode('utf8'))
+              mask(dict(config.items('credentials')))
+          PY
+          mkdir -p demo-results
+          image=$(cat ci/notebook-image.txt)
+          docker pull "$image"
+          docker image inspect "$image" > demo-results/image.json
+          docker run --rm --user root --entrypoint bash \
+            -e HOME=/tmp -e COPERNICUS_CREDENTIALS_FILE_CONTENT -e MPLBACKEND=Agg \
+            -e NUMBA_NUM_THREADS=2 -e OMP_NUM_THREADS=2 -e CUDA_VISIBLE_DEVICES= \
+            -v "$PWD:/work" -w /work "$image" -c \
+            'python -m pip install -e . && python ci/run_demo_notebook.py "$1"' \
+            bash '${{ matrix.notebook }}'
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: demo-${{ matrix.notebook }}
+          path: |
+            demo-results/image.json
+            demo-results/${{ matrix.notebook }}/summary.json
+            demo-results/${{ matrix.notebook }}/executed.ipynb
