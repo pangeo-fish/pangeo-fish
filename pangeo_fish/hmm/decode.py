@@ -373,10 +373,10 @@ def build_transitions(cell_ids, level, sigmas, truncate=4.0, ellipsoid="sphere")
 
     Returns
     -------
-    neighbors : numpy.ndarray of int, shape (n_sigma, n, K)
+    neighbors : tuple of numpy.ndarray of int, each shape (n, K_sigma)
         Local indices (0..n-1) of the predecessors j of each cell i.
         Padding entries point to i itself.
-    logT : numpy.ndarray of float, shape (n_sigma, n, K)
+    logT : tuple of numpy.ndarray of float, each shape (n, K_sigma)
         log P(i | j) for j = neighbors[s, i, k].
         Padding entries are -inf.
 
@@ -454,7 +454,10 @@ def build_transitions(cell_ids, level, sigmas, truncate=4.0, ellipsoid="sphere")
         all_nbr.append(nbr)
         all_logT.append(logT)
 
-    return np.stack(all_nbr), np.stack(all_logT)
+    # Each sigma has a different support radius and hence a different row width.
+    # Keep its sparse table intact: stacking requires equal widths and padding
+    # everything to the widest table wastes memory without changing the model.
+    return tuple(all_nbr), tuple(all_logT)
 
 
 def viterbi_healpix(emission, sigmas, truncate=4.0, ellipsoid="sphere", level=None):
