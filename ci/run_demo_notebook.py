@@ -26,6 +26,20 @@ def main(name):
     work = output / "work"
     work.mkdir(exist_ok=True)
     credentials = os.environ.get("COPERNICUS_CREDENTIALS_JSON", "")
+    sensitive = []
+    if credentials:
+        sensitive = [
+            v for v in json.loads(credentials).values() if isinstance(v, str) and v
+        ]
+
+    def redact(text):
+        for value in sensitive:
+            text = text.replace(value, "[REDACTED]")
+        return text
+
+    def save_notebook():
+        (output / "executed.ipynb").write_text(redact(nbformat.writes(notebook)))
+
     if credentials:
         folder = Path.home() / ".copernicusmarine"
         folder.mkdir(exist_ok=True)
@@ -45,9 +59,11 @@ def main(name):
         summary["active_cell"] = cell_index
 
     def completed(cell, cell_index, **kwargs):
-        summary["completed_cells"].append(cell_index)
+        reply = kwargs.get("execute_reply", {})
+        if reply.get("content", {}).get("status") == "ok":
+            summary["completed_cells"].append(cell_index)
         print(f"Completed cell {cell_index}", flush=True)
-        nbformat.write(notebook, output / "executed.ipynb")
+        save_notebook()
 
     client = NotebookClient(
         notebook,
@@ -64,11 +80,11 @@ def main(name):
         summary["status"] = "passed"
     except Exception as error:
         summary["status"] = "failed"
-        summary["error"] = str(error)
+        summary["error"] = redact(str(error))
         raise
     finally:
         summary["elapsed_seconds"] = time.monotonic() - start
-        nbformat.write(notebook, output / "executed.ipynb")
+        save_notebook()
         (output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
         if credentials:
             path.unlink(missing_ok=True)

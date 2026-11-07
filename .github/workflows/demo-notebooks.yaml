@@ -29,6 +29,17 @@ jobs:
         env:
           COPERNICUS_CREDENTIALS_JSON: ${{ secrets.DEMO_COPERNICUS_CREDENTIALS }}
         run: |
+          python - <<'PY'
+          import json, os
+          def mask(value):
+              if isinstance(value, dict):
+                  for item in value.values():
+                      mask(item)
+              elif isinstance(value, str) and value:
+                  escaped = value.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+                  print(f'::add-mask::{escaped}')
+          mask(json.loads(os.environ.get('COPERNICUS_CREDENTIALS_JSON') or '{}'))
+          PY
           mkdir -p demo-results
           image=$(cat ci/notebook-image.txt)
           docker pull "$image"
