@@ -1,5 +1,7 @@
 """Execute one of the two user-facing demos, retaining partial failure evidence."""
 
+import base64
+import configparser
 import hashlib
 import json
 import os
@@ -25,12 +27,12 @@ def main(name):
             cell.execution_count = None
     work = output / "work"
     work.mkdir(exist_ok=True)
-    credentials = os.environ.get("COPERNICUS_CREDENTIALS_JSON", "")
+    credentials = os.environ.get("COPERNICUS_CREDENTIALS_FILE_CONTENT", "")
     sensitive = []
     if credentials:
-        sensitive = [
-            v for v in json.loads(credentials).values() if isinstance(v, str) and v
-        ]
+        config = configparser.RawConfigParser()
+        config.read_string(base64.standard_b64decode(credentials).decode("utf8"))
+        sensitive = list(dict(config.items("credentials")).values())
 
     def redact(text):
         for value in sensitive:

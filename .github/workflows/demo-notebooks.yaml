@@ -27,10 +27,10 @@ jobs:
           fetch-depth: 0
       - name: Run the original demo in the pinned Notebook image
         env:
-          COPERNICUS_CREDENTIALS_JSON: ${{ secrets.DEMO_COPERNICUS_CREDENTIALS }}
+          COPERNICUS_CREDENTIALS_FILE_CONTENT: ${{ secrets.DEMO_COPERNICUS_CREDENTIALS }}
         run: |
           python - <<'PY'
-          import json, os
+          import base64, configparser, os
           def mask(value):
               if isinstance(value, dict):
                   for item in value.values():
@@ -38,14 +38,18 @@ jobs:
               elif isinstance(value, str) and value:
                   escaped = value.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
                   print(f'::add-mask::{escaped}')
-          mask(json.loads(os.environ.get('COPERNICUS_CREDENTIALS_JSON') or '{}'))
+          content = os.environ.get('COPERNICUS_CREDENTIALS_FILE_CONTENT', '')
+          if content:
+              config = configparser.RawConfigParser()
+              config.read_string(base64.standard_b64decode(content).decode('utf8'))
+              mask(dict(config.items('credentials')))
           PY
           mkdir -p demo-results
           image=$(cat ci/notebook-image.txt)
           docker pull "$image"
           docker image inspect "$image" > demo-results/image.json
           docker run --rm --user root --entrypoint bash \
-            -e HOME=/tmp -e COPERNICUS_CREDENTIALS_JSON -e MPLBACKEND=Agg \
+            -e HOME=/tmp -e COPERNICUS_CREDENTIALS_FILE_CONTENT -e MPLBACKEND=Agg \
             -e NUMBA_NUM_THREADS=2 -e OMP_NUM_THREADS=2 -e CUDA_VISIBLE_DEVICES= \
             -v "$PWD:/work" -w /work "$image" -c \
             'python -m pip install -e . && python ci/run_demo_notebook.py "$1"' \
