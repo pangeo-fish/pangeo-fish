@@ -38,16 +38,26 @@ def test_multisigma_transitions_and_exact_viterbi():
         dense.append(matrix)
     candidates = []
     for second, last in product(np.flatnonzero(mask), repeat=2):
-        score = (dense[0][second, 5] + np.log(pdf[1, second])
-                 + dense[1][last, second] + np.log(pdf[2, last]))
+        score = (
+            dense[0][second, 5]
+            + np.log(pdf[1, second])
+            + dense[1][last, second]
+            + np.log(pdf[2, last])
+        )
         candidates.append((score, (5, second, last)))
     best_score, best_path = max(candidates)
     assert np.isfinite(best_score)
     emission = xr.Dataset(
-        {"pdf": (("time", "cells"), pdf), "initial": ("cells", initial),
-         "mask": ("cells", mask), "predictor_index": ("time", indices)},
-        coords={"cell_ids": ("cells", cells),
-                "time": pd.date_range("2025-01-01", periods=3)},
+        {
+            "pdf": (("time", "cells"), pdf),
+            "initial": ("cells", initial),
+            "mask": ("cells", mask),
+            "predictor_index": ("time", indices),
+        },
+        coords={
+            "cell_ids": ("cells", cells),
+            "time": pd.date_range("2025-01-01", periods=3),
+        },
     ).dggs.decode({"grid_name": "healpix", "level": level, "indexing_scheme": "nested"})
     actual = viterbi_healpix(emission, sigmas)
     np.testing.assert_array_equal(actual.cell_ids, cells[list(best_path)])
