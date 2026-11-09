@@ -5,17 +5,17 @@ description = "Utilities for fish geolocation"
 readme = "README.md"
 license = "GPL-3.0-only"
 license-files = ["LICENSE"]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 classifiers = [
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
   # core scientific stack
-  # xarray 2025.4.0 has a BinGrouper.factorize regression (pd.Index(None));
-  # known-good version is 2025.3.x (matches docs/environment.yaml).
-  "xarray>=2024.11.0,<2025.4",
+  # Modern BinGrouper and Zarr-Python 3 integration; exercised in container CI.
+  "xarray>=2025.7.1,<2027",
   "pandas",
   "numpy",
   "scipy",
@@ -24,28 +24,33 @@ dependencies = [
   "opt_einsum",
   "more_itertools",
   "toolz",
-  # IO stack — pinned to known-working versions
-  "zarr==2.18.7",
-  "kerchunk==0.2.7",
-  "fsspec==2025.3.2",
-  "s3fs==2025.3.2",
-  "gcsfs==2025.3.2",
-  "numcodecs==0.15.1",
+  # Zarr-Python 3 runtime; writers explicitly retain Zarr format 2.
+  # Let the storage clients own their aiohttp/aiobotocore/numcodecs constraints.
+  "zarr>=3.1.2,<4",
+  "kerchunk>=0.2.9,<0.3",
+  "fsspec>=2025.7.0,<2027",
+  "s3fs>=2025.7.0,<2027",
+  "gcsfs>=2025.7.0,<2027",
   "h5netcdf",
   "intake",
-  "intake-xarray",
+  "intake-xarray>=2,<3",
   # geographic & HEALPix
   "healpy",
-  "cartopy",
+  "cartopy==0.25.0",
   "geopandas",
   "shapely",
   "movingpandas==0.21.3",
   "xhealpixify",
-  "xdggs",
+  "xdggs==0.6.0",
   "healpix-convolution",
+  "foscat>=2026.6.1,<2027",
   "cf_xarray>=0.10.4",
   "pint",
   "pint-xarray",
+  "eccodes>=2.35.0",
+  "cdshealpix",
+  "dask-image",
+  "dask-hpcconfig",
   # distributed / parallel
   "dask",
   "distributed",
@@ -54,16 +59,26 @@ dependencies = [
   "matplotlib",
   "hvplot",
   "holoviews",
+  "geoviews",
+  "altair",
   "cmocean",
   "imageio[ffmpeg]",
+  "ipywidgets",
   # CLI / progress
   "rich",
   "rich-click",
   "tqdm",
   # Copernicus Marine Service client (default model loader)
-  "copernicusmarine>=2.3,<2.4",
+  "copernicusmarine>=2.4,<3",
+  # deep learning (CPU-only usage in notebooks via CUDA_VISIBLE_DEVICES="")
+  "torch>=2.7,<3",
+  "healpix-analyse>=2026.10.2,<2027",
+  "healpix-resample>=2026.11.2,<2027",
 ]
 dynamic = ["version"]
+
+[project.optional-dependencies]
+notebooks = ["papermill>=2.7,<3", "ipykernel>=6.29,<8"]
 
 [project.urls]
 "Homepage" = "https://github.com/pangeo-fish/pangeo-fish"
@@ -139,6 +154,7 @@ known-third-party = []
 ban-relative-imports = "all"
 
 [tool.pytest.ini_options]
+testpaths = ["pangeo_fish/tests"]
 filterwarnings = [
   "error:::pangeo_fish.*",
   "ignore:Missing optional dependencies. To use the trajectory smoother classes please install Stone Soup:UserWarning:movingpandas",
