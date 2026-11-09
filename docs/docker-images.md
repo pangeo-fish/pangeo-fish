@@ -34,6 +34,11 @@ An existing release image tag cannot be reassigned to a different image digest.
    automatic image. Subsequent `main` pushes and published releases request
    images without a manual build step.
 
+Create future release tags from commits that contain this notification workflow.
+If releases are cut from the separate `release` branch, bring the workflow into
+that branch before tagging; publishing a release for an older commit does not
+retroactively add the new workflow to that commit.
+
 The source repository's automatic `GITHUB_TOKEN` cannot dispatch events to a
 different repository. This dedicated token is used only for notification;
 GHCR publication uses the Docker repository's own `GITHUB_TOKEN`.
