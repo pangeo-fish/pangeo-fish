@@ -87,3 +87,30 @@ Choose `states` in the variable selector and move the time selector. The
 viewer deployment. Exporting a store does not publish it or change bucket
 permissions. A new S3 endpoint still needs a live browser check; local round-trip
 tests cannot verify its read policy, HTTPS routing or CORS configuration.
+
+## Published A19124 example
+
+A real-data interoperability example is available in the Pangeo@EOSC MinIO
+bucket `todaka-pangeo-fish-demo`, exported with commit `0609f50`:
+
+[Open A19124 in Gridlook Preview](https://grid4earth.eu/gridlook-preview/#https://pangeo-eosc-minioapi.vm.fedcloud.eu/todaka-pangeo-fish-demo/outputs/A19124/dggs-preview/2026-11-09-0609f50/states.zarr)
+
+Select `states`. The dataset contains eleven daily posterior maps from
+2022-06-14 to 2022-06-24, recomputed from the existing workshop's A19124 combined
+temperature/acoustic emission and its saved movement sigma
+(`0.0014121326945640952`, spherical grid). It is a visualization interoperability
+demonstration rather than a newly validated tracking result.
+
+The export uses level-10 nested cells and level-4 parent tiles: chunks of
+`(time=1, cells=4096)`, 81,920 exported cells including padding, and 39,388
+original cells. It preserves the source posterior values and each daily map
+sums to one. The Zarr store occupies about 67 kB across 51 objects (all-NaN
+chunks are omitted). Existing bucket policy and CORS responses were sufficient;
+neither was changed.
+
+The complete dataset has been reopened anonymously over HTTPS and compared
+with the local export. Metadata and populated chunks return the viewer origin
+in their CORS headers. See the adjacent
+[validation record](https://pangeo-eosc-minioapi.vm.fedcloud.eu/todaka-pangeo-fish-demo/outputs/A19124/dggs-preview/2026-11-09-0609f50/validation.json)
+for the export details. An HTTP round trip alone does not verify the browser's
+rendering of the maps.
