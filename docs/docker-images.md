@@ -10,9 +10,9 @@ The source repository sends a `pangeo-fish-updated` repository dispatch to
 That repository builds the image, checks package imports and Jupyter kernel
 registration, and publishes it to GHCR:
 
-| Source event | Image tags |
-| --- | --- |
-| Push to `main` | `<notebook-date>-<commit>` and `latest` |
+| Source event             | Image tags                                                          |
+| ------------------------ | ------------------------------------------------------------------- |
+| Push to `main`           | `<notebook-date>-<commit>` and `latest`                             |
 | GitHub Release published | `<notebook-date>-<commit>` and the exact release tag, e.g. `v1.2.3` |
 
 All image names start with `ghcr.io/pangeo-fish/pangeo-fish-notebook:`.
