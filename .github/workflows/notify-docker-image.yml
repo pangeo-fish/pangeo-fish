@@ -1,0 +1,29 @@
+name: Trigger Docker image publication
+
+on:
+  push:
+    branches: [main]
+  release:
+    types: [published]
+
+permissions: {}
+
+jobs:
+  dispatch:
+    if: github.repository == 'pangeo-fish/pangeo-fish'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify pangeo-fish-docker
+        env:
+          GH_TOKEN: ${{ secrets.DOCKER_IMAGE_DISPATCH_TOKEN }}
+          SOURCE_SHA: ${{ github.sha }}
+          RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || '' }}
+        run: |
+          set -euo pipefail
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::Set DOCKER_IMAGE_DISPATCH_TOKEN as documented in docs/docker-images.md"
+            exit 1
+          fi
+          jq -n --arg sha "$SOURCE_SHA" --arg release_tag "$RELEASE_TAG" \
+            '{event_type: "pangeo-fish-updated", client_payload: {sha: $sha, release_tag: $release_tag}}' \
+            | gh api --method POST repos/pangeo-fish/pangeo-fish-docker/dispatches --input -

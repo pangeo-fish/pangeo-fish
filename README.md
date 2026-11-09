@@ -26,6 +26,9 @@ Install directly from PyPI:
 pip install pangeo-fish
 ```
 
+For JupyterHub, prebuilt notebook images are published from `main` and GitHub
+Releases. See [Docker images](docs/docker-images.md) for image tags and automation setup.
+
 Or set up the development environment:
 
 ```bash
