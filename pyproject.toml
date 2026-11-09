@@ -27,6 +27,7 @@ dependencies = [
   # Zarr-Python 3 runtime; writers explicitly retain Zarr format 2.
   # Let the storage clients own their aiohttp/aiobotocore/numcodecs constraints.
   "zarr>=3.1.2,<4",
+  "numcodecs",
   "kerchunk>=0.2.9,<0.3",
   "fsspec>=2025.7.0,<2027",
   "s3fs>=2025.7.0,<2027",

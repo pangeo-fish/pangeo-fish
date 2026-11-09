@@ -61,7 +61,11 @@ def test_save_zarr_writes_dggs_attrs(tmp_path):
 
     helpers._save_zarr(ds, path)
 
-    attrs = dict(zarr.open_group(path + ".zarr", mode="r")["cell_ids"].attrs)
+    group = zarr.open_group(path + ".zarr", mode="r")
+    attrs = dict(group["cell_ids"].attrs)
+    assert group.attrs["dggs"]["coordinate"] == "cell_ids"
+    assert group.attrs["dggs"]["refinement_level"] == 2
+    assert group["pdf"].chunks == (1, 192)
     assert attrs["grid_name"] == "healpix"
     assert attrs["level"] == 2
     assert attrs["indexing_scheme"] == "nested"
@@ -78,7 +82,11 @@ def test_save_zarr_without_dggs_index(tmp_path):
 
     helpers._save_zarr(ds, path)
 
-    attrs = dict(zarr.open_group(path + ".zarr", mode="r")["cell_ids"].attrs)
+    group = zarr.open_group(path + ".zarr", mode="r")
+    attrs = dict(group["cell_ids"].attrs)
+    assert group.attrs["dggs"]["coordinate"] == "cell_ids"
+    assert group.attrs["dggs"]["refinement_level"] == 2
+    assert group["pdf"].chunks == (1, 192)
     assert attrs["grid_name"] == "healpix"
     assert attrs["ellipsoid"] == "sphere"
 
