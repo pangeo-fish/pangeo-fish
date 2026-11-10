@@ -75,13 +75,13 @@ _DGGS_CONVENTION = {
 def prepare_dggs_zarr(ds, *, cell_chunk_size=4096):
     """Prepare a HEALPix dataset for a new Zarr store without adding cells.
 
-    Write the DGGS v1 group metadata alongside the xdggs 0.6 coordinate
+    Write the DGGS v1 group metadata alongside the xdggs coordinate
     attributes. Use one time step per chunk and bounded spatial chunks, with
     cells last, so HTTP readers can fetch a single map. Sparse cells retain
     their order; these chunks need not coincide with HEALPix parent cells.
     The input dataset and its encodings are not modified.
     """
-    import healpix_geo
+    import healpix_geo.ellipsoid
     import xarray as xr
 
     if isinstance(ds, xr.DataArray):

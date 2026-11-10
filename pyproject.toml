@@ -37,12 +37,16 @@ dependencies = [
   "intake-xarray>=2,<3",
   # geographic & HEALPix
   "healpy",
+  # Numeric ellipsoid parameters used by DGGS export and xdggs 0.7.
+  "healpix-geo>=0.3.0",
   "cartopy==0.25.0",
   "geopandas",
   "shapely",
   "movingpandas==0.21.3",
   "xhealpixify",
-  "xdggs==0.6.0",
+  # xdggs 0.7 requires Python >=3.12; retain the 0.6 line on Python 3.11.
+  "xdggs>=0.6.0,<0.7; python_version < '3.12'",
+  "xdggs>=0.7.0,<0.8; python_version >= '3.12'",
   "healpix-convolution",
   "foscat>=2026.6.1,<2027",
   "cf_xarray>=0.10.4",

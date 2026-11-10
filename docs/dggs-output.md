@@ -5,7 +5,7 @@ carry the [DGGS Zarr v1 convention](https://github.com/zarr-conventions/dggs/blo
 The group's `dggs` attribute describes the level, indexing scheme, spatial
 dimension, cell coordinate and numeric reference ellipsoid. `zarr_conventions`
 identifies the versioned convention. The `cell_ids` coordinate also keeps the
-attributes needed by xdggs 0.6, so it can still be opened with `ds.dggs.decode()`.
+attributes needed by xdggs 0.6/0.7, so it can still be opened with `ds.dggs.decode()`.
 
 `prepare_dggs_zarr(ds)` prepares a dataset for a new store: cells last, one time
 step per chunk and up to 4096 cells per spatial chunk. It preserves the sparse
@@ -114,3 +114,12 @@ in their CORS headers. See the adjacent
 [validation record](https://pangeo-eosc-minioapi.vm.fedcloud.eu/todaka-pangeo-fish-demo/outputs/A19124/dggs-preview/2026-11-09-0609f50/validation.json)
 for the export details. An HTTP round trip alone does not verify the browser's
 rendering of the maps.
+
+## xdggs and Python compatibility
+
+Python 3.11 uses `xdggs>=0.6.0,<0.7`; Python 3.12 and newer use
+`xdggs>=0.7.0,<0.8`, because xdggs 0.7 requires Python 3.12. Both lines retain
+the coordinate metadata used by the inference workflow and write the same DGGS
+v1 group metadata for viewers. xdggs 0.7 may return a resolved numeric ellipsoid
+where 0.6 retained a name such as `"WGS84"`; the reference body is unchanged.
+The minor-version upper bounds limit automatic upgrades to the tested API lines.

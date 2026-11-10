@@ -10,6 +10,7 @@ from pathlib import Path
 import copernicusmarine
 import fsspec
 import healpix_geo as hg
+import healpix_geo.ellipsoid
 import holoviews as hv
 import imageio as iio
 import intake

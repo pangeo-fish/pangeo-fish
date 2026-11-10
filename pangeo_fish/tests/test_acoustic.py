@@ -4,6 +4,7 @@ import pint
 import pytest
 import xarray as xr
 import xdggs  # noqa: F401
+from healpix_geo.ellipsoid import resolve
 from xarray import DataTree
 
 from pangeo_fish.acoustic import emission_probability
@@ -171,3 +172,13 @@ def test_emission_probability(detections, dummy_tag, dummy_grid):
 
     actual_ = actual.compute()
     assert actual_["acoustic"].notnull().any()
+
+
+@pytest.mark.parametrize("name", ["sphere", "WGS84"])
+def test_unit_vector_accepts_resolved_ellipsoid(name):
+    from pangeo_fish.acoustic import _unit_vector_to_lonlat
+
+    vector = np.array([0.6, 0.1, 0.7])
+    named = _unit_vector_to_lonlat(vector, name)
+    resolved = _unit_vector_to_lonlat(vector, resolve(name))
+    np.testing.assert_allclose(resolved, named, rtol=0, atol=1e-12)
