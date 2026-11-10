@@ -54,6 +54,10 @@ jobs:
           - os: ubuntu-latest
             python-version: "3.11"
             constraints: "-c ci/requirements/minimum.txt"
+          # First Python version supported by xdggs 0.7.
+          - os: ubuntu-latest
+            python-version: "3.12"
+            constraints: ""
           - os: ubuntu-latest
             python-version: "3.13"
             constraints: ""

@@ -7,5 +7,6 @@ Welcome to pangeo-fish's documentation!
     installation
     pangeo-notebook
     format
+    dggs-output
     notebook
     api
