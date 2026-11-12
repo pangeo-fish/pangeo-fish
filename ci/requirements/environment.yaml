@@ -1,48 +1,10 @@
+# Runtime requirements come from pyproject.toml (installed by CI with dependencies).
 channels:
   - conda-forge
+  - nodefaults
 dependencies:
+  - python>=3.11
+  - pip
   - pytest
   - pytest-cov
-  - tqdm
-  # I/O
-  - fsspec
-  - h5netcdf
-  - intake-xarray
-  - zstandard
-  # units, bounds, and cf-conventions
-  - cf_xarray>=0.10.4
-  - duckdb
-  - pint-xarray
-  # general computing
-  - flox
-  - xarray<2025.04.0
-  - more-itertools
-  - cytoolz
-  - toolz
-  - scipy
-  - opt_einsum
-  - sparse
-  # geographic manipulations
-  - movingpandas<=0.21.3
-  - geopandas
-  - cartopy
-  - healpy
-  - scikit-learn
-  - astropy
-  # video processing
   - ffmpeg
-  - xmovie
-  # distributed computing
-  - dask
-  # code formatting
-  - rich
-  - rich-click
-  - pip
-  - pip:
-      - cdshealpix
-      - xdggs
-      - healpix-convolution>=0.1.2
-      - dask-hpcconfig
-      - imageio[ffmpeg]
-      # - git+https://github.com/iaocea/xarray-healpy.git@0ffca6058f4008f4f22f076e2d60787fcf32ac82
-      - xhealpixify

@@ -87,7 +87,12 @@ def position_pdf(grid, position, sigma):
 
 
 def maximum_parameter(ds, parameters):
-    earth_radius = xr.DataArray(parameters["earth_radius"], dims=None)
+    earth_radius = parameters.get("earth_radius")
+    if earth_radius is None:
+        from pangeo_fish.helpers import _earth_radius_from_grid
+
+        earth_radius = _earth_radius_from_grid(ds)
+    earth_radius = xr.DataArray(earth_radius, dims=None)
 
     timedelta = temporal_resolution(ds["time"]).pint.quantify().pint.to("h")
     grid_resolution = earth_radius * ds["resolution"].pint.quantify()
