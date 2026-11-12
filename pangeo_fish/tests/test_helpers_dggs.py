@@ -4,9 +4,20 @@ import pint
 import pytest
 import xarray as xr
 import zarr
+from healpix_geo.ellipsoid import resolve
 from pint_xarray import unit_registry as ureg
 
 from pangeo_fish import helpers
+
+
+def _assert_wgs84(ellipsoid):
+    # xdggs 0.6 can retain a name; 0.7 resolves it to numeric parameters.
+    if isinstance(ellipsoid, str):
+        ellipsoid = resolve(ellipsoid)
+    elif hasattr(ellipsoid, "to_dict"):
+        ellipsoid = ellipsoid.to_dict()
+    assert ellipsoid["semimajor_axis"] == pytest.approx(6378137.0)
+    assert ellipsoid["inverse_flattening"] == pytest.approx(298.257223563)
 
 
 def _healpix_dataset(level=2, ellipsoid="sphere"):
@@ -51,8 +62,8 @@ def test_to_healpix_keeps_ellipsoid():
     decoded = helpers.to_healpix(_healpix_dataset(ellipsoid="WGS84"))
 
     assert decoded.dggs.grid_info.level == 2
-    assert decoded.dggs.grid_info.ellipsoid == "WGS84"
-    assert decoded["cell_ids"].attrs["ellipsoid"] == "WGS84"
+    _assert_wgs84(decoded.dggs.grid_info.ellipsoid)
+    _assert_wgs84(decoded["cell_ids"].attrs["ellipsoid"])
 
 
 def test_save_zarr_writes_dggs_attrs(tmp_path):
@@ -61,14 +72,18 @@ def test_save_zarr_writes_dggs_attrs(tmp_path):
 
     helpers._save_zarr(ds, path)
 
-    attrs = dict(zarr.open_group(path + ".zarr", mode="r")["cell_ids"].attrs)
+    group = zarr.open_group(path + ".zarr", mode="r")
+    attrs = dict(group["cell_ids"].attrs)
+    assert group.attrs["dggs"]["coordinate"] == "cell_ids"
+    assert group.attrs["dggs"]["refinement_level"] == 2
+    assert group["pdf"].chunks == (1, 192)
     assert attrs["grid_name"] == "healpix"
     assert attrs["level"] == 2
     assert attrs["indexing_scheme"] == "nested"
-    assert attrs["ellipsoid"] == "WGS84"
+    _assert_wgs84(attrs["ellipsoid"])
 
     reopened = xr.open_zarr(path + ".zarr")
-    assert helpers.to_healpix(reopened).dggs.grid_info.ellipsoid == "WGS84"
+    _assert_wgs84(helpers.to_healpix(reopened).dggs.grid_info.ellipsoid)
 
 
 def test_save_zarr_without_dggs_index(tmp_path):
@@ -78,7 +93,11 @@ def test_save_zarr_without_dggs_index(tmp_path):
 
     helpers._save_zarr(ds, path)
 
-    attrs = dict(zarr.open_group(path + ".zarr", mode="r")["cell_ids"].attrs)
+    group = zarr.open_group(path + ".zarr", mode="r")
+    attrs = dict(group["cell_ids"].attrs)
+    assert group.attrs["dggs"]["coordinate"] == "cell_ids"
+    assert group.attrs["dggs"]["refinement_level"] == 2
+    assert group["pdf"].chunks == (1, 192)
     assert attrs["grid_name"] == "healpix"
     assert attrs["ellipsoid"] == "sphere"
 
@@ -113,7 +132,7 @@ def test_with_dggs_attrs_from_index_only():
     attrs = helpers._with_dggs_attrs(ds)["cell_ids"].attrs
 
     assert attrs["level"] == 2
-    assert attrs["ellipsoid"] == "WGS84"
+    _assert_wgs84(attrs["ellipsoid"])
 
 
 def test_compute_acoustic_pdf_writes_dggs_attrs():
@@ -135,4 +154,4 @@ def test_compute_acoustic_pdf_writes_dggs_attrs():
     assert attrs["grid_name"] == "healpix"
     assert attrs["level"] == 1
     assert attrs["indexing_scheme"] == "nested"
-    assert attrs["ellipsoid"] == "WGS84"
+    _assert_wgs84(attrs["ellipsoid"])

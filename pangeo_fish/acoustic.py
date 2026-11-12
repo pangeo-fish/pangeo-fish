@@ -23,7 +23,21 @@ _WGS84_E2 = 0.00669437999014  # excentricité² de WGS84
 
 
 def _unit_vector_to_lonlat(vector, ellipsoid):
-    """Cartesian vector -> lon/lat in degrees"""
+    """Cartesian vector -> lon/lat in degrees for a sphere or WGS84."""
+    # xdggs 0.7 resolves names into numeric dictionaries. Retain the existing
+    # conversions, recognizing reference bodies by their parameters, not names.
+    if hasattr(ellipsoid, "to_dict"):
+        ellipsoid = ellipsoid.to_dict()
+    if isinstance(ellipsoid, dict):
+        if "radius" in ellipsoid:
+            ellipsoid = "sphere"
+        else:
+            major = ellipsoid.get("semimajor_axis", ellipsoid.get("semi_major_axis", 0))
+            invf = ellipsoid.get("inverse_flattening", 0)
+            if np.isclose(major, 6378137.0, rtol=0, atol=1e-8) and np.isclose(
+                invf, 298.257223563, rtol=0, atol=1e-10
+            ):
+                ellipsoid = "WGS84"
     if isinstance(ellipsoid, str) and ellipsoid.lower() == "sphere":
         # comportement d'origine
         lon, lat = hpg.cartesian_to_lonlat(

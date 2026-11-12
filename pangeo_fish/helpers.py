@@ -10,6 +10,7 @@ from pathlib import Path
 import copernicusmarine
 import fsspec
 import healpix_geo as hg
+import healpix_geo.ellipsoid
 import holoviews as hv
 import imageio as iio
 import intake
@@ -57,7 +58,7 @@ from pangeo_fish.io import (
     save_trajectories,
 )
 from pangeo_fish.pdf import combine_emission_pdf, normal
-from pangeo_fish.storage import _with_dggs_attrs
+from pangeo_fish.storage import _with_dggs_attrs, prepare_dggs_zarr
 from pangeo_fish.tags import adapt_model_time, reshape_by_bins, to_time_slice
 from pangeo_fish.utils import haversine_distance, temporal_resolution
 from pangeo_fish.visualization import filter_by_states, plot_map, render_frame
@@ -126,7 +127,8 @@ def _save_zarr(ds: xr.Dataset, path: str, storage_options=None):
     """Helper for saving a .zarr array and warning in case of failure."""
     try:
         path_to_zarr = path + ".zarr" if not path.endswith(".zarr") else path
-        ds = _with_dggs_attrs(ds)
+        if "cell_ids" in ds.coords:
+            ds = prepare_dggs_zarr(ds)
         ds.to_zarr(
             path_to_zarr, mode="w", storage_options=storage_options, zarr_format=2
         )
