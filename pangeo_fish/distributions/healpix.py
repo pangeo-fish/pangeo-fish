@@ -5,14 +5,30 @@ from healpix_convolution.distances import _distances
 from healpix_convolution.kernels.gaussian import gaussian_function
 
 
-def normal_at(grid, pos, sigma):
+def _grid_info(grid):
     try:
-        grid_info = grid.dggs.grid_info
+        return grid.dggs.grid_info
     except ValueError as e:
         raise ValueError("invalid grid type") from e
 
-    if not pos:
-        return None
+
+def angular_distances(grid, pos):
+    """Angular distance (in radians) from the cell containing ``pos`` to every cell.
+
+    Parameters
+    ----------
+    grid : xarray.Dataset or xarray.DataArray
+        HEALPix grid decoded with ``xdggs``.
+    pos : mapping
+        Position with ``longitude`` and ``latitude`` (in degrees).
+
+    Returns
+    -------
+    distances : xarray.DataArray
+        The great-circle distance between the center of the cell containing
+        ``pos`` and the center of every cell of ``grid``, along ``cells``.
+    """
+    grid_info = _grid_info(grid)
 
     lon = pos["longitude"].data
     lat = pos["latitude"].data
@@ -26,6 +42,18 @@ def normal_at(grid, pos, sigma):
         grid_info=grid_info,
     )
 
-    pdf = gaussian_function(distances, sigma)
+    return xr.DataArray(
+        np.reshape(distances, (-1,)), dims="cells", coords={"cell_ids": coord}
+    )
 
-    return xr.DataArray(np.squeeze(pdf), dims="cells", coords={"cell_ids": coord})
+
+def normal_at(grid, pos, sigma):
+    _grid_info(grid)
+
+    if not pos:
+        return None
+
+    distances = angular_distances(grid, pos)
+    pdf = gaussian_function(np.reshape(distances.data, (1, -1)), sigma)
+
+    return distances.copy(data=np.reshape(pdf, (-1,)))

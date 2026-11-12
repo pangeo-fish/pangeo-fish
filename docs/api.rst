@@ -19,6 +19,7 @@ High-level Functions
    compute_diff
    open_diff_dataset
    regrid_dataset
+   check_event_position
    compute_emission_pdf
    compute_acoustic_pdf
    combine_pdfs
@@ -163,6 +164,7 @@ Distributions
    planar2d.create_covariances
    planar2d.normal_at
    healpix.normal_at
+   healpix.angular_distances
 
 
 Trajectory Generation
