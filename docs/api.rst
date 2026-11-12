@@ -177,6 +177,17 @@ Tag Record Preprocessing
    pressure_offset.correct_pressure_offset
 
 
+Tag Description
+---------------
+
+.. currentmodule:: pangeo_fish.describe
+.. autosummary::
+   :toctree: generated
+
+   describe_tag
+   format_description
+
+
 Visualization
 -------------
 
