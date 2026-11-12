@@ -17,6 +17,7 @@ High-level Functions
    plot_tag
    load_model
    compute_diff
+   diagnose_depth_vs_bathymetry
    open_diff_dataset
    regrid_dataset
    estimate_refinement_costs
@@ -111,6 +112,7 @@ Emission Computations
    pdf.normal
    pdf.combine_emission_pdf
    diff.diff_z
+   bathy.sample_max_depth
 
 
 Tides on HEALPix

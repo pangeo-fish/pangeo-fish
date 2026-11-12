@@ -292,3 +292,91 @@ def batch_compute_pdf_bathy(ds_lr, reshaped_tag, target_root: str, batch_size=50
     pdf_da_func = pdf_da_func.rename_vars({"cells": "cell_ids"})
 
     return pdf_da_func
+
+
+def sample_max_depth(elevation, latitude, longitude, *, window=None):
+    """Sample a bathymetry (e.g. GEBCO) at given positions, as positive depth.
+
+    Parameters
+    ----------
+    elevation : xarray.DataArray
+        Elevation on a regular ``lat`` / ``lon`` grid, in meters, negative
+        below sea level (GEBCO convention). The coordinates can be named
+        ``lat``/``lon`` or ``latitude``/``longitude``.
+    latitude, longitude : array-like or xarray.DataArray
+        Positions where the depth is needed, e.g. the cell centers of the model
+        grid (``diff_ds["latitude"]``, ``diff_ds["longitude"]``).
+    window : float, optional
+        Width (in degrees) of the box centred on each position. The deepest
+        bathymetry value within the box is returned, which is the relevant
+        value to decide whether a fish can reach a given depth somewhere in a
+        model cell. Use the model resolution (e.g. ``1 / 36`` for a 1/36°
+        grid). If ``None``, the nearest bathymetry value is returned.
+
+    Returns
+    -------
+    depth : xarray.DataArray or numpy.ndarray
+        Depth in meters (positive downwards; land is negative), with the shape
+        of ``latitude``. An :py:class:`xarray.DataArray` if ``latitude`` is one.
+    """
+    from scipy import ndimage
+
+    names = {"latitude": "lat", "longitude": "lon"}
+    elevation = elevation.rename(
+        {k: v for k, v in names.items() if k in elevation.dims}
+    )
+
+    lat = np.asarray(latitude, dtype="float64")
+    lon = np.asarray(longitude, dtype="float64")
+    finite = np.isfinite(lat) & np.isfinite(lon)
+    result = np.full(lat.shape, np.nan)
+    if not finite.any():
+        return _like(latitude, result)
+
+    half = 0.0 if window is None else float(window) / 2
+    dlat = float(np.abs(np.diff(elevation["lat"].values[:2])).item())
+    dlon = float(np.abs(np.diff(elevation["lon"].values[:2])).item())
+    margin_lat = half + 2 * dlat
+    margin_lon = half + 2 * dlon
+
+    lat_slice = slice(lat[finite].min() - margin_lat, lat[finite].max() + margin_lat)
+    lon_slice = slice(lon[finite].min() - margin_lon, lon[finite].max() + margin_lon)
+    if elevation["lat"].values[0] > elevation["lat"].values[-1]:
+        lat_slice = slice(lat_slice.stop, lat_slice.start)
+    if elevation["lon"].values[0] > elevation["lon"].values[-1]:
+        lon_slice = slice(lon_slice.stop, lon_slice.start)
+
+    subset = elevation.sel(lat=lat_slice, lon=lon_slice).transpose("lat", "lon")
+    depth = -np.asarray(subset.values, dtype="float64")
+    if window is not None:
+        size = (
+            2 * int(np.ceil(half / dlat)) + 1,
+            2 * int(np.ceil(half / dlon)) + 1,
+        )
+        filled = np.where(np.isnan(depth), -np.inf, depth)
+        depth = ndimage.maximum_filter(filled, size=size, mode="nearest")
+        depth = np.where(np.isinf(depth), np.nan, depth)
+
+    sub_lat = subset["lat"].values
+    sub_lon = subset["lon"].values
+    i = _nearest_index(sub_lat, lat[finite])
+    j = _nearest_index(sub_lon, lon[finite])
+    result[finite] = depth[i, j]
+
+    return _like(latitude, result)
+
+
+def _nearest_index(coord, values):
+    order = np.argsort(coord)
+    sorted_coord = coord[order]
+    pos = np.clip(np.searchsorted(sorted_coord, values), 1, sorted_coord.size - 1)
+    left = sorted_coord[pos - 1]
+    right = sorted_coord[pos]
+    pos = np.where(np.abs(values - left) <= np.abs(right - values), pos - 1, pos)
+    return order[pos]
+
+
+def _like(template, values):
+    if isinstance(template, xr.DataArray):
+        return template.copy(data=values).rename("depth").assign_attrs(units="m")
+    return values
