@@ -98,6 +98,8 @@ Tag/time Operations
    tags.to_time_slice
    tags.adapt_model_time
    tags.reshape_by_bins
+   pressure_offset.estimate_pressure_offset
+   pressure_offset.correct_pressure_offset
    cf.bounds_to_bins
    dataset_utils.broadcast_variables
 
