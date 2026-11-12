@@ -16,6 +16,7 @@ High-level Functions
    update_stations
    plot_tag
    load_model
+   list_reference_models
    compute_diff
    open_diff_dataset
    regrid_dataset

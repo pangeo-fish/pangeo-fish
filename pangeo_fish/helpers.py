@@ -72,6 +72,7 @@ __all__ = [
     "compute_detection_time_intervals",
     "plot_tag",
     "load_model",
+    "list_reference_models",
     "compute_diff",
     "open_diff_dataset",
     "regrid_dataset",
@@ -724,6 +725,252 @@ def load_model(
         )
     ).chunk({"time": chunk_time, "lat": -1, "lon": -1, "depth": -1})
     return reference_model
+
+
+#: Default candidates for :func:`list_reference_models`: daily-mean 3D
+#: potential temperature datasets (``dataset_id`` -> ``product_id``).
+REFERENCE_MODEL_CANDIDATES = {
+    "cmems_mod_glo_phy_my_0.083deg_P1D-m": "GLOBAL_MULTIYEAR_PHY_001_030",
+    "cmems_mod_ibi_phy-temp_my_0.027deg_P1D-m": "IBI_MULTIYEAR_PHY_005_002",
+    "cmems_mod_nws_phy-t_my_7km-3D_P1D-m": "NWSHELF_MULTIYEAR_PHY_004_009",
+    "cmems_mod_med_phy-temp_my_4.2km_P1D-m": "MEDSEA_MULTIYEAR_PHY_006_004",
+    "cmems_mod_bal_phy_my_P1D-m": "BALTICSEA_MULTIYEAR_PHY_003_011",
+    "cmems_mod_glo_phy-thetao_anfc_0.083deg_P1D-m": "GLOBAL_ANALYSISFORECAST_PHY_001_024",
+    "cmems_mod_ibi_phy_anfc_0.027deg-3D_P1D-m": "IBI_ANALYSISFORECAST_PHY_005_001",
+    "cmems_mod_nws_phy-tem_anfc_1.5km-3D_P1D-m": "NWSHELF_ANALYSISFORECAST_PHY_004_013",
+}
+
+_KM_PER_DEGREE = 111.32
+
+
+def _describe_version(dataset):
+    """Latest version of a described dataset (largest label)."""
+    return max(dataset.versions, key=lambda version: version.label or "")
+
+
+def _describe_part(version, name=None):
+    """Part chosen like ``copernicusmarine``: ``name``, else ``default``/first."""
+    if name is not None:
+        return next((part for part in version.parts if part.name == name), None)
+    return next(
+        (part for part in version.parts if part.name == "default"), version.parts[0]
+    )
+
+
+def _describe_variables(part):
+    """Variables of the ARCO service of a described part, by short name."""
+    for service in part.services:
+        if service.service_name in ("arco-geo-series", "static-arco"):
+            return {variable.short_name: variable for variable in service.variables}
+    return {}
+
+
+def _coordinate_extent(coordinate):
+    """Return ``(minimum, maximum, step)`` of a described coordinate."""
+    values = coordinate.values
+    if coordinate.minimum_value is not None and coordinate.maximum_value is not None:
+        minimum, maximum = coordinate.minimum_value, coordinate.maximum_value
+    elif values:
+        minimum, maximum = min(values), max(values)
+    else:
+        return None, None, None
+    step = coordinate.step
+    if step is None and values and len(values) > 1:
+        step = float(np.median(np.abs(np.diff(np.sort(values)))))
+    return float(minimum), float(maximum), None if step is None else float(step)
+
+
+def _describe_time(value, unit):
+    """Convert a described time value (e.g. ``milliseconds since 1970...``)."""
+    name, _, epoch = (unit or "milliseconds since 1970-01-01").partition(" since ")
+    epoch = pd.Timestamp(epoch.split("Z")[0].strip() or "1970-01-01")
+    units = {"milliseconds": "ms", "seconds": "s", "minutes": "min", "hours": "h"}
+    return epoch + pd.to_timedelta(value, unit=units.get(name.strip(), "ms"))
+
+
+def _bbox_share(bbox, lon_range, lat_range):
+    """Area-weighted share of ``bbox`` inside the model lon/lat extent."""
+    (lon0, lon1), (lat0, lat1) = bbox["longitude"], bbox["latitude"]
+    if lon_range[1] - lon_range[0] >= 359:  # global grid: any longitude
+        lon_overlap = lon1 - lon0
+    else:
+        lon_overlap = max(0.0, min(lon1, lon_range[1]) - max(lon0, lon_range[0]))
+    lat_low, lat_high = max(lat0, lat_range[0]), min(lat1, lat_range[1])
+    if lat_high <= lat_low or lon1 <= lon0 or lat1 <= lat0:
+        return 0.0
+
+    def band(low, high):
+        return np.sin(np.deg2rad(high)) - np.sin(np.deg2rad(low))
+
+    share = lon_overlap / (lon1 - lon0) * band(lat_low, lat_high) / band(lat0, lat1)
+    return float(np.clip(share, 0, 1))
+
+
+def _load_model_support(dataset_id, catalogue):
+    """Whether ``load_model`` can open ``dataset_id`` (catalogue check only).
+
+    ``catalogue`` maps ``dataset_id`` to described datasets of the same
+    product. Returns ``(supported, note)``.
+    """
+    temperature_id, ssh_id, static_id, static_part = _resolve_copernicus_datasets(
+        dataset_id
+    )
+    required = [(temperature_id, None, ["thetao"])]
+    if ssh_id == temperature_id:
+        required[0][2].append("zos")
+    else:
+        required.append((ssh_id, None, ["zos"]))
+    required.append((static_id, static_part, ["deptho", "mask"]))
+
+    for required_id, part_name, variables in required:
+        if required_id not in catalogue:
+            return False, f"companion dataset {required_id!r} not found"
+        part = _describe_part(_describe_version(catalogue[required_id]), part_name)
+        if part is None:
+            return False, f"{required_id!r} has no part {part_name!r}"
+        missing = sorted(set(variables) - set(_describe_variables(part)))
+        if missing == ["zos"] and required_id == temperature_id:
+            return False, "zos is in a separate dataset not mapped by load_model"
+        if missing:
+            return False, f"{required_id!r} lacks {', '.join(missing)}"
+    return True, ""
+
+
+def list_reference_models(
+    *,
+    bbox: dict[str, tuple[float, float]],
+    time_slice: slice,
+    candidates: dict[str, str] = None,
+) -> pd.DataFrame:
+    """List Copernicus Marine reference models covering a bbox and a period.
+
+    Only catalogue metadata is read (:func:`copernicusmarine.describe`), so no
+    login is required and no data is downloaded.
+
+    Parameters
+    ----------
+    bbox : dict
+        Spatial boundaries with keys ``longitude`` and ``latitude`` (degrees,
+        longitudes in ``[-180, 180]``). Other keys (``max_depth``) are ignored.
+    time_slice : slice
+        Period of the tag, e.g. ``slice("2023-05-03", "2023-06-08")``.
+    candidates : dict, optional
+        Mapping of ``dataset_id`` to ``product_id`` to check. Defaults to
+        :data:`REFERENCE_MODEL_CANDIDATES` (daily 3D temperature of GLORYS,
+        IBI, NWS, MED and BAL reanalyses and of the GLO, IBI and NWS
+        analysis/forecast products).
+
+    Returns
+    -------
+    table : pandas.DataFrame
+        One row per dataset with the grid spacing (``lon_step``/``lat_step``
+        in degrees, ``dx_km``/``dy_km`` at the bbox centre latitude), the
+        time coverage, ``bbox_share`` (area-weighted share of the bbox inside
+        the model extent), ``covers_bbox``, ``covers_period``, ``load_model``
+        (whether :func:`load_model` can open it directly with
+        ``copernicus_model_name``) and a ``note``. Rows are sorted with full
+        coverage and finest grids first.
+
+    Notes
+    -----
+    Coverage uses the rectangular lon/lat extent of the grid cell centres. It
+    does not account for land, so a fully "covered" bbox can still contain
+    few ocean cells. ``load_model`` support is a catalogue check (companion
+    SSH and static datasets and required variables exist), not a test open.
+    """
+    if candidates is None:
+        candidates = REFERENCE_MODEL_CANDIDATES
+    start = pd.Timestamp(time_slice.start).normalize()
+    stop = pd.Timestamp(time_slice.stop).normalize()
+    mid_lat = np.deg2rad(np.mean(bbox["latitude"]))
+
+    catalogues = {}
+    rows = []
+    for dataset_id, product_id in candidates.items():
+        row = {"dataset_id": dataset_id, "product_id": product_id}
+        if product_id not in catalogues:
+            try:
+                described = copernicusmarine.describe(
+                    product_id=product_id, disable_progress_bar=True
+                )
+                catalogues[product_id] = {
+                    dataset.dataset_id: dataset
+                    for product in described.products
+                    for dataset in product.datasets
+                }
+            except Exception as error:  # network or unknown product
+                catalogues[product_id] = error
+        catalogue = catalogues[product_id]
+        if isinstance(catalogue, Exception):
+            rows.append(row | {"note": f"describe failed: {catalogue}"})
+            continue
+        if dataset_id not in catalogue:
+            rows.append(row | {"note": "dataset not found in product"})
+            continue
+
+        version = _describe_version(catalogue[dataset_id])
+        variables = _describe_variables(_describe_part(version))
+        if "thetao" not in variables:
+            rows.append(row | {"note": "no thetao variable"})
+            continue
+        coords = {c.coordinate_id: c for c in variables["thetao"].coordinates}
+        lon_min, lon_max, lon_step = _coordinate_extent(coords["longitude"])
+        lat_min, lat_max, lat_step = _coordinate_extent(coords["latitude"])
+        time_min, time_max, _ = _coordinate_extent(coords["time"])
+        unit = coords["time"].coordinate_unit
+        time_start = _describe_time(time_min, unit)
+        time_end = _describe_time(time_max, unit)
+        share = _bbox_share(bbox, (lon_min, lon_max), (lat_min, lat_max))
+        supported, note = _load_model_support(dataset_id, catalogue)
+        rows.append(
+            row
+            | {
+                "version": version.label,
+                "lon_step": lon_step,
+                "lat_step": lat_step,
+                "dx_km": lon_step * _KM_PER_DEGREE * np.cos(mid_lat),
+                "dy_km": lat_step * _KM_PER_DEGREE,
+                "lon_range": (lon_min, lon_max),
+                "lat_range": (lat_min, lat_max),
+                "time_start": time_start.normalize(),
+                "time_end": time_end.normalize(),
+                "bbox_share": share,
+                "covers_bbox": share >= 0.999,
+                "covers_period": bool(time_start <= start and time_end >= stop),
+                "load_model": supported,
+                "note": note,
+            }
+        )
+
+    columns = [
+        "dataset_id",
+        "product_id",
+        "version",
+        "lon_step",
+        "lat_step",
+        "dx_km",
+        "dy_km",
+        "lon_range",
+        "lat_range",
+        "time_start",
+        "time_end",
+        "bbox_share",
+        "covers_bbox",
+        "covers_period",
+        "load_model",
+        "note",
+    ]
+    table = pd.DataFrame(rows).reindex(columns=columns)
+    for name in ("covers_bbox", "covers_period", "load_model"):
+        table[name] = table[name].fillna(False).astype(bool)
+    table = table.assign(_area=table["dx_km"] * table["dy_km"])
+    table = table.sort_values(
+        ["covers_period", "covers_bbox", "bbox_share", "_area"],
+        ascending=[False, False, False, True],
+        na_position="last",
+        kind="stable",
+    )
+    return table.drop(columns="_area").reset_index(drop=True)
 
 
 def compute_diff(
