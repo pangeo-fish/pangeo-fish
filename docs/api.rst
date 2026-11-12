@@ -17,6 +17,7 @@ High-level Functions
    plot_tag
    load_model
    compute_diff
+   diagnose_depth_vs_bathymetry
    open_diff_dataset
    regrid_dataset
    compute_emission_pdf
@@ -86,6 +87,7 @@ Emission Computations
    pdf.normal
    pdf.combine_emission_pdf
    diff.diff_z
+   bathy.sample_max_depth
 
 
 Tag/time Operations
