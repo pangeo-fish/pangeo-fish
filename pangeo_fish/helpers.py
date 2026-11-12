@@ -75,6 +75,7 @@ __all__ = [
     "compute_diff",
     "open_diff_dataset",
     "regrid_dataset",
+    "estimate_refinement_costs",
     "compute_emission_pdf",
     "compute_acoustic_pdf",
     "combine_pdfs",
@@ -1118,6 +1119,152 @@ def regrid_dataset(
                 RuntimeWarning,
             )
     return reshaped, figure
+
+
+#: Reference run used by :func:`estimate_refinement_costs` to scale run times:
+#: twaite shad tag A19845 with pangeo-fish 2026.11.0, refinement level 11,
+#: bbox lat 50.7–53.0, lon 1.5–5.08, 6,467 cells after regridding (land
+#: cells included), 36 daily
+#: steps, ``conv_method="LargeHealpixConv"``, single-threaded on a laptop.
+#: The run took "minutes"; ``minutes`` is an order of magnitude, not a
+#: measurement to rely on.
+REFERENCE_RUN = {"n_cells": 6467, "n_steps": 36, "minutes": 5.0}
+
+
+def _mask_at_cells(ocean_mask: xr.DataArray, lon, lat):
+    """Nearest value of a lat/lon ``ocean_mask`` at the given points."""
+    names = {
+        "lat": next(n for n in ("lat", "latitude") if n in ocean_mask.coords),
+        "lon": next(n for n in ("lon", "longitude") if n in ocean_mask.coords),
+    }
+    points = {
+        names["lat"]: xr.DataArray(lat, dims="points"),
+        names["lon"]: xr.DataArray(lon, dims="points"),
+    }
+    values = ocean_mask.sel(points, method="nearest").fillna(0).values
+    return values.astype(float) > 0.5
+
+
+def estimate_refinement_costs(
+    *,
+    bbox: dict[str, tuple[float, float]],
+    time_slice: slice = None,
+    n_steps: int = None,
+    time_step: str = "1D",
+    refinement_levels=range(8, 14),
+    ocean_mask: xr.DataArray = None,
+    ellipsoid="sphere",
+    n_arrays: int = 5,
+    reference: dict = None,
+) -> pd.DataFrame:
+    """Estimate grid resolution and cost of each HEALPix refinement level.
+
+    Use it before :func:`regrid_dataset` to choose ``refinement_level``
+    knowing the number of cells, the memory and a rough run time.
+
+    Parameters
+    ----------
+    bbox : dict
+        Spatial boundaries with keys ``longitude`` and ``latitude`` (degrees).
+    time_slice : slice, optional
+        Period of the tag. The number of time steps is the number of
+        ``time_step`` intervals in it, both ends included.
+    n_steps : int, optional
+        Number of time steps, used instead of ``time_slice``.
+    time_step : str, default: "1D"
+        Model time step (pandas frequency), used with ``time_slice``.
+    refinement_levels : iterable of int, default: ``range(8, 14)``
+        Levels to tabulate.
+    ocean_mask : xarray.DataArray, optional
+        Ocean mask on a regular lat/lon grid (coordinates ``lat``/``lon`` or
+        ``latitude``/``longitude``), e.g. ``model["H0"].notnull()`` or the
+        ``ocean_mask`` of :func:`compute_diff`. If given, the ocean share is
+        the fraction of cell centres whose nearest mask point is ocean.
+    ellipsoid : str, default: "sphere"
+        Ellipsoid of the HEALPix grid, as passed to :func:`regrid_dataset`.
+    n_arrays : int, default: 5
+        Number of ``(time, cells)`` float64 arrays held at the same time.
+        The forward-backward pass keeps the emission, the forward predictions
+        and states, and the backward predictions and smoothed states (5);
+        stacking briefly adds up to two more.
+    reference : dict, optional
+        Reference run with keys ``n_cells``, ``n_steps`` and ``minutes`` used to
+        scale run times. Defaults to :data:`REFERENCE_RUN`.
+
+    Returns
+    -------
+    table : pandas.DataFrame
+        One row per level with ``cell_size_km`` (square root of the cell area),
+        ``n_cells`` (cells intersecting the bbox, from
+        :func:`healpix_geo.nested.zone_coverage`), ``ocean_share`` and
+        ``n_ocean_cells`` (``NaN`` without ``ocean_mask``), ``n_steps``,
+        ``array_mb`` (one ``(time, cells)`` float64 array), ``memory_mb``
+        (``n_arrays`` of them), ``relative_cost`` (cells × steps relative to
+        the reference run) and ``runtime_minutes``. Memory and cost use
+        ``n_cells``: the regridding keeps land cells (as ``NaN``), so the
+        arrays span every cell, not only ocean cells.
+
+    Notes
+    -----
+    Cell counts and memory are exact for the cells covering the bbox; the
+    regridding keeps every cell reached by a model grid point, so the actual
+    count can differ by about 1 % (6,424 here against 6,467 in the reference
+    run at level 11).
+
+    ``runtime_minutes`` is only an indication: the reference time scaled
+    linearly with cells × steps. This holds for ``"LargeHealpixConv"``, whose
+    cost per prediction is roughly proportional to the number of cells.
+    With ``"HealpixConv"`` the kernel also grows with the level (about 4×
+    per level for a fixed maximum speed). Data download, the number of
+    optimiser iterations, plotting and hardware are not modelled.
+    """
+    if reference is None:
+        reference = REFERENCE_RUN
+    if n_steps is None:
+        if time_slice is None:
+            raise ValueError("Either `time_slice` or `n_steps` must be provided.")
+        n_steps = len(pd.date_range(time_slice.start, time_slice.stop, freq=time_step))
+
+    radius_km = earth_radius_from_ellipsoid(ellipsoid).to("km").magnitude
+    box = (
+        bbox["longitude"][0],
+        bbox["latitude"][0],
+        bbox["longitude"][1],
+        bbox["latitude"][1],
+    )
+    reference_size = reference["n_cells"] * reference["n_steps"]
+
+    rows = []
+    for level in refinement_levels:
+        level = int(level)
+        cell_ids, _, _ = hg.nested.zone_coverage(box, level, ellipsoid=ellipsoid)
+        n_cells = int(np.unique(cell_ids).size)
+        if ocean_mask is not None and n_cells:
+            lon, lat = hg.nested.healpix_to_lonlat(
+                np.unique(cell_ids), level, ellipsoid=ellipsoid
+            )
+            ocean_share = float(np.mean(_mask_at_cells(ocean_mask, lon, lat)))
+            n_ocean = int(round(ocean_share * n_cells))
+        else:
+            ocean_share, n_ocean = np.nan, np.nan
+        # land cells stay in the regridded grid (as NaN), so arrays span all cells
+        array_mb = n_cells * n_steps * 8 / 1e6
+        relative = n_cells * n_steps / reference_size
+        rows.append(
+            {
+                "refinement_level": level,
+                "cell_size_km": radius_km * np.sqrt(4 * np.pi / (12 * 4**level)),
+                "n_cells": n_cells,
+                "ocean_share": ocean_share,
+                "n_ocean_cells": n_ocean,
+                "n_steps": n_steps,
+                "array_mb": array_mb,
+                "memory_mb": n_arrays * array_mb,
+                "relative_cost": relative,
+                "runtime_minutes": relative * reference["minutes"],
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 def compute_emission_pdf(
