@@ -13,7 +13,6 @@ import sparse
 from tqdm import tqdm
 from scipy.stats import multivariate_normal
 
-
 #####################################################################
 #  Première partie: Extraction signal de marée par sinus
 #####################################################################
