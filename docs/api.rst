@@ -188,3 +188,14 @@ HMM Filtering
    forward
    backward
    forward_backward
+
+
+ETN Acoustic Detections
+-----------------------
+
+.. currentmodule:: pangeo_fish.etn_acoustic
+.. autosummary::
+   :toctree: generated
+
+   find_etn_acoustic_detections
+   ETNAcousticDetections
