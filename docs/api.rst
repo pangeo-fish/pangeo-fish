@@ -118,6 +118,17 @@ Track Start and End
    plot_track_bounds
 
 
+Tag Description
+---------------
+
+.. currentmodule:: pangeo_fish.describe
+.. autosummary::
+   :toctree: generated
+
+   describe_tag
+   format_description
+
+
 Visualization
 -------------
 
