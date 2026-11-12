@@ -234,3 +234,14 @@ Dry Cells
    count_dry_cells
    mask_dry_cells
    DryCellWarning
+
+
+ETN Acoustic Detections
+-----------------------
+
+.. currentmodule:: pangeo_fish.etn_acoustic
+.. autosummary::
+   :toctree: generated
+
+   find_etn_acoustic_detections
+   ETNAcousticDetections
