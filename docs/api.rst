@@ -50,6 +50,20 @@ I/O
    tz_convert
 
 
+ETN Archival Data
+-----------------
+
+.. currentmodule:: pangeo_fish.etn_archival
+.. autosummary::
+   :toctree: generated
+
+   open_etn_archival
+   write_tag
+   read_etn_archival_records
+   read_etn_animals
+   read_etn_sensor_ranges
+
+
 DGGS Zarr Output
 ----------------
 
