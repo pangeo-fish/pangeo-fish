@@ -72,11 +72,11 @@ docker run --rm --user root --entrypoint bash -e HOME=/tmp \
   ci/run_notebook_compatibility.sh
 ```
 
-Both workflows run for pull requests targeting `release`. Notebook compatibility
-also has a Monday 06:23 UTC schedule. GitHub only activates scheduled workflows
-present on the repository's default branch; when merging only into `release`,
-the workflow must also be added to the default branch to activate that schedule.
-Scheduled runs check out `release`.
+Both workflows run for pushes and pull requests targeting `main`, `DEV`, and
+`release`. Use `DEV` to validate integrated changes before promoting them to
+`main`. Notebook compatibility also has a Monday 06:23 UTC schedule that checks
+out `main`. GitHub activates the schedule from the repository's default branch,
+so this schedule change takes effect after it reaches `main`.
 
 On the local Mac, running the full suite reproduced a native `foscat`/PyTorch
 crash on both unchanged `release` and the migrated source after earlier tests;

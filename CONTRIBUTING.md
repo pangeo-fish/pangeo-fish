@@ -9,6 +9,14 @@ Thank you for your interest in contributing to **pangeo-fish**!
 - Commit your changes clearly and concisely.
 - Submit a Pull Request against the `main` branch.
 
+For coordinated integration testing, target `DEV` first. Unit tests and the
+pinned/latest Pangeo Notebook compatibility checks run on pushes to `DEV` and
+pull requests targeting it. Compare scientific results against a recorded
+`main` commit using identical inputs and parameters before promoting `DEV` to
+`main`. Run the base and complete demos manually on the selected branch when
+Copernicus Marine credentials are configured. Docker image publication remains
+triggered by `main` pushes and published GitHub Releases.
+
 ## Coding Standards
 
 - Follow existing coding conventions.

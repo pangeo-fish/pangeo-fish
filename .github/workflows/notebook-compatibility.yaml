@@ -2,11 +2,12 @@ name: Pangeo Notebook compatibility
 
 on:
   pull_request:
-    branches: [main, release, "fix/pangeo-notebook-compat"]
+    branches: [main, DEV, release, "fix/pangeo-notebook-compat"]
   push:
     branches:
       [
         main,
+        DEV,
         release,
         "fix/pangeo-notebook-compat",
         "feat/parameterized-demo-ci",
@@ -35,7 +36,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-          ref: ${{ github.event_name == 'schedule' && 'release' || '' }}
+          ref: ${{ github.event_name == 'schedule' && 'main' || '' }}
       - name: Resolve and record the image
         id: image
         shell: bash
