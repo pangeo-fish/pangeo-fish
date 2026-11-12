@@ -102,6 +102,20 @@ Tag/time Operations
    dataset_utils.broadcast_variables
 
 
+Track Start and End
+-------------------
+
+.. currentmodule:: pangeo_fish.track_bounds
+.. autosummary::
+   :toctree: generated
+
+   detect_start_of_track
+   detect_end_of_track
+   flag_records
+   pressure_activity
+   plot_track_bounds
+
+
 Visualization
 -------------
 
