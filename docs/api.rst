@@ -102,6 +102,18 @@ Tag/time Operations
    dataset_utils.broadcast_variables
 
 
+Tag Record Preprocessing
+------------------------
+
+.. currentmodule:: pangeo_fish
+.. autosummary::
+   :toctree: generated
+
+   track_bounds.detect_start_of_track
+   track_bounds.detect_end_of_track
+   track_bounds.flag_records
+
+
 Visualization
 -------------
 
@@ -113,6 +125,7 @@ Visualization
    render_frame
    plot_map
    plot_trajectories
+   plot_track_bounds
    filter_by_states
 
 
