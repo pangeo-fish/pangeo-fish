@@ -185,7 +185,6 @@ Tag Description
    :toctree: generated
 
    describe_tag
-   format_description
 
 
 Visualization
