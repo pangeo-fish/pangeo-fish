@@ -41,6 +41,7 @@ I/O
    :toctree: generated
 
    open_tag
+   write_tag
    open_copernicus_catalog
    open_copernicus_zarr
    prepare_dataset
@@ -48,6 +49,17 @@ I/O
    read_trajectories
    save_html_hvplot
    tz_convert
+
+
+ETN Archival Data
+-----------------
+
+.. currentmodule:: pangeo_fish.etn_archival
+.. autosummary::
+   :toctree: generated
+
+   open_etn_archival
+   read_etn_animals
 
 
 DGGS Zarr Output

@@ -96,6 +96,88 @@ def open_tag(root, name, storage_options=None):
     return xr.DataTree.from_dict(mapping)
 
 
+_TAG_TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+
+
+def _as_utc(values):
+    values = pd.DatetimeIndex(values)
+    if values.tz is None:
+        return values.tz_localize("UTC")
+    return values.tz_convert("UTC")
+
+
+def _write_tag_csv(fs, path, df):
+    # open_tag reads the times as time zone aware: write them as UTC
+    df = df.assign(
+        **{
+            column: _as_utc(values)
+            for column, values in df.items()
+            if pd.api.types.is_datetime64_any_dtype(values)
+        }
+    )
+    if isinstance(df.index, pd.DatetimeIndex):
+        df.index = _as_utc(df.index)
+    with fs.open(path, "w") as f:
+        df.to_csv(f, date_format=_TAG_TIME_FORMAT, na_rep="NA")
+
+
+def write_tag(tag, root, name, storage_options=None):
+    """Write a tag to the tag folder format read by :func:`open_tag`
+
+    Writes ``{name}/dst.csv``, ``{name}/tagging_events.csv`` and
+    ``{name}/metadata.json`` (the attributes of the root node) under ``root``,
+    ``{name}/acoustic.csv`` if the tag has an ``acoustic`` node and
+    ``stations.csv`` if it has a ``stations`` node (see ``docs/format.md``).
+    Times are written as UTC.
+
+    .. note::
+        ``stations.csv`` is at the root of the tag folders and is shared by all
+        the tags under ``root``: an existing file is replaced by the
+        ``stations`` node. To add stations to those of an existing file, merge
+        them into the tag first, e.g. with
+        :func:`pangeo_fish.helpers.update_stations`.
+
+    Parameters
+    ----------
+    tag : xarray.DataTree
+        The tag, e.g. from :func:`open_tag`.
+    root : str or fsspec.FSMap
+        The tag root. If not a mapper object, ``storage_options`` need
+        to contain the necessary access options.
+    name : str
+        The name of the tag folder (usually the DST name).
+    storage_options : mapping, optional
+        The storage options required to open the mapper. Only used if ``root`` is a url.
+    """
+    if isinstance(root, str):
+        if storage_options is None:
+            storage_options = {}
+        mapper = fsspec.get_mapper(root, **storage_options)
+    else:
+        mapper = root
+    fs = mapper.dirfs
+    fs.makedirs(name, exist_ok=True)
+
+    _write_tag_csv(fs, f"{name}/dst.csv", tag["dst"].to_dataset().to_dataframe())
+    tagging_events = tag["tagging_events"].to_dataset().to_dataframe()
+    _write_tag_csv(
+        fs,
+        f"{name}/tagging_events.csv",
+        tagging_events[["time", "latitude", "longitude"]],
+    )
+    if "acoustic" in tag.children:
+        _write_tag_csv(
+            fs, f"{name}/acoustic.csv", tag["acoustic"].to_dataset().to_dataframe()
+        )
+    if "stations" in tag.children:
+        stations = tag["stations"].to_dataset().to_dataframe()
+        _write_tag_csv(fs, "stations.csv", stations)
+
+    with fs.open(f"{name}/metadata.json", "w") as f:
+        json.dump(dict(tag.attrs), f, indent=2, default=str)
+        f.write("\n")
+
+
 def open_copernicus_catalog(cat, chunks=None):
     """Assemble the given intake catalog into a dataset
 
