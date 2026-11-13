@@ -1,4 +1,3 @@
-import matplotlib
 import numpy as np
 import pandas as pd
 import pytest
@@ -6,11 +5,8 @@ import xarray as xr
 
 from pangeo_fish import track_bounds
 
-matplotlib.use("Agg")
-
 RELEASE = pd.Timestamp("2023-05-03 11:07")
 STRANDED = pd.Timestamp("2023-05-08 08:17")
-PICKED_UP = pd.Timestamp("2023-05-09 11:00")
 SENSOR_RANGES = {"pressure": [0, 300], "temperature": [2, 34]}
 
 
@@ -63,9 +59,9 @@ def synthetic_tag(*, in_air_before=True, end="stranded", seed=0, sensor_ranges=N
     return ds
 
 
-def test_pressure_activity():
+def test_flag_records_activity():
     ds = synthetic_tag()
-    activity = track_bounds.pressure_activity(ds)
+    activity = track_bounds.flag_records(ds)["activity"]
 
     assert activity.sizes == ds.sizes
     assert float(activity.sel(time=slice("2023-05-04", "2023-05-07")).median()) > 0.5
@@ -111,77 +107,98 @@ def test_detect_start_of_track_in_water_from_first_record():
     assert actual["pre_release_level"] is None
 
 
-def test_detect_end_of_track_stranded():
-    ds = synthetic_tag(end="stranded")
-    actual = track_bounds.detect_end_of_track(ds)
-
-    assert abs(actual["end"] - STRANDED) <= pd.Timedelta("5min")
-    assert actual["end"] < STRANDED
-    assert "out of the water" in actual["likely_cause"]
-    assert actual["evidence"]["temperature_daily_range_during"] > 5
-    assert actual["warning"] is None
-    assert actual["parameters"]["min_duration"] == "12h"
-
-
-def test_detect_end_of_track_seabed():
-    ds = synthetic_tag(end="seabed")
-    actual = track_bounds.detect_end_of_track(ds, start=RELEASE)
-
-    assert abs(actual["end"] - STRANDED) <= pd.Timedelta("1h")
-    assert "no vertical movement" in actual["likely_cause"]
-
-
-def test_detect_end_of_track_sensor_failure():
+def sensor_failure_tree():
     ds = synthetic_tag(end="sensor_failure")
-    tree = xr.DataTree.from_dict(
+    return xr.DataTree.from_dict(
         {
             "/": xr.Dataset(attrs={"sensor_ranges": SENSOR_RANGES}),
             "dst": ds,
         }
     )
-    actual = track_bounds.detect_end_of_track(tree)
-
-    assert abs(actual["end"] - STRANDED) <= pd.Timedelta("5min")
-    assert "sensor range" in actual["likely_cause"]
 
 
-def test_detect_end_of_track_not_found():
-    ds = synthetic_tag(end="none")
-    actual = track_bounds.detect_end_of_track(ds)
-
-    assert actual["end"] is None
-    assert "active until the last record" in actual["reason"]
-
-
-def test_detect_end_of_track_short_rest_is_ignored():
-    ds = synthetic_tag(end="none")
-    # 3 h without vertical movement in the middle of the track
-    rest = slice("2023-05-05 02:00", "2023-05-05 05:00")
-    ds["pressure"].loc[{"time": rest}] = 12.0
-    actual = track_bounds.detect_end_of_track(ds)
-
-    assert actual["end"] is None
-
-
-def test_detect_end_of_track_resumed_activity_warning():
-    ds = synthetic_tag(end="seabed")
-    # active again for a day after the end
-    revival = slice(STRANDED + pd.Timedelta("1D"), STRANDED + pd.Timedelta("2D"))
-    swimming = synthetic_tag(end="none")["pressure"].sel(time=revival)
-    ds["pressure"].loc[{"time": revival}] = swimming.to_numpy()
-    actual = track_bounds.detect_end_of_track(ds, start=RELEASE)
-
-    assert abs(actual["end"] - STRANDED) <= pd.Timedelta("1h")
-    assert actual["warning"] is not None
-
-
-def test_plot_track_bounds():
-    ds = synthetic_tag()
-    start = track_bounds.detect_start_of_track(ds)
-    end = track_bounds.detect_end_of_track(ds, start=start["start"])
-    fig = track_bounds.plot_track_bounds(
-        ds, start, end, events={"release": RELEASE, "recapture": PICKED_UP}
+class TestDetectEndOfTrack:
+    @pytest.mark.parametrize(
+        ["make_tag", "start", "tolerance", "expected_cause"],
+        [
+            pytest.param(
+                lambda: synthetic_tag(end="stranded"),
+                None,
+                "5min",
+                "out_of_water",
+                id="stranded",
+            ),
+            pytest.param(
+                lambda: synthetic_tag(end="seabed"),
+                RELEASE,
+                "1h",
+                "no_vertical_movement",
+                id="seabed",
+            ),
+            pytest.param(
+                sensor_failure_tree,
+                None,
+                "5min",
+                "out_of_sensor_range",
+                id="sensor-failure",
+            ),
+        ],
     )
+    def test_cause(self, make_tag, start, tolerance, expected_cause):
+        actual = track_bounds.detect_end_of_track(make_tag(), start=start)
 
-    assert len(fig.axes) == 2
-    matplotlib.pyplot.close(fig)
+        assert abs(actual["end"] - STRANDED) <= pd.Timedelta(tolerance)
+        assert actual["likely_cause"] == expected_cause
+
+    def test_stranded_details(self):
+        ds = synthetic_tag(end="stranded")
+        actual = track_bounds.detect_end_of_track(ds)
+
+        assert actual["end"] < STRANDED
+        assert actual["evidence"]["temperature_daily_range_during"] > 5
+        assert actual["warning"] is None
+        assert actual["parameters"]["min_duration"] == "12h"
+
+    def test_not_found(self):
+        ds = synthetic_tag(end="none")
+        actual = track_bounds.detect_end_of_track(ds)
+
+        assert actual["end"] is None
+        assert actual["likely_cause"] is None
+        assert "active until the last record" in actual["reason"]
+
+    def test_short_rest_is_ignored(self):
+        ds = synthetic_tag(end="none")
+        # 3 h without vertical movement in the middle of the track
+        rest = slice("2023-05-05 02:00", "2023-05-05 05:00")
+        ds["pressure"].loc[{"time": rest}] = 12.0
+        actual = track_bounds.detect_end_of_track(ds)
+
+        assert actual["end"] is None
+
+    def test_resumed_activity_warning(self):
+        ds = synthetic_tag(end="seabed")
+        # active again for a day after the end
+        revival = slice(STRANDED + pd.Timedelta("1D"), STRANDED + pd.Timedelta("2D"))
+        swimming = synthetic_tag(end="none")["pressure"].sel(time=revival)
+        ds["pressure"].loc[{"time": revival}] = swimming.to_numpy()
+        actual = track_bounds.detect_end_of_track(ds, start=RELEASE)
+
+        assert abs(actual["end"] - STRANDED) <= pd.Timedelta("1h")
+        assert actual["warning"] is not None
+
+    def test_start_detection_uses_the_same_thresholds(self, monkeypatch):
+        received = {}
+        detect_start = track_bounds.detect_start_of_track
+
+        def spy(tag_log, **kwargs):
+            received.update(kwargs)
+            return detect_start(tag_log, **kwargs)
+
+        monkeypatch.setattr(track_bounds, "detect_start_of_track", spy)
+        track_bounds.detect_end_of_track(
+            synthetic_tag(), max_gap="10min", level_change_threshold=0.8
+        )
+
+        assert received["max_gap"] == "10min"
+        assert received["level_change_threshold"] == 0.8
