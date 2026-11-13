@@ -480,20 +480,72 @@ def _open_intake_catalog(yaml_url: str, chunks: dict = None):
     return model
 
 
+# Products whose temperature, SSH and static fields live in separate Copernicus
+# Marine datasets. Key: temperature ``dataset_id``; value: (SSH ``dataset_id``,
+# static ``dataset_id``, static ``dataset_part``). All of them expose
+# ``deptho`` and ``mask`` in the ``bathy`` part of the static dataset.
+_COPERNICUS_SPLIT_PRODUCTS = {
+    # IBI reanalysis, daily
+    "cmems_mod_ibi_phy-temp_my_0.027deg_P1D-m": (
+        "cmems_mod_ibi_phy-ssh_my_0.027deg_P1D-m",
+        "cmems_mod_ibi_phy_my_0.027deg-3D_static",
+        "bathy",
+    ),
+    # IBI analysis/forecast, hourly 3D (``zos`` only in the 2D dataset)
+    "cmems_mod_ibi_phy_anfc_0.027deg-3D_PT1H-m": (
+        "cmems_mod_ibi_phy_anfc_0.027deg-2D_PT1H-m",
+        "cmems_mod_ibi_phy_anfc_0.027deg-3D_static",
+        "bathy",
+    ),
+    # North-West European Shelf analysis/forecast, hourly 3D
+    "cmems_mod_nws_phy-tem_anfc_1.5km-3D_PT1H-i": (
+        "cmems_mod_nws_phy-ssh_anfc_1.5km-2D_PT1H-i",
+        "cmems_mod_nws_phy_anfc_1.5km_static",
+        "bathy",
+    ),
+}
+
+
 def _resolve_copernicus_datasets(dataset_id: str):
     """Return temperature, SSH, static IDs and the optional static part.
 
-    Only the IBI daily reanalysis has an explicit split-product mapping;
-    other products retain the existing combined-dataset/static convention.
+    Products listed in ``_COPERNICUS_SPLIT_PRODUCTS`` have an explicit
+    split-product mapping; other products retain the existing
+    combined-dataset/static convention.
     """
-    if dataset_id == "cmems_mod_ibi_phy-temp_my_0.027deg_P1D-m":
-        return (
-            dataset_id,
-            "cmems_mod_ibi_phy-ssh_my_0.027deg_P1D-m",
-            "cmems_mod_ibi_phy_my_0.027deg-3D_static",
-            "bathy",
-        )
+    if dataset_id in _COPERNICUS_SPLIT_PRODUCTS:
+        ssh_id, static_id, static_part = _COPERNICUS_SPLIT_PRODUCTS[dataset_id]
+        return dataset_id, ssh_id, static_id, static_part
     return dataset_id, dataset_id, dataset_id.rsplit("_", 1)[0] + "_static", None
+
+
+def _copernicus_is_hourly(dataset_id: str) -> bool:
+    """Whether the Copernicus Marine ``dataset_id`` is an hourly (``PT1H``) product."""
+    return "_PT1H" in dataset_id or "-PT1H" in dataset_id
+
+
+def _copernicus_time_bounds(dataset_id, time_slice, tag_log):
+    """Return ``start_datetime`` and ``end_datetime`` for ``open_dataset``.
+
+    Daily products are bounded at day resolution. Hourly products are bounded
+    at second resolution; as for ``xarray`` partial string indexing, a ``stop``
+    given as a date (e.g. ``"2021-06-03"``) includes that whole day.
+    """
+    hourly = _copernicus_is_hourly(dataset_id)
+    unit = "s" if hourly else "D"
+    if time_slice is not None and time_slice.start is not None:
+        start = np.datetime64(time_slice.start)
+        stop = np.datetime64(time_slice.stop)
+        if hourly and np.datetime_data(stop.dtype)[0] == "D":
+            stop = stop + np.timedelta64(1, "D") - np.timedelta64(1, "s")
+    elif tag_log is not None:
+        start, stop = tag_log.time.values[0], tag_log.time.values[-1]
+    else:
+        raise ValueError("Either `time_slice` or `tag_log` must be provided.")
+    return (
+        np.datetime_as_string(start, unit=unit),
+        np.datetime_as_string(stop, unit=unit),
+    )
 
 
 def _align_copernicus_coordinates(reference, other, dataset_id):
@@ -536,6 +588,39 @@ def _align_copernicus_coordinates(reference, other, dataset_id):
     return other
 
 
+def _warn_if_period_clipped(dataset_id, times, start_datetime, end_datetime):
+    """Warn when the data returned starts later or ends earlier than requested."""
+    if not len(times):
+        return
+    first, last = times[0], times[-1]
+    # one time step of tolerance: a date-only bound need not hit a data time
+    step = times[1] - times[0] if len(times) > 1 else np.timedelta64(0, "s")
+    if (
+        first - np.datetime64(start_datetime) > step
+        or np.datetime64(end_datetime) - last > step
+    ):
+        warnings.warn(
+            f"Copernicus dataset {dataset_id!r} only covers "
+            f"{np.datetime_as_string(first, unit='s')} to "
+            f"{np.datetime_as_string(last, unit='s')}, which is narrower than the "
+            f"requested period ({start_datetime} to {end_datetime}); the model "
+            "is restricted to the period covered.",
+            category=UserWarning,
+        )
+
+
+def _mask_land_depth(static):
+    """Set ``deptho`` to NaN on land.
+
+    Some products (e.g. the North-West European Shelf analysis/forecast) store
+    a depth value on land cells, which are then masked out in ``mask`` only.
+    ``mask`` is positive on ocean cells and NaN or zero on land.
+    """
+    mask = static["mask"]
+    ocean = (mask.isel(depth=0, drop=True) if "depth" in mask.dims else mask) > 0
+    return static.assign(deptho=static["deptho"].where(ocean))
+
+
 def _open_copernicus_model(
     copernicus_model_name: str,
     bbox: dict[str, tuple[float, float]],
@@ -549,15 +634,18 @@ def _open_copernicus_model(
     Parameters
     ----------
     copernicus_model_name : str
-        Copernicus Marine ``dataset_id`` for the daily-mean physics product
-        (e.g. ``"cmems_mod_glo_phy_my_0.083deg_P1D-m"``). The matching static
-        product is opened to retrieve ``deptho`` and ``mask``. IBI daily
-        reanalysis resolves separate temperature/SSH IDs and static ``bathy``
-        fields internally; callers still provide just the temperature ID.
+        Copernicus Marine ``dataset_id`` for the physics product (e.g.
+        ``"cmems_mod_glo_phy_my_0.083deg_P1D-m"``). The matching static
+        product is opened to retrieve ``deptho`` and ``mask``. The IBI daily
+        reanalysis and the hourly (``PT1H``) 3D IBI and North-West European
+        Shelf analysis/forecast products resolve separate temperature/SSH IDs
+        and static ``bathy`` fields internally; callers still provide just the
+        temperature ID. Hourly products are requested at hourly resolution.
     bbox : dict
         Spatial boundaries with keys ``longitude`` and ``latitude``.
     time_slice : slice
-        Time slice used to bound ``start_datetime`` / ``end_datetime``. If
+        Time slice used to bound ``start_datetime`` / ``end_datetime`` (day
+        resolution for daily products, second resolution for hourly ones). If
         ``None``, the full extent of ``tag_log`` is used.
     tag_log : xarray.Dataset, optional
         DST data; used as fallback when ``time_slice`` is ``None``.
@@ -571,16 +659,9 @@ def _open_copernicus_model(
         copernicus_model_name
     )
 
-    if time_slice is not None and time_slice.start is not None:
-        start_datetime = np.datetime_as_string(
-            np.datetime64(time_slice.start), unit="D"
-        )
-        end_datetime = np.datetime_as_string(np.datetime64(time_slice.stop), unit="D")
-    elif tag_log is not None:
-        start_datetime = np.datetime_as_string(tag_log.time.values[0], unit="D")
-        end_datetime = np.datetime_as_string(tag_log.time.values[-1], unit="D")
-    else:
-        raise ValueError("Either `time_slice` or `tag_log` must be provided.")
+    start_datetime, end_datetime = _copernicus_time_bounds(
+        temperature_id, time_slice, tag_log
+    )
 
     spatial = dict(
         minimum_longitude=bbox["longitude"][0],
@@ -610,8 +691,23 @@ def _open_copernicus_model(
     )
     datasets = [temperature]
     if split:
-        ssh = open_fields(ssh_id, ["zos"], **temporal)
-        if "time" not in ssh.coords or "time" not in temperature.coords:
+        if "time" not in temperature.coords:
+            raise ValueError(
+                f"Copernicus dataset {temperature_id!r}: missing time coordinate."
+            )
+        # The temperature product may start later than the SSH one (and than the
+        # requested period): request SSH over the temperature time range only.
+        temperature_times = temperature["time"].values
+        _warn_if_period_clipped(
+            temperature_id, temperature_times, start_datetime, end_datetime
+        )
+        unit = "s" if _copernicus_is_hourly(temperature_id) else "D"
+        ssh_temporal = dict(
+            start_datetime=np.datetime_as_string(temperature_times[0], unit=unit),
+            end_datetime=np.datetime_as_string(temperature_times[-1], unit=unit),
+        )
+        ssh = open_fields(ssh_id, ["zos"], **ssh_temporal)
+        if "time" not in ssh.coords:
             raise ValueError(f"Copernicus dataset {ssh_id!r}: missing time coordinate.")
         datasets.append(_align_copernicus_coordinates(temperature, ssh, ssh_id))
 
@@ -619,6 +715,7 @@ def _open_copernicus_model(
     # mask(depth, latitude, longitude), as well as unused deptho_lev.
     static_options = {"dataset_part": static_part} if static_part else {}
     static = open_fields(static_id, ["deptho", "mask"], **static_options)
+    static = _mask_land_depth(static)
     datasets.append(_align_copernicus_coordinates(temperature, static, static_id))
     ds_all = xr.merge(datasets, compat="no_conflicts", join="exact")
     ds_all = ds_all.rename({"latitude": "lat", "longitude": "lon"})
