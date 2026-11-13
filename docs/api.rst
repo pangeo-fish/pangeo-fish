@@ -54,6 +54,20 @@ I/O
 ETN Archival Data
 -----------------
 
+
+ETN Acoustic Detections
+-----------------------
+
+.. currentmodule:: pangeo_fish.etn_acoustic
+.. autosummary::
+   :toctree: generated
+
+   find_etn_acoustic_detections
+
+
+DGGS Zarr Output
+----------------
+
 .. currentmodule:: pangeo_fish.etn_archival
 .. autosummary::
    :toctree: generated
@@ -245,3 +259,5 @@ ETN Acoustic Detections
 
    find_etn_acoustic_detections
    ETNAcousticDetections
+
+
