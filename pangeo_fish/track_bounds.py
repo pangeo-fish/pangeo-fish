@@ -31,6 +31,17 @@ DEFAULTS = {
 }
 
 
+def _timedelta(value):
+    """``pd.Timedelta(value)``, parsing strings like ``"30min"`` with ``pd.to_timedelta``.
+
+    With pandas < 3 and numpy >= 2.5, ``pd.Timedelta("30min")`` creates a
+    timedelta64 with the deprecated generic unit (DeprecationWarning).
+    """
+    if isinstance(value, str):
+        return pd.to_timedelta([value])[0]
+    return pd.Timedelta(value)
+
+
 def _as_dataset(tag_log):
     """Return the records as a Dataset (accepts a tag DataTree or a Dataset)."""
     if isinstance(tag_log, xr.DataTree):
@@ -173,7 +184,7 @@ def _runs(mask, max_gap):
     starts = np.flatnonzero(edges == 1)
     stops = np.flatnonzero(edges == -1) - 1
 
-    max_gap = pd.Timedelta(max_gap)
+    max_gap = _timedelta(max_gap)
     runs = []
     for start, stop in zip(index[starts], index[stops]):
         if runs and start - runs[-1][1] <= max_gap:
@@ -287,7 +298,7 @@ def detect_start_of_track(
     active_runs = [
         (first, last)
         for first, last in _runs(~flags["suspect"], max_gap)
-        if last - first >= pd.Timedelta(min_active_duration)
+        if last - first >= _timedelta(min_active_duration)
     ]
     if not active_runs:
         result["reason"] = (
@@ -297,7 +308,7 @@ def detect_start_of_track(
 
     run_start = active_runs[0][0]
     first_record = df.index[0]
-    window_ = pd.Timedelta(window)
+    window_ = _timedelta(window)
     if run_start - first_record <= window_:
         result["start"] = first_record
         result["reason"] = "the tag is active from the first record (already in water?)"
@@ -459,7 +470,7 @@ def detect_end_of_track(
         (first, last)
         for first, last in _runs(flags["suspect"], max_gap)
         if first > start
-        and (last - first >= pd.Timedelta(min_duration) or last == last_record)
+        and (last - first >= _timedelta(min_duration) or last == last_record)
     ]
     if not candidates:
         result["reason"] = (
@@ -469,7 +480,7 @@ def detect_end_of_track(
         return result
 
     first, last = candidates[0]
-    window_ = pd.Timedelta(window)
+    window_ = _timedelta(window)
     pressure = df["pressure"]
     level = float(pressure[first : first + window_].median())
     search = pressure[
@@ -479,7 +490,7 @@ def detect_end_of_track(
     end = moved.index[-1] if not moved.empty else first - pd.Timedelta(1, "ns")
     end = pressure.index[pressure.index <= end][-1]
 
-    inactive = flags.loc[first : first + pd.Timedelta(min_duration)]
+    inactive = flags.loc[first : first + _timedelta(min_duration)]
     temperature = df["temperature"] if "temperature" in df else None
     evidence = {
         "fraction_inactive": float(inactive["inactive"].mean()),
@@ -488,12 +499,12 @@ def detect_end_of_track(
             inactive["temperature_outside_water_range"].mean()
         ),
         "temperature_daily_range_before": (
-            _daily_range(temperature[first - pd.Timedelta("3D") : first])
+            _daily_range(temperature[first - pd.Timedelta(3, "D") : first])
             if temperature is not None
             else None
         ),
         "temperature_daily_range_during": (
-            _daily_range(temperature[first : min(last, first + pd.Timedelta("3D"))])
+            _daily_range(temperature[first : min(last, first + pd.Timedelta(3, "D"))])
             if temperature is not None
             else None
         ),
@@ -504,7 +515,7 @@ def detect_end_of_track(
         ),
         "longest_active_period_after_hours": max(
             [
-                (stop - begin) / pd.Timedelta("1h")
+                (stop - begin) / pd.Timedelta(1, "h")
                 for begin, stop in _runs(~flags.loc[last:, "suspect"], max_gap)
             ],
             default=0.0,
@@ -523,7 +534,7 @@ def detect_end_of_track(
 
     warning = None
     longest = evidence["longest_active_period_after_hours"]
-    min_duration_hours = pd.Timedelta(min_duration) / pd.Timedelta("1h")
+    min_duration_hours = _timedelta(min_duration) / pd.Timedelta(1, "h")
     if (
         evidence["fraction_active_after"] > resumed_activity_warning
         or longest >= min_duration_hours
@@ -543,7 +554,7 @@ def detect_end_of_track(
             "warning": warning,
             "reason": (
                 f"inactive from {first} to {last} "
-                f"({(last - first) / pd.Timedelta('1h'):.1f} h)"
+                f"({(last - first) / pd.Timedelta(1, 'h'):.1f} h)"
             ),
         }
     )
