@@ -12,7 +12,7 @@ def _grid_info(grid):
         raise ValueError("invalid grid type") from e
 
 
-def angular_distances(grid, pos):
+def _angular_distances(grid, pos):
     """Angular distance (in radians) from the cell containing ``pos`` to every cell.
 
     Parameters
@@ -53,7 +53,7 @@ def normal_at(grid, pos, sigma):
     if not pos:
         return None
 
-    distances = angular_distances(grid, pos)
+    distances = _angular_distances(grid, pos)
     pdf = gaussian_function(np.reshape(distances.data, (1, -1)), sigma)
 
     return distances.copy(data=np.reshape(pdf, (-1,)))

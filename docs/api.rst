@@ -20,7 +20,6 @@ High-level Functions
    open_diff_dataset
    regrid_dataset
    estimate_refinement_costs
-   check_event_position
    compute_emission_pdf
    compute_acoustic_pdf
    combine_pdfs
@@ -33,6 +32,15 @@ High-level Functions
    render_frames
    render_distributions
 
+
+Diagnostics
+-----------
+
+.. currentmodule:: pangeo_fish.diagnostics
+.. autosummary::
+   :toctree: generated
+
+   check_event_position
 
 
 I/O
@@ -212,7 +220,6 @@ Distributions
    planar2d.create_covariances
    planar2d.normal_at
    healpix.normal_at
-   healpix.angular_distances
 
 
 Trajectory Generation
