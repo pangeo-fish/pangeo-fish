@@ -102,6 +102,17 @@ Tag/time Operations
    dataset_utils.broadcast_variables
 
 
+Tag Record Preprocessing
+------------------------
+
+.. currentmodule:: pangeo_fish
+.. autosummary::
+   :toctree: generated
+
+   pressure_offset.estimate_pressure_offset
+   pressure_offset.correct_pressure_offset
+
+
 Visualization
 -------------
 
