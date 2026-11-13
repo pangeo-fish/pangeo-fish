@@ -9,8 +9,9 @@ and this offset matters for coastal fish and for depth-dependent comparisons
 is known to be in the air (before the release, after the recovery), and
 :py:func:`correct_pressure_offset` subtracts it, recording the correction in the
 attributes. The in-air periods can be found with
-``pangeo_fish.track_bounds.detect_start_of_track`` (``pre_release_period``), from
-the tagging events, or by looking at the records.
+``pangeo_fish.track_bounds.detect_start_of_track`` (``pre_release_period``, pass
+it as ``slice(*pre_release_period)``), from the tagging events, or by looking at the
+records.
 """
 
 import numpy as np
@@ -26,33 +27,42 @@ def _as_dataset(tag_log):
     return tag_log
 
 
-def _segments(in_air, time):
-    """Normalize ``in_air`` to a list of (first, last) timestamps."""
-    if isinstance(in_air, xr.DataArray):
-        mask = in_air.reindex(time=time, fill_value=False).to_series().astype(bool)
+def _segments(periods, time, *, name):
+    """Normalize ``periods`` to a list of (first, last) timestamps sorted by start.
+
+    ``periods`` is a slice, a list of slices or a boolean DataArray along ``time``.
+    """
+    if isinstance(periods, xr.DataArray):
+        if periods.dtype != bool or periods.dims != ("time",):
+            raise TypeError(
+                f"{name} as a DataArray must be a boolean mask along 'time', "
+                f"got dtype {periods.dtype} and dims {periods.dims}"
+            )
+        mask = periods.reindex(time=time, fill_value=False).to_series().astype(bool)
         values = mask.to_numpy().astype(int)
         edges = np.diff(np.concatenate([[0], values, [0]]))
         starts = np.flatnonzero(edges == 1)
         stops = np.flatnonzero(edges == -1) - 1
         return [(mask.index[a], mask.index[b]) for a, b in zip(starts, stops)]
 
-    if isinstance(in_air, slice) or (
-        isinstance(in_air, tuple)
-        and len(in_air) == 2
-        and not isinstance(in_air[0], (tuple, list, slice))
+    if isinstance(periods, slice):
+        periods = [periods]
+    if not isinstance(periods, (list, tuple)) or not all(
+        isinstance(period, slice) for period in periods
     ):
-        in_air = [in_air]
+        raise TypeError(
+            f"{name} must be a slice, a list of slices or a boolean DataArray along "
+            f"'time', got {periods!r} (write slice(start, stop) for one period)"
+        )
 
     segments = []
-    for segment in in_air:
-        if isinstance(segment, slice):
-            first, last = segment.start, segment.stop
-        else:
-            first, last = segment
-        first = pd.Timestamp(first) if first is not None else pd.Timestamp(time[0])
-        last = pd.Timestamp(last) if last is not None else pd.Timestamp(time[-1])
+    for period in periods:
+        if period.step is not None:
+            raise ValueError(f"{name}: slices with a step are not supported")
+        first = pd.Timestamp(period.start if period.start is not None else time[0])
+        last = pd.Timestamp(period.stop if period.stop is not None else time[-1])
         segments.append((first, last))
-    return segments
+    return sorted(segments)
 
 
 def estimate_pressure_offset(
@@ -74,17 +84,17 @@ def estimate_pressure_offset(
     tag_log : xarray.Dataset or xarray.DataTree
         The tag records (the *full* records, including the in-air periods). A tag
         DataTree uses its ``dst`` node.
-    in_air : sequence of (start, stop) or slice, or xarray.DataArray
-        Periods where the tag is in the air: a ``(start, stop)`` pair, a slice, a
-        list of them (bounds included, ``None`` for the first / last record), or a
-        boolean DataArray along ``time``.
+    in_air : slice, list of slice or xarray.DataArray
+        Periods where the tag is in the air: a slice ``slice(start, stop)`` (bounds
+        included, ``None`` for the first / last record), a list of slices, or a
+        boolean DataArray along ``time``. The periods are sorted by start time.
     variable : str, default: "pressure"
         The pressure variable (m).
     combine : {"median", "first", "last", "linear"}, default: "median"
         How to combine the offsets of several periods: median of the period
-        offsets, offset of the first or of the last period, or a linear
-        interpolation in time between the periods (sensor drift; constant before
-        the first and after the last period).
+        offsets, offset of the first or of the last used period in time, or a
+        linear interpolation in time between the periods (sensor drift; constant
+        before the first and after the last period).
     max_std : float, default: 0.25
         Periods whose pressure standard deviation (m) is larger are not used (the
         tag was probably handled, heated by the sun or in water).
@@ -96,10 +106,11 @@ def estimate_pressure_offset(
     negative_tolerance : float, default: 0.5
         Records outside the in-air periods shallower than ``-negative_tolerance``
         after the correction are counted in ``fraction_negative_after_correction``.
-    in_water : (start, stop) or slice, optional
-        Only check these records for negative depths (e.g. the track, from the
-        release to the end of the track). Defaults to all the records outside the
-        in-air periods.
+    in_water : slice or xarray.DataArray, optional
+        A single period (a slice, a one-element list of slices or a boolean mask
+        with one contiguous period): only check these records for negative depths
+        (e.g. the track, from the release to the end of the track). Defaults to all
+        the records outside the in-air periods.
 
     Returns
     -------
@@ -109,13 +120,20 @@ def estimate_pressure_offset(
         ``segments``: one dict per period (``start``, ``stop``, ``n_records``,
         ``median``, ``std``, ``used``); ``spread``: range (m) of the offsets of the
         used periods; ``fraction_negative_after_correction``: fraction of the
-        in-water records (see ``in_water``) shallower than ``-negative_tolerance`` after the
-        correction; ``warnings``: list of str; ``parameters``.
+        in-water records (see ``in_water``) shallower than ``-negative_tolerance``
+        after the correction; ``warnings``: list of str; ``parameters``.
+
+    Raises
+    ------
+    TypeError
+        If ``in_air`` or ``in_water`` is not one of the accepted forms.
+    ValueError
+        If ``combine`` is unknown or ``in_water`` is not a single period.
 
     Examples
     --------
     >>> estimate = estimate_pressure_offset(
-    ...     tag["dst"].ds, in_air=("2023-05-03T08:00", "2023-05-03T11:06")
+    ...     tag, in_air=slice("2023-05-03T08:00", "2023-05-03T11:06")
     ... )
     >>> estimate["offset"]
     """
@@ -124,7 +142,16 @@ def estimate_pressure_offset(
 
     ds = _as_dataset(tag_log)
     pressure = ds[variable].to_series().dropna().sort_index()
-    segments = _segments(in_air, ds["time"].to_index())
+    time = ds["time"].to_index()
+    segments = _segments(in_air, time, name="in_air")
+    in_water_segments = None
+    if in_water is not None:
+        in_water_segments = _segments(in_water, time, name="in_water")
+        if len(in_water_segments) != 1:
+            raise ValueError(
+                "in_water must be a single period, got "
+                f"{len(in_water_segments)} periods"
+            )
 
     result = {
         "offset": None,
@@ -191,7 +218,6 @@ def estimate_pressure_offset(
             ]
         )
         order = np.argsort(centers)
-        time = ds["time"].to_index()
         values = np.interp(
             time.as_unit("ns").asi8,
             centers.as_unit("ns").asi8[order],
@@ -212,8 +238,8 @@ def estimate_pressure_offset(
         )
 
     in_water_records = pressure[~in_air_mask]
-    if in_water is not None:
-        first, last = _segments(in_water, ds["time"].to_index())[0]
+    if in_water_segments is not None:
+        [(first, last)] = in_water_segments
         in_water_records = in_water_records[first:last]
     if len(in_water_records):
         if isinstance(offset, xr.DataArray):
@@ -239,8 +265,9 @@ def correct_pressure_offset(tag_log, offset, *, variable="pressure"):
 
     Parameters
     ----------
-    tag_log : xarray.Dataset
-        The tag records.
+    tag_log : xarray.Dataset or xarray.DataTree
+        The tag records. For a tag DataTree, the pressure of its ``dst`` node is
+        corrected.
     offset : float, xarray.DataArray or dict
         The offset (m) to subtract, or the dict returned by
         :py:func:`estimate_pressure_offset`. A DataArray is interpolated on the
@@ -250,10 +277,11 @@ def correct_pressure_offset(tag_log, offset, *, variable="pressure"):
 
     Returns
     -------
-    corrected : xarray.Dataset
-        A copy of ``tag_log`` with the corrected pressure. The ``pressure_offset``
-        attribute of the variable holds the subtracted offset (mean offset for a
-        time-varying one) and ``pressure_offset_method`` describes it.
+    corrected : xarray.Dataset or xarray.DataTree
+        A copy of ``tag_log`` (same type) with the corrected pressure. The
+        ``pressure_offset`` attribute of the variable holds the subtracted offset
+        (mean offset for a time-varying one) and ``pressure_offset_method``
+        describes it.
 
     Raises
     ------
@@ -265,14 +293,15 @@ def correct_pressure_offset(tag_log, offset, *, variable="pressure"):
     if offset is None:
         raise ValueError("no offset to correct (the estimation failed?)")
 
-    attrs = dict(tag_log[variable].attrs)
+    ds = _as_dataset(tag_log)
+    attrs = dict(ds[variable].attrs)
     if "pressure_offset" in attrs:
         raise ValueError(
             f"{variable!r} was already corrected by {attrs['pressure_offset']} m"
         )
 
     if isinstance(offset, xr.DataArray):
-        offset_ = offset.interp(time=tag_log["time"]).drop_vars(
+        offset_ = offset.interp(time=ds["time"]).drop_vars(
             [name for name in offset.coords if name != "time"]
         )
         attrs["pressure_offset"] = float(offset_.mean())
@@ -284,5 +313,9 @@ def correct_pressure_offset(tag_log, offset, *, variable="pressure"):
         attrs["pressure_offset"] = offset_
         attrs["pressure_offset_method"] = "constant offset from in-air periods"
 
-    corrected = (tag_log[variable] - offset_).assign_attrs(attrs)
-    return tag_log.assign({variable: corrected})
+    corrected = ds.assign({variable: (ds[variable] - offset_).assign_attrs(attrs)})
+    if isinstance(tag_log, xr.DataTree):
+        tree = tag_log.copy()
+        tree["dst"] = corrected
+        return tree
+    return corrected
