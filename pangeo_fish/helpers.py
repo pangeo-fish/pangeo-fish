@@ -75,6 +75,7 @@ __all__ = [
     "compute_diff",
     "open_diff_dataset",
     "regrid_dataset",
+    "estimate_refinement_costs",
     "compute_emission_pdf",
     "compute_acoustic_pdf",
     "combine_pdfs",
@@ -1120,6 +1121,126 @@ def regrid_dataset(
     return reshaped, figure
 
 
+def _mask_at_cells(ocean_mask: xr.DataArray, lon, lat):
+    """Nearest value of a lat/lon ``ocean_mask`` at the given points."""
+    names = {
+        "lat": next(n for n in ("lat", "latitude") if n in ocean_mask.coords),
+        "lon": next(n for n in ("lon", "longitude") if n in ocean_mask.coords),
+    }
+    points = {
+        names["lat"]: xr.DataArray(lat, dims="points"),
+        names["lon"]: xr.DataArray(lon, dims="points"),
+    }
+    values = ocean_mask.sel(points, method="nearest").fillna(0).values
+    return values.astype(float) > 0.5
+
+
+def estimate_refinement_costs(
+    *,
+    bbox: dict[str, tuple[float, float]],
+    n_steps: int,
+    refinement_levels=range(8, 14),
+    ocean_mask: xr.DataArray = None,
+    ellipsoid="sphere",
+    n_arrays: int = 5,
+) -> pd.DataFrame:
+    """Estimate grid resolution and cost of each HEALPix refinement level.
+
+    Use it before :func:`regrid_dataset` to choose ``refinement_level``
+    knowing the number of cells and the memory.
+
+    Parameters
+    ----------
+    bbox : dict
+        Spatial boundaries with keys ``longitude`` and ``latitude`` (degrees).
+    n_steps : int
+        Number of model time steps of the run (e.g. ``model.sizes["time"]``).
+    refinement_levels : iterable of int, default: ``range(8, 14)``
+        Levels to tabulate.
+    ocean_mask : xarray.DataArray, optional
+        Ocean mask on a regular lat/lon grid (coordinates ``lat``/``lon`` or
+        ``latitude``/``longitude``), e.g. ``model["H0"].notnull()`` or the
+        ``ocean_mask`` of :func:`compute_diff`. If given, the ocean share is
+        the fraction of cell centres whose nearest mask point is ocean.
+    ellipsoid : str, default: "sphere"
+        Ellipsoid of the HEALPix grid, as passed to :func:`regrid_dataset_hpresample`.
+    n_arrays : int, default: 5
+        Number of ``(time, cells)`` float64 arrays held at the same time.
+        The forward-backward pass keeps the emission, the forward predictions
+        and states, and the backward predictions and smoothed states (5);
+        stacking briefly adds up to two more.
+
+    Returns
+    -------
+    table : pandas.DataFrame
+        One row per level with ``cell_size_km`` (square root of the cell area
+        on the authalic sphere of ``ellipsoid``), ``n_cells`` (cells
+        intersecting the bbox, from :func:`healpix_geo.nested.zone_coverage`),
+        ``ocean_share`` and ``n_ocean_cells`` (``NaN`` without
+        ``ocean_mask``), ``n_steps``, ``array_mb`` (one ``(time, cells)``
+        float64 array), ``memory_mb`` (``n_arrays`` of them) and
+        ``relative_cost`` (cells × steps relative to the first level of the
+        table). Memory and cost use ``n_cells``: the regridding keeps land
+        cells (as ``NaN``), so the arrays span every cell, not only ocean
+        cells.
+
+    Notes
+    -----
+    Cell counts and memory are exact for the cells covering the bbox; the
+    regridding keeps every cell reached by a model grid point, so the actual
+    count can differ by about 1 %.
+
+    ``relative_cost`` is not a run time. For ``"LargeHealpixConv"`` the cost
+    of one prediction is roughly proportional to the number of cells; with
+    ``"HealpixConv"`` the kernel also grows with the level (about 4× per level
+    for a fixed maximum speed). Data download, the number of optimiser
+    iterations, plotting and hardware are not modelled.
+    """
+    n_steps = int(n_steps)
+    radius_km = _authalic_radius(ellipsoid).to("km").magnitude
+    box = (
+        bbox["longitude"][0],
+        bbox["latitude"][0],
+        bbox["longitude"][1],
+        bbox["latitude"][1],
+    )
+
+    rows = []
+    for level in refinement_levels:
+        level = int(level)
+        cell_ids, _, _ = hg.nested.zone_coverage(box, level, ellipsoid=ellipsoid)
+        n_cells = int(np.unique(cell_ids).size)
+        if ocean_mask is not None and n_cells:
+            lon, lat = hg.nested.healpix_to_lonlat(
+                np.unique(cell_ids), level, ellipsoid=ellipsoid
+            )
+            ocean_share = float(np.mean(_mask_at_cells(ocean_mask, lon, lat)))
+            n_ocean = int(round(ocean_share * n_cells))
+        else:
+            ocean_share, n_ocean = np.nan, np.nan
+        # land cells stay in the regridded grid (as NaN), so arrays span all cells
+        array_mb = n_cells * n_steps * 8 / 1e6
+        rows.append(
+            {
+                "refinement_level": level,
+                "cell_size_km": radius_km * _healpix_resolution_radians(level),
+                "n_cells": n_cells,
+                "ocean_share": ocean_share,
+                "n_ocean_cells": n_ocean,
+                "n_steps": n_steps,
+                "array_mb": array_mb,
+                "memory_mb": n_arrays * array_mb,
+            }
+        )
+    table = pd.DataFrame(rows)
+    if len(table):
+        size = table["n_cells"] * table["n_steps"]
+        table["relative_cost"] = size / size.iloc[0]
+    else:
+        table["relative_cost"] = pd.Series(dtype=float)
+    return table
+
+
 def compute_emission_pdf(
     *,
     diff_ds: xr.Dataset,
@@ -1575,6 +1696,17 @@ def _get_predictor_factory(
     return predictor
 
 
+def _ellipsoid_params(ellipsoid=None) -> dict:
+    """Parameters of a HEALPix ``ellipsoid`` (name, mapping or xdggs object)."""
+    if ellipsoid is None:
+        ellipsoid = "sphere"
+    if isinstance(ellipsoid, str):
+        return hg.ellipsoid.resolve(ellipsoid)
+    elif hasattr(ellipsoid, "to_dict"):
+        return ellipsoid.to_dict()
+    return dict(ellipsoid)
+
+
 def earth_radius_from_ellipsoid(ellipsoid=None) -> pint.Quantity:
     """Return the Earth radius (in km) implied by a HEALPix ``ellipsoid``.
 
@@ -1593,14 +1725,7 @@ def earth_radius_from_ellipsoid(ellipsoid=None) -> pint.Quantity:
         can span on the ellipsoid, so the result is a conservative bound for
         converting displacements into angular sigma.
     """
-    if ellipsoid is None:
-        ellipsoid = "sphere"
-    if isinstance(ellipsoid, str):
-        params = hg.ellipsoid.resolve(ellipsoid)
-    elif hasattr(ellipsoid, "to_dict"):
-        params = ellipsoid.to_dict()
-    else:
-        params = dict(ellipsoid)
+    params = _ellipsoid_params(ellipsoid)
 
     radius_m = params.get("radius", params.get("semimajor_axis"))
     if radius_m is None:
@@ -1618,13 +1743,50 @@ def _earth_radius_from_grid(ds: xr.Dataset) -> pint.Quantity:
     return earth_radius_from_ellipsoid(ellipsoid)
 
 
+def _authalic_radius(ellipsoid=None) -> pint.Quantity:
+    """Radius of the sphere with the same area as ``ellipsoid``.
+
+    HEALPix cells have equal areas on this sphere, so it is the radius to use
+    for cell sizes (unlike :py:func:`earth_radius_from_ellipsoid`, which gives
+    the semi-major axis as a bound for displacements).
+    """
+    params = _ellipsoid_params(ellipsoid)
+
+    if "radius" in params:
+        return ureg.Quantity(float(params["radius"]), "m").to("km")
+
+    a = params.get("semimajor_axis")
+    if a is None:
+        raise ValueError(f"cannot determine the Earth radius from {ellipsoid!r}")
+    a = float(a)
+    if params.get("inverse_flattening") is not None:
+        f = 1 / float(params["inverse_flattening"])
+    elif params.get("semiminor_axis") is not None:
+        f = 1 - float(params["semiminor_axis"]) / a
+    else:
+        raise ValueError(f"cannot determine the flattening of {ellipsoid!r}")
+
+    e2 = f * (2 - f)
+    if e2 == 0:
+        return ureg.Quantity(a, "m").to("km")
+    e = np.sqrt(e2)
+    # authalic latitude factor q at the pole (Snyder 1987, eq. 3-12)
+    q_p = (1 - e2) * (1 / (1 - e2) + np.log((1 + e) / (1 - e)) / (2 * e))
+    return ureg.Quantity(a * np.sqrt(q_p / 2), "m").to("km")
+
+
+def _healpix_resolution_radians(level: int) -> float:
+    """Mean HEALPix cell size in radians at ``level`` (square root of the cell area)."""
+    return float(np.sqrt(4 * np.pi / (12 * 4 ** int(level))))
+
+
 def _grid_resolution_radians(ds: xr.Dataset) -> xr.DataArray:
     """Mean HEALPix cell size in radians (square root of the cell area)."""
     if "resolution" in ds.variables:
         return ds["resolution"].pint.quantify()
-    nside = 2 ** int(ds.dggs.grid_info.level)
     return xr.DataArray(
-        ureg.Quantity(np.sqrt(4 * np.pi / (12 * nside**2)), "radian"), dims=None
+        ureg.Quantity(_healpix_resolution_radians(ds.dggs.grid_info.level), "radian"),
+        dims=None,
     )
 
 

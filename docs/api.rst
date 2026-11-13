@@ -19,6 +19,7 @@ High-level Functions
    compute_diff
    open_diff_dataset
    regrid_dataset
+   estimate_refinement_costs
    compute_emission_pdf
    compute_acoustic_pdf
    combine_pdfs
