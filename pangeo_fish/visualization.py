@@ -9,8 +9,11 @@ import hvplot.xarray  # noqa: F401
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import numpy as np
+import pandas as pd
 import xarray as xr
 from shapely.errors import ShapelyDeprecationWarning
+
+from pangeo_fish import track_bounds
 
 
 def filter_by_states(ds):
@@ -236,3 +239,107 @@ def plot_trajectories(trajectories, *, subplots=False, **kwargs):
     else:
         plots = [traj.hvplot(title=traj.id, **kwargs) for traj in trajectories]
         return hv.Layout(plots).cols(2)
+
+
+def plot_track_bounds(
+    tag_log,
+    start=None,
+    end=None,
+    *,
+    events=None,
+    window=track_bounds.DEFAULTS["window"],
+    activity_threshold=track_bounds.DEFAULTS["activity_threshold"],
+    ax=None,
+):
+    """Plot the tag records with the suggested start and end of the track.
+
+    Static (matplotlib) figure of the pressure and temperature records, with the
+    records without vertical activity shaded, the tagging events and the start /
+    end suggested by :py:func:`pangeo_fish.track_bounds.detect_start_of_track` and
+    :py:func:`pangeo_fish.track_bounds.detect_end_of_track`.
+
+    Parameters
+    ----------
+    tag_log : xarray.Dataset or xarray.DataTree
+        The tag records. For a tag DataTree, the tagging events are also drawn.
+    start, end : datetime-like or dict, optional
+        Suggested start / end, or the dicts returned by
+        :py:func:`pangeo_fish.track_bounds.detect_start_of_track` /
+        :py:func:`pangeo_fish.track_bounds.detect_end_of_track`.
+    events : mapping of str to datetime-like, optional
+        Other times to draw (e.g. ``{"release": ..., "fish_death": ...}``).
+        Defaults to the tagging events of a tag DataTree.
+    window, activity_threshold
+        See :py:func:`pangeo_fish.track_bounds.flag_records`. Use the values given
+        to the detection, so that the shaded records are the ``inactive`` ones it
+        used.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw on.
+
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+    """
+    if events is None:
+        events = {}
+        if isinstance(tag_log, xr.DataTree) and "tagging_events" in tag_log:
+            times = tag_log["tagging_events"].to_dataset()["time"].to_series()
+            events = {name: time for name, time in times.items() if pd.notna(time)}
+
+    if isinstance(start, dict):
+        start = start.get("start")
+    if isinstance(end, dict):
+        end = end.get("end")
+
+    df, _ = track_bounds._to_frame(tag_log)
+    inactive = track_bounds.flag_records(
+        tag_log, window=window, activity_threshold=activity_threshold
+    )["inactive"]
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(14, 4))
+    else:
+        fig = ax.figure
+
+    ax.plot(df.index, df["pressure"], color="tab:blue", lw=0.6, label="pressure")
+    ax.invert_yaxis()
+    ax.set_ylabel("pressure (m)")
+    ax.fill_between(
+        df.index,
+        0,
+        1,
+        where=inactive.to_numpy(),
+        transform=ax.get_xaxis_transform(),
+        color="0.85",
+        label="no vertical activity",
+    )
+    if "temperature" in df:
+        ax_t = ax.twinx()
+        ax_t.plot(df.index, df["temperature"], color="tab:red", lw=0.6, alpha=0.7)
+        ax_t.set_ylabel("temperature (°C)", color="tab:red")
+
+    for name, time in events.items():
+        ax.axvline(pd.Timestamp(time), color="k", ls=":", lw=1)
+        ax.annotate(
+            name,
+            (pd.Timestamp(time), 1.0),
+            xycoords=("data", "axes fraction"),
+            rotation=90,
+            va="top",
+            fontsize=8,
+        )
+    if start is not None:
+        ax.axvline(
+            track_bounds._timestamp(start),
+            color="tab:green",
+            ls="--",
+            label="suggested start",
+        )
+    if end is not None:
+        ax.axvline(
+            track_bounds._timestamp(end),
+            color="tab:purple",
+            ls="--",
+            label="suggested end",
+        )
+    ax.legend(loc="lower left", fontsize=8)
+    return fig

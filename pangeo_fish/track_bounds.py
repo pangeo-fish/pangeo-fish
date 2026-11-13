@@ -10,9 +10,12 @@ the tagging events and decide.
 The main criterion is the vertical activity of the tag: a swimming fish changes
 depth all the time, while a tag in the air, stranded or lying on the seabed only
 shows the sensor noise (and the slow tide for a tag on the seabed). The activity
-is the mean absolute deviation of the pressure from its running median (see
-:py:func:`pressure_activity`). Values outside the sensor range and temperatures
-outside the plausible water range are also used.
+is the mean absolute deviation of the pressure from its running median (the
+``activity`` variable of :py:func:`flag_records`). Values outside the sensor range
+and temperatures outside the plausible water range are also used.
+
+:py:func:`pangeo_fish.visualization.plot_track_bounds` shows the records with the
+suggestions.
 """
 
 import numpy as np
@@ -48,43 +51,16 @@ def _to_frame(tag_log):
 
 
 def _pressure_activity(pressure, window):
+    """Vertical activity of the tag (m).
+
+    The running mean (over ``window``) of the absolute deviation of the pressure
+    from its running median (over ``window``). It is close to the sensor noise (a
+    few cm) for a tag in the air, stranded or lying on the seabed (the tide is
+    removed by the running median), and of the order of 1 m for a swimming fish.
+    """
     median = pressure.rolling(window, center=True, min_periods=1).median()
     deviation = (pressure - median).abs()
     return deviation.rolling(window, center=True, min_periods=1).mean()
-
-
-def pressure_activity(tag_log, window="1h"):
-    """Vertical activity of the tag.
-
-    The activity is the running mean (over ``window``) of the absolute deviation of
-    the pressure from its running median (over ``window``). It is close to the
-    sensor noise (a few cm) for a tag in the air, stranded or lying on the seabed
-    (the tide is removed by the running median), and of the order of 1 m for a
-    swimming fish.
-
-    Parameters
-    ----------
-    tag_log : xarray.Dataset or xarray.DataTree
-        The tag records, with a ``time`` dimension and a ``pressure`` variable (m).
-        A tag DataTree (as returned by :py:func:`pangeo_fish.io.open_tag`) uses its
-        ``dst`` node.
-    window : str, default: "1h"
-        Width of the running windows (pandas offset alias).
-
-    Returns
-    -------
-    activity : xarray.DataArray
-        The activity (m) along ``time``.
-    """
-    df, _ = _to_frame(tag_log)
-    activity = _pressure_activity(df["pressure"], window)
-    return xr.DataArray(
-        activity.to_numpy(),
-        dims="time",
-        coords={"time": df.index.to_numpy()},
-        name="activity",
-        attrs={"units": "m", "long_name": "vertical activity", "window": window},
-    )
 
 
 def _flags(
@@ -141,15 +117,19 @@ def flag_records(
     Parameters
     ----------
     tag_log : xarray.Dataset or xarray.DataTree
-        The tag records (``pressure`` in m, optionally ``temperature`` in °C).
+        The tag records, with a ``time`` dimension, ``pressure`` (m) and optionally
+        ``temperature`` (°C). A tag DataTree (as returned by
+        :py:func:`pangeo_fish.io.open_tag`) uses its ``dst`` node.
     window : str, default: "1h"
-        Window of :py:func:`pressure_activity`.
+        Width of the running windows used for the vertical activity (pandas
+        offset alias).
     activity_threshold : float, default: 0.1
         Records with an activity below this value (m) are flagged ``inactive``.
         The default suits 1-min records with a pressure resolution of a few cm.
     sensor_ranges : mapping of str to (float, float), optional
-        Valid range of each sensor, e.g. ``{"pressure": (0, 300)}``. Defaults to the
-        ``sensor_ranges`` attribute of the tag (tag metadata), if any.
+        Valid range of each sensor, e.g. ``{"pressure": (0, 300)}``. Defaults to a
+        ``sensor_ranges`` attribute of the records, if present (no check
+        otherwise).
     sensor_range_tolerance : float, default: 0.01
         Tolerance, as a fraction of the sensor range, before flagging a record as
         ``out_of_sensor_range``.
@@ -160,8 +140,13 @@ def flag_records(
     Returns
     -------
     flags : xarray.Dataset
-        ``activity`` and the boolean flags ``inactive``, ``out_of_sensor_range``,
-        ``temperature_outside_water_range`` and ``suspect`` (any of them).
+        ``activity`` (m): the running mean (over ``window``) of the absolute
+        deviation of the pressure from its running median. It is close to the
+        sensor noise (a few cm) for a tag in the air, stranded or lying on the
+        seabed (the tide is removed by the running median), and of the order of
+        1 m for a swimming fish. The boolean flags ``inactive``,
+        ``out_of_sensor_range``, ``temperature_outside_water_range`` and
+        ``suspect`` (any of them).
     """
     df, attrs = _to_frame(tag_log)
     flags = _flags(
@@ -375,7 +360,9 @@ def detect_end_of_track(
         The *full* tag records (not sliced to the tagging events).
     start : datetime-like, optional
         Only look after this time (e.g. the release). Defaults to the start
-        suggested by :py:func:`detect_start_of_track`.
+        suggested by :py:func:`detect_start_of_track`, called with the same
+        ``window``, ``activity_threshold``, ``max_gap``, ``level_change_threshold``,
+        ``sensor_ranges``, ``sensor_range_tolerance`` and ``temperature_range``.
     window, activity_threshold, sensor_ranges, sensor_range_tolerance, temperature_range
         See :py:func:`flag_records`.
     min_duration : str, default: "12h"
@@ -384,7 +371,8 @@ def detect_end_of_track(
         Inactive periods separated by less than this (e.g. a short handling of the
         tag) are merged.
     level_change_threshold : float, default: 0.5
-        Pressure change (m) used to refine the end.
+        Pressure change (m) used to refine the end (and the start, if ``start`` is
+        not given).
     air_temperature_daily_range : float, default: 5.0
         A median daily temperature range (°C) above this in the inactive period
         suggests the tag is in the air (diurnal cycle).
@@ -398,11 +386,23 @@ def detect_end_of_track(
     suggestion : dict
         ``end``: suggested last record of the track (``None`` if no end found);
         ``inactive_period``: (first, last) record of the inactive period;
-        ``likely_cause``: a short text; ``evidence``: the numbers behind it
-        (fraction of each flag in the inactive period, median daily temperature
-        range before and during it, fraction of active records after it and
-        longest active period after it);
+        ``likely_cause``: one of the codes below (``None`` if no end found);
+        ``evidence``: the numbers behind it (fraction of each flag in the inactive
+        period, median daily temperature range before and during it, fraction of
+        active records after it and longest active period after it);
         ``warning`` (or ``None``); ``reason`` and ``parameters``.
+
+        The ``likely_cause`` codes, checked in this order on the first
+        ``min_duration`` of the inactive period:
+
+        - ``"out_of_sensor_range"``: more than half of the records are outside the
+          sensor range (sensor failure, or tag out of the water);
+        - ``"out_of_water"``: more than 10 % of the temperatures are outside the
+          plausible water range, or the median daily temperature range is at
+          least ``air_temperature_daily_range`` (diurnal cycle of a tag in the
+          air, e.g. stranded on a beach);
+        - ``"no_vertical_movement"``: otherwise (fish dead or resting on the
+          bottom, tag lost or stranded in water).
 
     Examples
     --------
@@ -443,7 +443,10 @@ def detect_end_of_track(
     )
     if start is None:
         start = detect_start_of_track(
-            df.to_xarray().assign_attrs(attrs), **flag_kwargs
+            df.to_xarray().assign_attrs(attrs),
+            max_gap=max_gap,
+            level_change_threshold=level_change_threshold,
+            **flag_kwargs,
         )["start"]
         if start is None:
             start = df.index[0]
@@ -510,27 +513,20 @@ def detect_end_of_track(
 
     daily_range = evidence["temperature_daily_range_during"]
     if evidence["fraction_out_of_sensor_range"] > 0.5:
-        cause = (
-            "values outside the sensor range (sensor failure or tag out of the water)"
-        )
+        cause = "out_of_sensor_range"
     elif evidence["fraction_temperature_outside_water_range"] > 0.1 or (
         daily_range is not None and daily_range >= air_temperature_daily_range
     ):
-        cause = "tag out of the water (air-like temperature or diurnal cycle)"
+        cause = "out_of_water"
     else:
-        cause = (
-            "no vertical movement (fish dead or resting on the bottom, tag lost or "
-            "stranded in water)"
-        )
+        cause = "no_vertical_movement"
 
     warning = None
     longest = evidence["longest_active_period_after_hours"]
-    if evidence[
-        "fraction_active_after"
-    ] > resumed_activity_warning or longest >= pd.Timedelta(
-        min_duration
-    ) / pd.Timedelta(
-        "1h"
+    min_duration_hours = pd.Timedelta(min_duration) / pd.Timedelta("1h")
+    if (
+        evidence["fraction_active_after"] > resumed_activity_warning
+        or longest >= min_duration_hours
     ):
         warning = (
             f"activity resumes after the inactive period "
@@ -552,83 +548,3 @@ def detect_end_of_track(
         }
     )
     return result
-
-
-def plot_track_bounds(
-    tag_log, start=None, end=None, *, events=None, window="1h", ax=None
-):
-    """Plot the records with the suggested start and end of the track.
-
-    Parameters
-    ----------
-    tag_log : xarray.Dataset or xarray.DataTree
-        The tag records. For a tag DataTree, the tagging events are also drawn.
-    start, end : datetime-like or dict, optional
-        Suggested start / end, or the dicts returned by
-        :py:func:`detect_start_of_track` / :py:func:`detect_end_of_track`.
-    events : mapping of str to datetime-like, optional
-        Other times to draw (e.g. ``{"release": ..., "fish_death": ...}``).
-    window : str, default: "1h"
-        Window of :py:func:`pressure_activity` (inactive records are shaded).
-    ax : matplotlib.axes.Axes, optional
-        Axes to draw on.
-
-    Returns
-    -------
-    fig : matplotlib.figure.Figure
-    """
-    import matplotlib.pyplot as plt
-
-    if events is None:
-        events = {}
-        if isinstance(tag_log, xr.DataTree) and "tagging_events" in tag_log:
-            times = tag_log["tagging_events"].to_dataset()["time"].to_series()
-            events = {name: time for name, time in times.items() if pd.notna(time)}
-
-    if isinstance(start, dict):
-        start = start.get("start")
-    if isinstance(end, dict):
-        end = end.get("end")
-
-    df, _ = _to_frame(tag_log)
-    if ax is None:
-        fig, ax = plt.subplots(figsize=(14, 4))
-    else:
-        fig = ax.figure
-
-    ax.plot(df.index, df["pressure"], color="tab:blue", lw=0.6, label="pressure")
-    ax.invert_yaxis()
-    ax.set_ylabel("pressure (m)")
-    activity = _pressure_activity(df["pressure"], window)
-    ax.fill_between(
-        df.index,
-        0,
-        1,
-        where=(activity < DEFAULTS["activity_threshold"]).to_numpy(),
-        transform=ax.get_xaxis_transform(),
-        color="0.85",
-        label="no vertical activity",
-    )
-    if "temperature" in df:
-        ax_t = ax.twinx()
-        ax_t.plot(df.index, df["temperature"], color="tab:red", lw=0.6, alpha=0.7)
-        ax_t.set_ylabel("temperature (°C)", color="tab:red")
-
-    for name, time in events.items():
-        ax.axvline(pd.Timestamp(time), color="k", ls=":", lw=1)
-        ax.annotate(
-            name,
-            (pd.Timestamp(time), 1.0),
-            xycoords=("data", "axes fraction"),
-            rotation=90,
-            va="top",
-            fontsize=8,
-        )
-    if start is not None:
-        ax.axvline(
-            _timestamp(start), color="tab:green", ls="--", label="suggested start"
-        )
-    if end is not None:
-        ax.axvline(_timestamp(end), color="tab:purple", ls="--", label="suggested end")
-    ax.legend(loc="lower left", fontsize=8)
-    return fig
