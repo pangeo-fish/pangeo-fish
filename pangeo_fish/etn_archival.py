@@ -10,13 +10,10 @@ ETN publishes its data as parquet files (https://www.lifewatch.be/etn/parquet/):
 - ``archival/tags/part-0.parquet``: tag model and sensor ranges
 
 :func:`open_etn_archival` converts one tag to the tag :py:class:`xarray.DataTree`
-returned by :func:`pangeo_fish.io.open_tag`, and :func:`write_tag` writes such a
-tree to the tag folder format (``dst.csv``, ``tagging_events.csv``,
-``metadata.json``, see ``docs/format.md``).
+returned by :func:`pangeo_fish.io.open_tag`; :func:`pangeo_fish.io.write_tag`
+writes such a tree to the tag folder format (see ``docs/format.md``).
 """
 
-import json
-import os
 import warnings
 
 import fsspec
@@ -27,13 +24,21 @@ import xarray as xr
 ETN_PARQUET_ROOT = "https://www.lifewatch.be/etn/parquet"
 
 #: ETN uses several spellings for the same sensor (e.g. "Pressure" and "pressure")
-MEASUREMENT_NAMES = {
+_MEASUREMENT_NAMES = {
     "pressure": "pressure",
     "depth": "pressure",
     "temperature": "temperature",
 }
 
-_TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+# ``measurement_unit`` of the pressure records -> ``pressure_unit`` metadata.
+# ETN labels the DST pressure ``Pa`` but stores dbar (~ metres of depth).
+_PRESSURE_UNITS = {
+    "Pa": "dbar (labelled 'Pa' in ETN), used as depth in metres",
+    "dbar": "dbar, used as depth in metres",
+    "m": "m (depth)",
+}
+# deepest ocean ~ 11000 dbar: larger values labelled ``Pa`` are real pascals
+_MAX_DBAR = 12000
 
 
 def _storage_options(path, storage_options):
@@ -51,7 +56,7 @@ def _read_parquet(path, storage_options=None, **kwargs):
         return pd.read_parquet(f, **kwargs)
 
 
-def archival_data_url(project, root=ETN_PARQUET_ROOT):
+def _archival_data_url(project, root=ETN_PARQUET_ROOT):
     """Path of the sensor records of an ETN archival project."""
     return f"{root}/archival/archival_det/{project}/part-0.parquet"
 
@@ -77,7 +82,7 @@ def read_etn_animals(root=ETN_PARQUET_ROOT, storage_options=None):
     )
 
 
-def read_etn_sensor_ranges(tag_id, root=ETN_PARQUET_ROOT, storage_options=None):
+def _read_sensor_ranges(tag_id, root=ETN_PARQUET_ROOT, storage_options=None):
     """Sensor ranges of an archival tag: ``{"temperature": [min, max], ...}``."""
     tags = _read_parquet(
         f"{root}/archival/tags/part-0.parquet",
@@ -92,7 +97,7 @@ def read_etn_sensor_ranges(tag_id, root=ETN_PARQUET_ROOT, storage_options=None):
     tags = tags[tags["tag_serial_number"] == tag_id]
     ranges = {}
     for row in tags.itertuples():
-        sensor = MEASUREMENT_NAMES.get(str(row.sensor_type).lower())
+        sensor = _MEASUREMENT_NAMES.get(str(row.sensor_type).lower())
         bounds = pd.to_numeric(
             pd.Series([row.sensor_range_min, row.sensor_range_max]), errors="coerce"
         )
@@ -101,9 +106,7 @@ def read_etn_sensor_ranges(tag_id, root=ETN_PARQUET_ROOT, storage_options=None):
     return ranges
 
 
-def read_etn_archival_records(
-    project, tag_id, root=ETN_PARQUET_ROOT, storage_options=None
-):
+def _read_records(project, tag_id, root=ETN_PARQUET_ROOT, storage_options=None):
     """Read the sensor records of one tag as a ``time, temperature, pressure`` table.
 
     Exact duplicate records are removed. Records with the same time and sensor
@@ -124,12 +127,15 @@ def read_etn_archival_records(
     -------
     dst : pandas.DataFrame
         Indexed by (time zone naive, UTC) ``time``, with the columns
-        ``temperature`` and ``pressure``. ETN labels the pressure unit ``Pa``
-        but the values are in dbar (~ metres of depth): they are returned unchanged.
+        ``temperature`` and ``pressure``. The values are returned unchanged.
     stats : dict
-        Number of records read, units as labelled by ETN, duplicates removed.
+        Number of records read, units as labelled by ETN, duplicates removed,
+        and ``pressure_unit``: the unit of ``pressure``, derived from the ETN
+        label. ETN labels the DST pressure ``Pa`` but stores dbar (~ metres of
+        depth); a warning is emitted if values labelled ``Pa`` are too large to
+        be dbar, or if the label is not a known unit.
     """
-    source = archival_data_url(project, root)
+    source = _archival_data_url(project, root)
     # the files are sorted by tag: the filter only reads the row groups of `tag_id`
     records = _read_parquet(
         source,
@@ -155,7 +161,7 @@ def read_etn_archival_records(
     stats = {"etn_records": len(records), "etn_units": sorted(units)}
 
     records["measurement_type"] = (
-        records["measurement_type"].str.lower().map(MEASUREMENT_NAMES)
+        records["measurement_type"].str.lower().map(_MEASUREMENT_NAMES)
     )
     records = records.dropna(subset=["measurement_type"])
 
@@ -176,6 +182,32 @@ def read_etn_archival_records(
     missing = {"temperature", "pressure"} - set(dst.columns)
     if missing:
         raise ValueError(f"tag {tag_id!r} has no {sorted(missing)} records")
+
+    pressure_units = sorted(
+        records.loc[records["measurement_type"] == "pressure", "measurement_unit"]
+        .astype(str)
+        .unique()
+    )
+    if len(pressure_units) > 1:
+        raise ValueError(
+            f"tag {tag_id!r}: pressure records with several units {pressure_units}"
+        )
+    (unit,) = pressure_units
+    stats["pressure_unit"] = _PRESSURE_UNITS.get(unit, f"{unit} (as labelled in ETN)")
+    if unit not in _PRESSURE_UNITS:
+        warnings.warn(
+            f"tag {tag_id!r}: unknown pressure unit {unit!r} in ETN,"
+            " the values are not converted",
+            UserWarning,
+        )
+    elif unit == "Pa" and dst["pressure"].max() > _MAX_DBAR:
+        stats["pressure_unit"] = "Pa"
+        warnings.warn(
+            f"tag {tag_id!r}: pressure labelled 'Pa' with values up to"
+            f" {dst['pressure'].max()}: these look like pascals, not dbar,"
+            " and are not depths in metres",
+            UserWarning,
+        )
 
     dst = dst[["temperature", "pressure"]].sort_index()
     dst.columns.name = None
@@ -225,7 +257,13 @@ def open_etn_archival(
     retrieval of the tag, which may be after the death of the fish), else the
     last record. The ETN export has no recapture position: ``end_position``
     defaults to ``NA``. The source of every value is stored in the
-    ``event_sources`` attribute.
+    ``event_sources`` attribute, and the unit of ``pressure`` (derived from the
+    ETN label) in the ``pressure_unit`` attribute.
+
+    A tag attached to several animals of ``project`` raises an error: pass
+    ``animals`` restricted to the right animal.
+
+    Use :func:`pangeo_fish.io.write_tag` to write the tag to the tag folder format.
 
     Parameters
     ----------
@@ -260,14 +298,17 @@ def open_etn_archival(
         raise ValueError(
             f"tag {tag_id!r} not found in the ETN animals table of project {project!r}"
         )
-    if matches["animal_id"].nunique() > 1:
-        warnings.warn(
-            f"tag {tag_id!r} is attached to several animals, using the first one",
-            UserWarning,
+    animal_ids = matches["animal_id"].unique()
+    if len(animal_ids) > 1:
+        # the release time and position depend on the animal: do not guess
+        raise ValueError(
+            f"tag {tag_id!r} is attached to several animals of project {project!r}"
+            f" ({sorted(animal_ids.tolist())}): pass the animals table"
+            " restricted to one of them as `animals`"
         )
     animal = matches.iloc[0]
 
-    dst, stats = read_etn_archival_records(project, tag_id, root, storage_options)
+    dst, stats = _read_records(project, tag_id, root, storage_options)
 
     sources = {}
     release_time = animal["release_date_time"]
@@ -316,7 +357,7 @@ def open_etn_archival(
     ).astype({"latitude": float, "longitude": float})
 
     try:
-        sensor_ranges = read_etn_sensor_ranges(tag_id, root, storage_options)
+        sensor_ranges = _read_sensor_ranges(tag_id, root, storage_options)
     except (OSError, KeyError, ValueError) as e:
         warnings.warn(f"could not read the sensor ranges: {e}", UserWarning)
         sensor_ranges = {}
@@ -331,10 +372,9 @@ def open_etn_archival(
         "common_name": _str_or_none(animal.get("common_name")),
         "tagging_campaign": project,
         "etn_animal_id": int(animal["animal_id"]),
-        "source": archival_data_url(project, root),
+        "source": _archival_data_url(project, root),
         "sensor_ranges": sensor_ranges,
         "event_sources": sources,
-        "pressure_unit": "dbar (labelled 'Pa' in ETN), used as depth in metres",
         "dst_records": len(dst),
         **stats,
     }
@@ -346,58 +386,3 @@ def open_etn_archival(
             "tagging_events": tagging_events.to_xarray(),
         }
     )
-
-
-def write_tag(tag, root, name):
-    """Write a tag tree to the tag folder format read by :func:`pangeo_fish.io.open_tag`.
-
-    Writes ``{root}/{name}/dst.csv``, ``tagging_events.csv`` and
-    ``metadata.json`` (and ``acoustic.csv`` if the tree has an ``acoustic`` node).
-
-    Parameters
-    ----------
-    tag : xarray.DataTree
-        The tag, e.g. from :func:`open_etn_archival`.
-    root : str or os.PathLike
-        Local root folder of the tags.
-    name : str
-        Name of the tag folder (usually the tag id).
-
-    Returns
-    -------
-    path : str
-        Path of the tag folder.
-    """
-    folder = os.path.join(os.fspath(root), name)
-    os.makedirs(folder, exist_ok=True)
-
-    def to_csv(df, filename, index=True):
-        # pangeo-fish reads the times as time zone aware: write them as UTC
-        df = df.copy()
-        for column in df.columns:
-            if pd.api.types.is_datetime64_any_dtype(df[column]):
-                df[column] = pd.DatetimeIndex(df[column]).tz_localize("UTC")
-        if isinstance(df.index, pd.DatetimeIndex):
-            df.index = df.index.tz_localize("UTC")
-        df.to_csv(
-            os.path.join(folder, filename),
-            index=index,
-            date_format=_TIME_FORMAT,
-            na_rep="NA",
-        )
-
-    to_csv(tag["dst"].to_dataset().to_dataframe(), "dst.csv")
-    to_csv(
-        tag["tagging_events"]
-        .to_dataset()
-        .to_dataframe()[["time", "latitude", "longitude"]],
-        "tagging_events.csv",
-    )
-    if "acoustic" in tag.children:
-        to_csv(tag["acoustic"].to_dataset().to_dataframe(), "acoustic.csv")
-
-    with open(os.path.join(folder, "metadata.json"), "w") as f:
-        json.dump(dict(tag.attrs), f, indent=2, default=str)
-        f.write("\n")
-
-    return folder

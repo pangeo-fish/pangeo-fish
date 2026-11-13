@@ -41,6 +41,7 @@ I/O
    :toctree: generated
 
    open_tag
+   write_tag
    open_copernicus_catalog
    open_copernicus_zarr
    prepare_dataset
@@ -58,10 +59,7 @@ ETN Archival Data
    :toctree: generated
 
    open_etn_archival
-   write_tag
-   read_etn_archival_records
    read_etn_animals
-   read_etn_sensor_ranges
 
 
 DGGS Zarr Output
