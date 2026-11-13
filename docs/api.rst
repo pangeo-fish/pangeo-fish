@@ -17,7 +17,6 @@ High-level Functions
    plot_tag
    load_model
    compute_diff
-   diagnose_depth_vs_bathymetry
    open_diff_dataset
    regrid_dataset
    compute_emission_pdf
@@ -32,6 +31,15 @@ High-level Functions
    render_frames
    render_distributions
 
+
+Diagnostics
+-----------
+
+.. currentmodule:: pangeo_fish.diagnostics
+.. autosummary::
+   :toctree: generated
+
+   diagnose_depth_vs_bathymetry
 
 
 I/O
