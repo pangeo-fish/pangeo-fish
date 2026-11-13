@@ -32,6 +32,15 @@ High-level Functions
    render_distributions
 
 
+Diagnostics
+-----------
+
+.. currentmodule:: pangeo_fish.diagnostics
+.. autosummary::
+   :toctree: generated
+
+   check_event_position
+
 
 I/O
 ---

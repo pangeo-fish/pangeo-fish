@@ -1133,6 +1133,7 @@ def compute_emission_pdf(
     save=False,
     target_root=".",
     storage_options: dict = None,
+    check_positions: bool = True,
     **kwargs,
 ):
     """Compute the temporal emission matrices given a dataset and tagging events.
@@ -1164,6 +1165,10 @@ def compute_emission_pdf(
     storage_options : mapping, optional
         Dictionary containing storage options for connecting to the S3 bucket.
         Only used if ``save=True``
+    check_positions : bool, default: True
+        Whether to warn when the release (or recapture) distribution has almost
+        no mass on the ocean cells, i.e. the cells where ``ocean_mask`` is
+        positive (see :py:func:`pangeo_fish.diagnostics.check_event_position`).
 
     Returns
     -------
@@ -1197,6 +1202,30 @@ def compute_emission_pdf(
         final_probability = distrib.healpix.normal_at(
             grid, pos=final_position, sigma=recapture_std
         )
+
+    if check_positions:
+        # imported here because pangeo_fish.diagnostics imports this module
+        from pangeo_fish.diagnostics import check_event_position
+
+        # same mask as the one stored in the emission dataset. The ocean_mask
+        # written by regrid_dataset_hpresample(..., mask_threshold=0.0) can be
+        # positive on cells without H0; fixing that mask is a separate follow-up.
+        ocean_mask = diff_ds["ocean_mask"].compute()
+        check_event_position(
+            grid=grid,
+            position=initial_position,
+            sigma=initial_std,
+            mask=ocean_mask,
+            event_name="release",
+        )
+        if final_probability is not None:
+            check_event_position(
+                grid=grid,
+                position=final_position,
+                sigma=recapture_std,
+                mask=ocean_mask,
+                event_name="recapture",
+            )
 
     emission_pdf = (
         normal(diff_ds["diff"], mean=0, std=differences_std, dims=dims)
