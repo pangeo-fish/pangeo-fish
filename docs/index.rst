@@ -8,5 +8,6 @@ Welcome to pangeo-fish's documentation!
     pangeo-notebook
     format
     dggs-output
+    resolution-and-memory
     notebook
     api

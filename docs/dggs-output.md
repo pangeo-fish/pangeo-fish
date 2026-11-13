@@ -7,9 +7,14 @@ dimension, cell coordinate and numeric reference ellipsoid. `zarr_conventions`
 identifies the versioned convention. The `cell_ids` coordinate also keeps the
 attributes needed by xdggs 0.6/0.7, so it can still be opened with `ds.dggs.decode()`.
 
-`prepare_dggs_zarr(ds)` prepares a dataset for a new store: cells last, one time
-step per chunk and up to 4096 cells per spatial chunk. It preserves the sparse
-cell domain and order used for inference. It clears inherited storage encodings
+`prepare_dggs_zarr(ds)` prepares a dataset for a new store: cells last, with
+chunks sized from the data up to 64 MiB (`target_chunk_bytes`). When one map
+fits, all the cells stay in one chunk and several time steps are grouped;
+otherwise each chunk holds one time step and the cells are split into nearly
+equal chunks (see
+[Choosing a resolution](resolution-and-memory.md)). Pass `cell_chunk_size` to
+force one time step and a fixed number of cells per chunk. It preserves the
+sparse cell domain and order used for inference. It clears inherited storage encodings
 before rechunking, so source chunk boundaries and zero-valued fill sentinels do
 not leak into the new store. Non-storage variable attributes are preserved.
 This helper does not write a store. For example:

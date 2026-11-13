@@ -35,7 +35,8 @@ def test_sparse_metadata_and_no_mutation(sparse_maps):
     sparse_maps.states.encoding = {"chunks": (3, 2), "_FillValue": 0.0}
     ds = prepare_dggs_zarr(sparse_maps.chunk({"time": 2, "cells": 1}))
     assert ds.states.dims == ("time", "cells")
-    assert ds.states.chunks == ((1, 1), (3,))
+    # One map is far below the default target: one chunk for the whole store.
+    assert ds.states.chunks == ((2,), (3,))
     assert ds.attrs["dggs"] == {
         "name": "healpix",
         "refinement_level": 2,
@@ -139,3 +140,59 @@ def test_named_dataarray_and_unsorted_ids(tmp_path, sparse_maps):
     actual = xr.open_zarr(path)
     assert actual.states[0, 0] == 0.0
     assert actual.states[0, -1] == 0.7
+
+
+@pytest.mark.parametrize(
+    ["target", "time_chunks", "cell_chunks"],
+    (
+        # One map of the largest variable (float64 states, uint64 ids) is 24 bytes.
+        (48, (2,), (3,)),
+        (24, (1, 1), (3,)),
+        # Too large for one map: one time step per chunk, cells split.
+        (16, (1, 1), (2, 1)),
+        (1, (1, 1), (1, 1, 1)),
+    ),
+)
+def test_chunks_follow_byte_target(sparse_maps, target, time_chunks, cell_chunks):
+    ds = prepare_dggs_zarr(sparse_maps, target_chunk_bytes=target)
+    assert ds.states.chunks == (time_chunks, cell_chunks)
+    assert ds["mask"].chunks == (cell_chunks,)
+    assert ds["sigma"].chunks == (time_chunks,)
+
+
+def test_chunks_count_non_spatial_dimensions(sparse_maps):
+    # A depth dimension multiplies the size of one time step.
+    ds = sparse_maps.expand_dims(depth=4).transpose("time", "depth", "cells")
+    chunked = prepare_dggs_zarr(ds, target_chunk_bytes=4 * 24)
+    assert chunked.states.chunks == ((1, 1), (4,), (3,))
+
+
+def test_explicit_cell_chunk_size(sparse_maps):
+    ds = prepare_dggs_zarr(sparse_maps, cell_chunk_size=2)
+    assert ds.states.chunks == ((1, 1), (2, 1))
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    (
+        {"cell_chunk_size": 0},
+        {"cell_chunk_size": 1.5},
+        {"target_chunk_bytes": 0},
+        {"target_chunk_bytes": None},
+    ),
+)
+def test_invalid_chunk_arguments(sparse_maps, kwargs):
+    with pytest.raises(ValueError):
+        prepare_dggs_zarr(sparse_maps, **kwargs)
+
+
+def test_large_maps_are_split_into_nearly_equal_chunks():
+    cell_ids = np.arange(100, dtype="uint64")
+    ds = xr.Dataset(
+        {"states": (("time", "cells"), np.zeros((2, 100)))},
+        coords={"cell_ids": ("cells", cell_ids)},
+    )
+    ds.cell_ids.attrs.update(grid_name="healpix", level=3, indexing_scheme="nested")
+    # At most 41 cells fit: three chunks of 34, 34 and 32 cells, not 41, 41, 18.
+    chunked = prepare_dggs_zarr(ds, target_chunk_bytes=8 * 41)
+    assert chunked.states.chunks == ((1, 1), (34, 34, 32))

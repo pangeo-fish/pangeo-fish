@@ -123,6 +123,13 @@ def _plot_in_figure(ds: xr.Dataset, **plot_kwargs) -> Figure:
     return fig
 
 
+def _rechunk_existing(ds: xr.Dataset, chunks: dict | None) -> xr.Dataset:
+    """Rechunk ``ds`` along the dimensions of ``chunks`` that it has."""
+    return ds.chunk(
+        {dim: size for dim, size in (chunks or {}).items() if dim in ds.dims}
+    )
+
+
 def _save_zarr(ds: xr.Dataset, path: str, storage_options=None):
     """Helper for saving a .zarr array and warning in case of failure."""
     try:
@@ -2338,24 +2345,31 @@ def open_distributions(
     ellipsoid = resampling_info["ellipsoid"]
     refinement_level = resampling_info["refinement_level"]
 
+    # Read whole storage chunks, then rechunk: a storage chunk can hold several
+    # time steps, and asking xarray for smaller chunks would read it repeatedly.
     emission = (
         xr.open_dataset(
             f"{target_root}/combined.zarr",
             engine="zarr",
-            chunks=chunks,
+            chunks={},
             inline_array=True,
             storage_options=storage_options,
         )
+        .pipe(_rechunk_existing, chunks)
         .rename_vars({"pdf": "emission"})
         .drop_vars(["final", "initial"], errors="ignore")
     )
-    states = xr.open_dataset(
-        f"{target_root}/states.zarr",
-        engine="zarr",
-        chunks=chunks,
-        inline_array=True,
-        storage_options=storage_options,
-    ).where(emission["mask"])
+    states = (
+        xr.open_dataset(
+            f"{target_root}/states.zarr",
+            engine="zarr",
+            chunks={},
+            inline_array=True,
+            storage_options=storage_options,
+        )
+        .pipe(_rechunk_existing, chunks)
+        .where(emission["mask"])
+    )
 
     data_hp = xr.merge([states, emission.drop_vars(["mask"])])
 
