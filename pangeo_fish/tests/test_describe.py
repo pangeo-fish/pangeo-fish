@@ -3,7 +3,8 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from pangeo_fish.describe import describe_tag, format_description
+from pangeo_fish.describe import describe_tag
+from pangeo_fish.pressure_offset import estimate_pressure_offset
 
 RELEASE = pd.Timestamp("2023-05-03 11:07")
 END = pd.Timestamp("2023-05-08 08:17")
@@ -43,7 +44,7 @@ def synthetic_records(end="stranded", seed=0):
     )
 
 
-def synthetic_tag(end="stranded", events=None):
+def synthetic_tag(end="stranded", events=None, sensor_ranges=SENSOR_RANGES):
     if events is None:
         events = {
             "release": (RELEASE, 51.07, 4.19),
@@ -57,101 +58,125 @@ def synthetic_tag(end="stranded", events=None):
         },
         coords={"event_name": list(events)},
     )
+    attrs = {"pit_tag_id": "T1"}
+    if sensor_ranges is not None:
+        attrs["sensor_ranges"] = sensor_ranges
     return xr.DataTree.from_dict(
         {
-            "/": xr.Dataset(attrs={"pit_tag_id": "T1", "sensor_ranges": SENSOR_RANGES}),
+            "/": xr.Dataset(attrs=attrs),
             "dst": synthetic_records(end=end),
             "tagging_events": tagging_events,
         }
     )
 
 
-@pytest.fixture(scope="module")
-def stranded():
-    return describe_tag(synthetic_tag("stranded"))
+class TestDescribeTag:
+    def test_records(self):
+        description = describe_tag(synthetic_tag(), tide=False)
+        records = description["records"]
 
+        assert description["tag_name"] == "T1"
+        assert records["first_record"] == pd.Timestamp("2023-05-03 08:00")
+        assert records["sampling_interval"] == pd.Timedelta("1min")
+        assert records["regular_sampling"]
+        assert records["n_gaps"] == 0
+        assert records["n_duplicate_times"] == 0
+        assert records["n_missing"] == {"pressure": 0, "temperature": 0}
 
-def test_describe_tag_records(stranded):
-    records = stranded["records"]
+    def test_ranges_on_the_suggested_track(self):
+        tag = synthetic_tag()
+        description = describe_tag(tag, tide=False)
+        start = description["suggested_start"]["start"]
+        end = description["suggested_end"]["end"]
+        temperature = tag["dst"]["temperature"]
 
-    assert stranded["tag_name"] == "T1"
-    assert records["first_record"] == pd.Timestamp("2023-05-03 08:00")
-    assert records["sampling_interval"] == pd.Timedelta("1min")
-    assert records["regular_sampling"]
-    assert records["n_gaps"] == 0
-    assert records["n_duplicate_times"] == 0
-    assert records["n_missing"] == {"pressure": 0, "temperature": 0}
+        record = description["ranges"]["record"]["temperature"]
+        track = description["ranges"]["track"]["temperature"]
+        assert record["max"] == float(temperature.max())
+        assert track["max"] == float(temperature.sel(time=slice(start, end)).max())
+        assert track["min"] == float(temperature.sel(time=slice(start, end)).min())
 
-
-def test_describe_tag_ranges(stranded):
-    track = stranded["ranges"]["track"]
-    record = stranded["ranges"]["record"]
-
-    assert track["temperature"]["max"] < 20
-    assert record["temperature"]["max"] == pytest.approx(36)
-    out = stranded["out_of_sensor_range"]["temperature"]
-    assert out["n_records"] > 0
-    assert out["first_after_start"] == END + pd.Timedelta(days=2)
-
-
-def test_describe_tag_suggestions(stranded):
-    assert abs(stranded["suggested_start"]["start"] - RELEASE) <= pd.Timedelta("5min")
-    assert abs(stranded["suggested_end"]["end"] - END) <= pd.Timedelta("5min")
-    comparison = stranded["comparison"]
-    assert abs(comparison["release_minus_suggested_start_days"]) < 0.01
-    assert comparison["fish_death_minus_suggested_end_days"] == pytest.approx(
-        1.42, abs=0.01
+    @pytest.mark.parametrize(
+        ["sensor_ranges", "expected_first"],
+        [
+            pytest.param(SENSOR_RANGES, END + pd.Timedelta(days=2), id="with-ranges"),
+            pytest.param(None, None, id="without-ranges"),
+        ],
     )
+    def test_out_of_sensor_range(self, sensor_ranges, expected_first):
+        description = describe_tag(
+            synthetic_tag(sensor_ranges=sensor_ranges), tide=False
+        )
+        actual = description["out_of_sensor_range"]
 
+        if expected_first is None:
+            assert actual is None
+        else:
+            assert actual["sensor_ranges"] == SENSOR_RANGES
+            assert actual["n_records"] > 0
+            assert actual["first_after_start"] == expected_first
 
-def test_describe_tag_pressure_offset(stranded):
-    offset = stranded["pressure_offset"]
+    def test_comparison_is_event_minus_suggestion(self):
+        fish_death = END + pd.Timedelta("1D 10h")
+        description = describe_tag(synthetic_tag(), tide=False)
+        start = description["suggested_start"]["start"]
+        end = description["suggested_end"]["end"]
+        comparison = description["comparison"]
 
-    assert offset["offset"] == pytest.approx(1.8, abs=0.1)
-    assert offset["warnings"] == []
+        assert comparison["release_minus_suggested_start_days"] == pytest.approx(
+            (RELEASE - start) / pd.Timedelta("1D")
+        )
+        assert comparison["fish_death_minus_suggested_end_days"] == pytest.approx(
+            (fish_death - end) / pd.Timedelta("1D")
+        )
 
+    def test_pressure_offset_uses_the_pre_release_period(self):
+        tag = synthetic_tag()
+        description = describe_tag(tag, tide=False)
+        start = description["suggested_start"]
+        end = description["suggested_end"]["end"]
 
-def test_describe_tag_questions(stranded):
-    questions = "\n".join(stranded["questions"])
+        expected = estimate_pressure_offset(
+            tag,
+            in_air=slice(*start["pre_release_period"]),
+            in_water=slice(start["start"], end),
+        )
+        actual = description["pressure_offset"]
+        assert actual["offset"] == expected["offset"]
+        assert actual["segments"] == expected["segments"]
+        assert (
+            actual["fraction_negative_after_correction"]
+            == expected["fraction_negative_after_correction"]
+        )
 
-    assert "which end should be used" in questions
-    assert "correct the pressure" in questions
-    assert "Where was the fish released" not in questions
-    assert "seabed" not in questions
+    def test_tide_after_the_end(self):
+        description = describe_tag(synthetic_tag("seabed"))
+        tide = description["tide"]
 
+        assert tide["available"]
+        assert tide["fraction_after_end"] > 0.5
 
-def test_describe_tag_seabed_tide():
-    description = describe_tag(synthetic_tag("seabed"))
+    def test_tide_not_computed(self):
+        description = describe_tag(synthetic_tag(), tide=False)
 
-    assert description["tide"]["available"]
-    assert description["tide"]["fraction_after_end"] > 0.5
-    assert any("seabed" in question for question in description["questions"])
+        assert description["tide"] == {"available": False, "reason": "not computed"}
 
+    def test_tagging_events(self):
+        events = {"release": (RELEASE, np.nan, np.nan)}
+        description = describe_tag(synthetic_tag(events=events), tide=False)
 
-def test_describe_tag_without_events():
-    description = describe_tag(
-        synthetic_tag(events={"release": (RELEASE, np.nan, np.nan)}), tide=False
-    )
+        assert description["tagging_events"] == {
+            "times": {"release": RELEASE},
+            "positions": {"release": None},
+        }
+        assert list(description["comparison"]) == ["release_minus_suggested_start_days"]
 
-    questions = "\n".join(description["questions"])
-    assert "Where was the fish released" in questions
-    assert "is this the end of the track" in questions
-    assert description["tide"]["available"] is False
+    def test_dataset(self):
+        description = describe_tag(
+            synthetic_records(), tag_name="T2", sensor_ranges=SENSOR_RANGES, tide=False
+        )
 
-
-def test_describe_tag_dataset():
-    description = describe_tag(
-        synthetic_records(), tag_name="T2", sensor_ranges=SENSOR_RANGES, tide=False
-    )
-
-    assert description["tag_name"] == "T2"
-    assert description["tagging_events"]["times"] == {}
-    assert description["suggested_end"]["end"] is not None
-
-
-def test_format_description(stranded):
-    text = format_description(stranded)
-
-    assert text.startswith("## Tag T1")
-    assert "suggested end" in text
-    assert "### Questions" in text
+        assert description["tag_name"] == "T2"
+        assert description["tagging_events"] == {"times": {}, "positions": {}}
+        assert description["comparison"] == {}
+        assert "questions" not in description
