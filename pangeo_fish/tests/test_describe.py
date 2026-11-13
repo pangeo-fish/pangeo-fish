@@ -14,8 +14,8 @@ SENSOR_RANGES = {"pressure": [0, 300], "temperature": [2, 34]}
 def synthetic_records(end="stranded", seed=0):
     """1-min records: 3 h in air (1.8 m), swimming fish, then stranded / seabed."""
     rng = np.random.default_rng(seed)
-    time = pd.date_range("2023-05-03 08:00", END + pd.Timedelta(days=3), freq="1min")
-    hours = ((time - time[0]) / pd.Timedelta("1h")).to_numpy()
+    time = pd.date_range("2023-05-03 08:00", END + pd.Timedelta(3, "D"), freq="1min")
+    hours = ((time - time[0]) / pd.Timedelta(1, "h")).to_numpy()
 
     pressure = 10 + 4 * np.sin(2 * np.pi * hours / 0.7) + rng.normal(0, 1.5, len(time))
     temperature = 15 + 0.02 * hours + rng.normal(0, 0.1, len(time))
@@ -25,12 +25,12 @@ def synthetic_records(end="stranded", seed=0):
     temperature[before] = 12 + rng.normal(0, 0.3, before.sum())
 
     after = time >= END
-    hours_after = ((time[after] - END) / pd.Timedelta("1h")).to_numpy()
+    hours_after = ((time[after] - END) / pd.Timedelta(1, "h")).to_numpy()
     if end == "stranded":
         pressure[after] = 5.4 + rng.normal(0, 0.02, after.sum())
         temperature[after] = 19.5 + 4.5 * np.sin(2 * np.pi * (hours_after - 6) / 24)
         # picked up: hot, in the hand
-        picked_up = time >= END + pd.Timedelta(days=2)
+        picked_up = time >= END + pd.Timedelta(2, "D")
         temperature[picked_up] = 36
     elif end == "seabed":
         pressure[after] = 25 + 2.5 * np.sin(2 * np.pi * hours_after / 12.42)
@@ -48,7 +48,7 @@ def synthetic_tag(end="stranded", events=None, sensor_ranges=SENSOR_RANGES):
     if events is None:
         events = {
             "release": (RELEASE, 51.07, 4.19),
-            "fish_death": (END + pd.Timedelta("1D 10h"), np.nan, np.nan),
+            "fish_death": (END + pd.Timedelta(34, "h"), np.nan, np.nan),
         }
     tagging_events = xr.Dataset(
         {
@@ -77,7 +77,7 @@ class TestDescribeTag:
 
         assert description["tag_name"] == "T1"
         assert records["first_record"] == pd.Timestamp("2023-05-03 08:00")
-        assert records["sampling_interval"] == pd.Timedelta("1min")
+        assert records["sampling_interval"] == pd.Timedelta(1, "min")
         assert records["regular_sampling"]
         assert records["n_gaps"] == 0
         assert records["n_duplicate_times"] == 0
@@ -99,7 +99,7 @@ class TestDescribeTag:
     @pytest.mark.parametrize(
         ["sensor_ranges", "expected_first"],
         [
-            pytest.param(SENSOR_RANGES, END + pd.Timedelta(days=2), id="with-ranges"),
+            pytest.param(SENSOR_RANGES, END + pd.Timedelta(2, "D"), id="with-ranges"),
             pytest.param(None, None, id="without-ranges"),
         ],
     )
@@ -117,17 +117,17 @@ class TestDescribeTag:
             assert actual["first_after_start"] == expected_first
 
     def test_comparison_is_event_minus_suggestion(self):
-        fish_death = END + pd.Timedelta("1D 10h")
+        fish_death = END + pd.Timedelta(34, "h")
         description = describe_tag(synthetic_tag(), tide=False)
         start = description["suggested_start"]["start"]
         end = description["suggested_end"]["end"]
         comparison = description["comparison"]
 
         assert comparison["release_minus_suggested_start_days"] == pytest.approx(
-            (RELEASE - start) / pd.Timedelta("1D")
+            (RELEASE - start) / pd.Timedelta(1, "D")
         )
         assert comparison["fish_death_minus_suggested_end_days"] == pytest.approx(
-            (fish_death - end) / pd.Timedelta("1D")
+            (fish_death - end) / pd.Timedelta(1, "D")
         )
 
     def test_pressure_offset_uses_the_pre_release_period(self):
