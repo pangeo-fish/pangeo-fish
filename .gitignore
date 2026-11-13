@@ -72,3 +72,6 @@ viterbi_complete.py
 .gitignore
 viterbi2_complete.py
 notebooks/DEV_TESTER.ipynb
+notebooks/test_largeconv.ipynb
+notebooks/notebook_test_base.ipynb
+notebooks/notebook_test_complete.ipynb

@@ -47,6 +47,7 @@ from pangeo_fish.hmm.prediction import (
     Foscat1DHealpix,
     Gaussian1DHealpix,
     UpDownGaussian1DHealpix,
+    FFTGaussian1DHealpix,
 )
 from pangeo_fish.io import (
     open_copernicus_catalog,
@@ -123,15 +124,42 @@ def _plot_in_figure(ds: xr.Dataset, **plot_kwargs) -> Figure:
     return fig
 
 
+def _with_dggs_attrs(ds: xr.Dataset) -> xr.Dataset:
+    """Return ``ds`` with the DGGS grid attributes written on ``cell_ids``.
+
+    The attributes follow the Zarr DGGS convention used by xdggs (``grid_name``,
+    ``level``, ``indexing_scheme`` and ``ellipsoid``). They are taken from the
+    xdggs index when the dataset has one, else from the existing ``cell_ids``
+    attributes, so that the grid definition survives a round trip to Zarr.
+    """
+    if "cell_ids" not in ds.variables:
+        return ds
+
+    try:
+        grid_attrs = ds.dggs.grid_info.to_dict()
+    except Exception:
+        attrs = ds["cell_ids"].attrs
+        if "level" not in attrs:
+            return ds
+        grid_attrs = {
+            "grid_name": attrs.get("grid_name", "healpix"),
+            "level": int(attrs["level"]),
+            "indexing_scheme": attrs.get("indexing_scheme", "nested"),
+        }
+        if attrs.get("ellipsoid") is not None:
+            grid_attrs["ellipsoid"] = attrs["ellipsoid"]
+
+    ds = ds.copy()
+    ds["cell_ids"].attrs.update(grid_attrs)
+    return ds
+
+
 def _save_zarr(ds: xr.Dataset, path: str, storage_options=None):
     """Helper for saving a .zarr array and warning in case of failure."""
     try:
         path_to_zarr = path + ".zarr" if not path.endswith(".zarr") else path
-        if "cell_ids" in ds.coords:
-            ds = prepare_dggs_zarr(ds)
-        ds.to_zarr(
-            path_to_zarr, mode="w", storage_options=storage_options, zarr_format=2
-        )
+        ds = _with_dggs_attrs(ds)
+        ds.to_zarr(path_to_zarr, mode="w", storage_options=storage_options)
     except Exception:
         warnings.warn(
             f'An error occurred when saving a .zarr array to "{path_to_zarr}")',
@@ -1558,6 +1586,14 @@ def _get_predictor_factory(
                 device=device,
                 ellipsoid=ellipsoid,
             )
+        elif conv_method == "FFTConv":
+            predictor = curry(
+                FFTGaussian1DHealpix,
+                cell_ids=ds["cell_ids"].data,
+                grid_info=ds.dggs.grid_info,
+                device=device,
+                ellipsoid=ellipsoid,
+            )
         elif conv_method == "FoscatConv":
             predictor = curry(
                 Foscat1DHealpix,
@@ -1567,7 +1603,7 @@ def _get_predictor_factory(
 
         else:
             raise ValueError(
-                f'Unknown helper "{conv_method}". Expected "HealpixConv", "LargeHealpixConv" or "FoscatConv".'
+                f'Unknown helper "{conv_method}". Expected "HealpixConv", "LargeHealpixConv", "FFTConv" or "FoscatConv".'
             )
     else:
         raise ValueError(f'Unknown dims "{dims}".')
@@ -1689,7 +1725,7 @@ def optimize_pdf(
     tolerance: float,
     earth_radius: pint.Quantity | None = None,
     dims: list[str] = ["cells"],
-    conv_method: str = "HealpixConv",
+    conv_method: str = "FFTConv",
     ellipsoid: str = None,
     final: bool = False,
     single_behav: bool = True,
@@ -1719,6 +1755,13 @@ def optimize_pdf(
          of ``cell_ids``), see :py:func:`earth_radius_from_ellipsoid`.
      dims : list of str, default: ["cells"]
          The list of the dimensions. Either ``["x", "y"]`` or ``["cells"]``
+    conv_method : str, default "FFTGaussian1DHealpix"
+        Define the convolution used by the predictor. It can be:        
+         -"LargeHealpixConv"=>"UpDownGaussian1DHealpix": convolution method based on working on upper cell size (Up) before going back to lower (Down),  
+         -"FoscatConv"=>"Foscat1DHealpix",\\
+         -"HealpixConv"=>"Gaussian1DHealpix": Simple convolution, slow,\\
+         -"FFTConv"=>"FFTGaussian1DHealpix": Default, verry fast multiplies in fft space then come back to real space,
+        
      final : bool, default: False
          If True, optimize sigma by matching the predicted final state to the
          observed final position (``score_final_pos``) instead of the standard
@@ -2024,6 +2067,14 @@ def _build_estimator(emission, target_root, storage_options, ellipsoid=None):
             conv_method="LargeHealpixConv",
             dims=["cells"],
             ellipsoid=ellipsoid,
+        )    
+    elif "FFTGaussian1DHealpix" in cls_name:
+            predictor_factory = _get_predictor_factory(
+            emission,
+            truncate=truncate,
+            conv_method="FFTConv",
+            dims=["cells"],
+            ellipsoid=ellipsoid,
         )
     elif "Gaussian1DHealpix" in cls_name:
         predictor_factory = _get_predictor_factory(
@@ -2041,6 +2092,7 @@ def _build_estimator(emission, target_root, storage_options, ellipsoid=None):
             dims=["cells"],
             ellipsoid=ellipsoid,
         )
+
     else:
         raise RuntimeError("Could not infer predictor's class from the `.json` file.")
 
@@ -2201,7 +2253,6 @@ def decode_trajectories(
     estimator, emission, _ = _build_estimator(
         emission, target_root, storage_options, ellipsoid
     )
-    print(emission)
     needs_states = not set(track_modes) <= {"viterbi", "viterbi_healpix"}
     print(needs_states)
     if states is None and needs_states:
@@ -2670,7 +2721,7 @@ def _find_time_intervals(df: pd.DataFrame, min_time: pd.Timedelta, min_dist: flo
             'The dataframe must have the columns "id", "longitude" and "latitude".'
         )
 
-    time_delta = pd.Timedelta(np.timedelta64(0, "s"))
+    time_delta = pd.Timedelta(0)
     first_row = df.iloc[0]
     last_time = first_row.name  # type: pd.Timestamp
     last_point = (
@@ -2686,12 +2737,12 @@ def _find_time_intervals(df: pd.DataFrame, min_time: pd.Timedelta, min_dist: flo
         if _is_far_enough(*last_point, row.longitude, row.latitude, min_dist):
             times.append(last_time)
             times.append(curr_time)
-            time_delta = pd.Timedelta(np.timedelta64(0, "s"))
+            time_delta = pd.Timedelta(0)
 
             last_point = (row.longitude, row.latitude)
         if time_delta > min_time:
             times.append(curr_time)
-            time_delta = pd.Timedelta(np.timedelta64(0, "s"))
+            time_delta = pd.Timedelta(0)
 
             last_point = (row.longitude, row.latitude)
 
@@ -2702,7 +2753,7 @@ def _find_time_intervals(df: pd.DataFrame, min_time: pd.Timedelta, min_dist: flo
 def compute_detection_time_intervals(
     *,
     tag: xr.DataTree,
-    min_time: pd.Timedelta = pd.Timedelta(np.timedelta64(4, "D")),
+    min_time: pd.Timedelta = pd.Timedelta("4days"),
     min_dist: float = 17.0,
     **kwargs,
 ):
@@ -2713,7 +2764,7 @@ def compute_detection_time_intervals(
     tag : xarray.DataTree
         The fish tag, assumed to have an entry "acoustic".
     min_time : pandas.Timedelta, optional
-        Minimum time length for the intervals (defaults to ``pd.Timedelta(np.timedelta64(4, "D"))``).
+        Minimum time length for the intervals (defaults to ``pd.Timedelta("4days")``).
     min_dist : float, default: 17.0
         Minimum distance between the detections to set apart different intervals, in kilometers.
     Returns
@@ -2740,7 +2791,7 @@ def compute_detection_time_intervals(
         raise ValueError(
             f'The minimum distance must be strictly positive (received: "{min_dist}").'
         )
-    if min_time <= pd.Timedelta(np.timedelta64(0, "s")):
+    if min_time <= pd.Timedelta(0):
         raise ValueError(
             f'The minimum interval time must be strictly positive (received: "{min_time}").'
         )
@@ -2894,7 +2945,7 @@ def create_parameters(
     single_behav=True,
     predictor_factory=None,
     predictors=None,
-    class_name="Foscat1DHealpix",
+    class_name="FFTGaussian1DHealpix",
     comment="Custom parameters",
     save_parameters=False,
     storage_options=None,
@@ -2914,6 +2965,13 @@ def create_parameters(
     predictor_indices : array-like of int, optional
         One predictor index per time step, used to build ``sigma_indices``
         when it is not provided.
+    class_name : str, default "FFTGaussian1DHealpix"
+        Define the convolution used by the predictor. It can be:        
+        "Foscat1DHealpix",
+        "UpDownGaussian1DHealpix",
+        "Gaussian1DHealpix",
+        "FFTGaussian1DHealpix",
+        "OldUpDownGaussian1DHealpix"
     single_behav : bool, default=True
         Only used when ``sigma_indices`` is None. If False, one list of time
         indices per continuous segment. If True, one list per predictor value.
@@ -2939,9 +2997,11 @@ def create_parameters(
         "Foscat1DHealpix",
         "UpDownGaussian1DHealpix",
         "Gaussian1DHealpix",
+        "FFTGaussian1DHealpix",
+        "OldUpDownGaussian1DHealpix"
     ]:
         raise ValueError(
-            f'Unknown class_name "{class_name}". Expected "Gaussian1DHealpix", "Foscat1DHealpix" or "UpDownGaussian1DHealpix".'
+            f'Unknown class_name "{class_name}". Expected "Gaussian1DHealpix", "Foscat1DHealpix", "FFTGaussian1DHealpix" or "UpDownGaussian1DHealpix".'
         )
     if predictor_factory is None:
         predictor_factory = {
@@ -3072,10 +3132,10 @@ def hand_test_parameter(
         xr.open_dataset(
             f"{target_root}/combined.zarr",
             engine="zarr",
-            chunks={},
+            chunks=default_chunk_dims,
             inline_array=True,
             storage_options=storage_options,
-        ).chunk(default_chunk_dims or {})
+        )
         if emission is None
         else emission
     )
@@ -3087,9 +3147,7 @@ def hand_test_parameter(
         sigma_indices=sigma_indices,
         predictor_indices=(
             emission["predictor_index"].values
-            if sigma_indices is None
-            and len(sigma_tested) > 1
-            and "predictor_index" in emission
+            if sigma_indices is None and "predictor_index" in emission
             else None
         ),
         n_steps=n_steps,
@@ -3101,11 +3159,6 @@ def hand_test_parameter(
     )
 
     # Create a new folder
-    # A rechunked read retains the source store's encoding. For this new store,
-    # derive safe storage chunks from the current Dask layout instead.
-    emission = emission.copy(deep=False)
-    for name in emission.variables:
-        emission[name].encoding.pop("chunks", None)
     emission.to_zarr(
         f"{target_root}{saving_root}/combined.zarr",
         mode="w",

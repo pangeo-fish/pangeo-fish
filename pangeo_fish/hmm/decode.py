@@ -373,10 +373,10 @@ def build_transitions(cell_ids, level, sigmas, truncate=4.0, ellipsoid="sphere")
 
     Returns
     -------
-    neighbors : tuple of numpy.ndarray of int, each shape (n, K_sigma)
+    neighbors : numpy.ndarray of int, shape (n_sigma, n, K)
         Local indices (0..n-1) of the predecessors j of each cell i.
         Padding entries point to i itself.
-    logT : tuple of numpy.ndarray of float, each shape (n, K_sigma)
+    logT : numpy.ndarray of float, shape (n_sigma, n, K)
         log P(i | j) for j = neighbors[s, i, k].
         Padding entries are -inf.
 
@@ -450,14 +450,12 @@ def build_transitions(cell_ids, level, sigmas, truncate=4.0, ellipsoid="sphere")
 
         nbr = np.where(in_dom_s, loc_s, np.arange(n)[:, None])
         logT = np.where(in_dom_s, w_s - logZ[nbr], -np.inf)
+        all_nbr.append(nbr.astype(np.int32))
+        all_logT.append(logT.astype(np.float32))
 
-        all_nbr.append(nbr)
-        all_logT.append(logT)
 
-    # Each sigma has a different support radius and hence a different row width.
-    # Keep its sparse table intact: stacking requires equal widths and padding
-    # everything to the widest table wastes memory without changing the model.
-    return tuple(all_nbr), tuple(all_logT)
+    # return np.stack(all_nbr), np.stack(all_logT)
+    return all_nbr, all_logT
 
 
 def viterbi_healpix(emission, sigmas, truncate=4.0, ellipsoid="sphere", level=None):
@@ -532,14 +530,18 @@ def viterbi_healpix(emission, sigmas, truncate=4.0, ellipsoid="sphere", level=No
     M = np.where(ocean, logE[0], -np.inf)
     back = np.zeros((T, n), dtype=np.int32)
 
-    # forward pass
+    bufs = [np.empty(nb.shape, dtype=np.float64) for nb in neighbors]
+
     for t in range(1, T):
         s = sig_idx_u[t]
-        nbr = neighbors[s]
-        cand = M[nbr] + logT[s]  # (n, K): score of each predecessor
-        k = np.argmax(cand, axis=1)
-        best = cand[rows, k]
+        nbr, lt, buf = neighbors[s], logT[s], bufs[s]
+
+        np.take(M, nbr, out=buf, mode="clip")  # buf = M[nbr], sans allocation
+        buf += lt                              # buf = M[nbr] + logT, en place
+
+        k = buf.argmax(axis=1)
         back[t] = nbr[rows, k]
+        best = buf[rows, k]
         M = np.where(ocean, best + logE[t], -np.inf)
 
     if not np.isfinite(M).any():

@@ -49,7 +49,7 @@ def score(emission, predictors, predictor_indices, initial_probability, mask=Non
         normalization_factor = np.sum(updated)
         if normalization_factor == 0:
             warnings.warn(
-                f"Empty product of the prediction with the true distribution at step {time_index + 1}.",
+                f"Empty product of the prediction with the true distribution at step {time_index+1}.",
                 RuntimeWarning,
             )
             return 1e6
