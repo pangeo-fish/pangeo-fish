@@ -46,6 +46,7 @@ from pangeo_fish.hmm.prediction import (
     Foscat1DHealpix,
     Gaussian1DHealpix,
     UpDownGaussian1DHealpix,
+    FFTGaussian1DHealpix,
 )
 from pangeo_fish.io import (
     open_copernicus_catalog,
@@ -1583,6 +1584,14 @@ def _get_predictor_factory(
                 device=device,
                 ellipsoid=ellipsoid,
             )
+        elif conv_method == "FFTConv":
+            predictor = curry(
+                FFTGaussian1DHealpix,
+                cell_ids=ds["cell_ids"].data,
+                grid_info=ds.dggs.grid_info,
+                device=device,
+                ellipsoid=ellipsoid,
+            )
         elif conv_method == "FoscatConv":
             predictor = curry(
                 Foscat1DHealpix,
@@ -1592,7 +1601,7 @@ def _get_predictor_factory(
 
         else:
             raise ValueError(
-                f'Unknown helper "{conv_method}". Expected "HealpixConv", "LargeHealpixConv" or "FoscatConv".'
+                f'Unknown helper "{conv_method}". Expected "HealpixConv", "LargeHealpixConv", "FFTConv" or "FoscatConv".'
             )
     else:
         raise ValueError(f'Unknown dims "{dims}".')
@@ -1714,7 +1723,7 @@ def optimize_pdf(
     tolerance: float,
     earth_radius: pint.Quantity | None = None,
     dims: list[str] = ["cells"],
-    conv_method: str = "HealpixConv",
+    conv_method: str = "FFTConv",
     ellipsoid: str = None,
     final: bool = False,
     single_behav: bool = True,
@@ -1744,6 +1753,13 @@ def optimize_pdf(
          of ``cell_ids``), see :py:func:`earth_radius_from_ellipsoid`.
      dims : list of str, default: ["cells"]
          The list of the dimensions. Either ``["x", "y"]`` or ``["cells"]``
+    conv_method : str, default "FFTGaussian1DHealpix"
+        Define the convolution used by the predictor. It can be:        
+         -"LargeHealpixConv"=>"UpDownGaussian1DHealpix": convolution method based on working on upper cell size (Up) before going back to lower (Down),  
+         -"FoscatConv"=>"Foscat1DHealpix",\\
+         -"HealpixConv"=>"Gaussian1DHealpix": Simple convolution, slow,\\
+         -"FFTConv"=>"FFTGaussian1DHealpix": Default, verry fast multiplies in fft space then come back to real space,
+        
      final : bool, default: False
          If True, optimize sigma by matching the predicted final state to the
          observed final position (``score_final_pos``) instead of the standard
@@ -2049,6 +2065,14 @@ def _build_estimator(emission, target_root, storage_options, ellipsoid=None):
             conv_method="LargeHealpixConv",
             dims=["cells"],
             ellipsoid=ellipsoid,
+        )    
+    elif "FFTGaussian1DHealpix" in cls_name:
+            predictor_factory = _get_predictor_factory(
+            emission,
+            truncate=truncate,
+            conv_method="FFTConv",
+            dims=["cells"],
+            ellipsoid=ellipsoid,
         )
     elif "Gaussian1DHealpix" in cls_name:
         predictor_factory = _get_predictor_factory(
@@ -2066,6 +2090,7 @@ def _build_estimator(emission, target_root, storage_options, ellipsoid=None):
             dims=["cells"],
             ellipsoid=ellipsoid,
         )
+
     else:
         raise RuntimeError("Could not infer predictor's class from the `.json` file.")
 
@@ -2226,7 +2251,6 @@ def decode_trajectories(
     estimator, emission, _ = _build_estimator(
         emission, target_root, storage_options, ellipsoid
     )
-    print(emission)
     needs_states = not set(track_modes) <= {"viterbi", "viterbi_healpix"}
     print(needs_states)
     if states is None and needs_states:
@@ -2919,7 +2943,7 @@ def create_parameters(
     single_behav=True,
     predictor_factory=None,
     predictors=None,
-    class_name="Foscat1DHealpix",
+    class_name="FFTGaussian1DHealpix",
     comment="Custom parameters",
     save_parameters=False,
     storage_options=None,
@@ -2939,6 +2963,13 @@ def create_parameters(
     predictor_indices : array-like of int, optional
         One predictor index per time step, used to build ``sigma_indices``
         when it is not provided.
+    class_name : str, default "FFTGaussian1DHealpix"
+        Define the convolution used by the predictor. It can be:        
+        "Foscat1DHealpix",
+        "UpDownGaussian1DHealpix",
+        "Gaussian1DHealpix",
+        "FFTGaussian1DHealpix",
+        "OldUpDownGaussian1DHealpix"
     single_behav : bool, default=True
         Only used when ``sigma_indices`` is None. If False, one list of time
         indices per continuous segment. If True, one list per predictor value.
@@ -2964,9 +2995,11 @@ def create_parameters(
         "Foscat1DHealpix",
         "UpDownGaussian1DHealpix",
         "Gaussian1DHealpix",
+        "FFTGaussian1DHealpix",
+        "OldUpDownGaussian1DHealpix"
     ]:
         raise ValueError(
-            f'Unknown class_name "{class_name}". Expected "Gaussian1DHealpix", "Foscat1DHealpix" or "UpDownGaussian1DHealpix".'
+            f'Unknown class_name "{class_name}". Expected "Gaussian1DHealpix", "Foscat1DHealpix", "FFTGaussian1DHealpix" or "UpDownGaussian1DHealpix".'
         )
     if predictor_factory is None:
         predictor_factory = {
