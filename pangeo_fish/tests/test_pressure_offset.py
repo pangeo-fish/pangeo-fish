@@ -16,7 +16,7 @@ def synthetic_tag(offset_before=1.8, offset_after=1.8, seed=0):
     """1-min records: in air, at sea (5-15 m), in air again."""
     rng = np.random.default_rng(seed)
     time = pd.date_range("2023-05-03 08:00", "2023-05-07 12:00", freq="1min")
-    hours = ((time - time[0]) / pd.Timedelta("1h")).to_numpy()
+    hours = ((time - time[0]) / pd.Timedelta(1, "h")).to_numpy()
     depth = 10 + 5 * np.sin(2 * np.pi * hours / 3)
     drift = np.interp(
         time.asi8, [time.asi8[0], time.asi8[-1]], [offset_before, offset_after]
@@ -30,8 +30,8 @@ def synthetic_tag(offset_before=1.8, offset_after=1.8, seed=0):
     )
 
 
-BEFORE_RELEASE = slice(None, RELEASE - pd.Timedelta("1min"))
-AFTER_RECOVERY = slice(RECOVERY + pd.Timedelta("1min"), None)
+BEFORE_RELEASE = slice(None, RELEASE - pd.Timedelta(1, "min"))
+AFTER_RECOVERY = slice(RECOVERY + pd.Timedelta(1, "min"), None)
 
 
 class TestEstimatePressureOffset:
@@ -80,7 +80,7 @@ class TestEstimatePressureOffset:
         actual = estimate_pressure_offset(ds, in_air=mask)
 
         assert actual["offset"] == pytest.approx(1.8, abs=0.02)
-        assert actual["segments"][0]["stop"] == RELEASE - pd.Timedelta("1min")
+        assert actual["segments"][0]["stop"] == RELEASE - pd.Timedelta(1, "min")
 
     def test_rejects_non_boolean_mask(self):
         ds = synthetic_tag()
@@ -148,7 +148,7 @@ class TestEstimatePressureOffset:
         )
 
         assert reversed_["offset"] == in_order["offset"]
-        assert reversed_["segments"][0]["stop"] == RELEASE - pd.Timedelta("1min")
+        assert reversed_["segments"][0]["stop"] == RELEASE - pd.Timedelta(1, "min")
 
     def test_invalid_combine(self):
         with pytest.raises(ValueError, match="combine"):
