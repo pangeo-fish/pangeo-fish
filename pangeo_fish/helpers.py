@@ -497,6 +497,25 @@ def _resolve_copernicus_datasets(dataset_id: str):
     return dataset_id, dataset_id, dataset_id.rsplit("_", 1)[0] + "_static", None
 
 
+def _copernicus_requests(dataset_id: str):
+    """Datasets, parts and variables that :func:`load_model` opens.
+
+    Returns a list of ``(dataset_id, part, variables)``: the temperature
+    dataset first (with ``zos`` when SSH is in the same dataset), then the
+    separate SSH dataset if any, and the static dataset last. Both
+    :func:`_open_copernicus_model` and :func:`list_reference_models` use it,
+    so they cannot disagree on what ``load_model`` needs.
+    """
+    temperature_id, ssh_id, static_id, static_part = _resolve_copernicus_datasets(
+        dataset_id
+    )
+    if ssh_id == temperature_id:
+        requests = [(temperature_id, None, ["thetao", "zos"])]
+    else:
+        requests = [(temperature_id, None, ["thetao"]), (ssh_id, None, ["zos"])]
+    return requests + [(static_id, static_part, ["deptho", "mask"])]
+
+
 def _align_copernicus_coordinates(reference, other, dataset_id):
     """Accept roundoff only; never interpolate spatial or temporal coordinates."""
     for name in ("latitude", "longitude", "depth", "time"):
@@ -568,9 +587,10 @@ def _open_copernicus_model(
     model : xarray.Dataset
         Dataset with ``TEMP``, ``XE`` and ``H0`` (via :func:`prepare_dataset`).
     """
-    temperature_id, ssh_id, static_id, static_part = _resolve_copernicus_datasets(
-        copernicus_model_name
+    (temperature_id, _, temperature_variables), *ssh_requests, static_request = (
+        _copernicus_requests(copernicus_model_name)
     )
+    static_id, static_part, static_variables = static_request
 
     if time_slice is not None and time_slice.start is not None:
         start_datetime = np.datetime_as_string(
@@ -605,13 +625,10 @@ def _open_copernicus_model(
             )
         return ds[variables]
 
-    split = temperature_id != ssh_id
-    temperature = open_fields(
-        temperature_id, ["thetao"] if split else ["thetao", "zos"], **temporal
-    )
+    temperature = open_fields(temperature_id, temperature_variables, **temporal)
     datasets = [temperature]
-    if split:
-        ssh = open_fields(ssh_id, ["zos"], **temporal)
+    for ssh_id, _, ssh_variables in ssh_requests:
+        ssh = open_fields(ssh_id, ssh_variables, **temporal)
         if "time" not in ssh.coords or "time" not in temperature.coords:
             raise ValueError(f"Copernicus dataset {ssh_id!r}: missing time coordinate.")
         datasets.append(_align_copernicus_coordinates(temperature, ssh, ssh_id))
@@ -619,7 +636,7 @@ def _open_copernicus_model(
     # IBI 202511 catalogue: bathy contains deptho(latitude, longitude) and
     # mask(depth, latitude, longitude), as well as unused deptho_lev.
     static_options = {"dataset_part": static_part} if static_part else {}
-    static = open_fields(static_id, ["deptho", "mask"], **static_options)
+    static = open_fields(static_id, static_variables, **static_options)
     datasets.append(_align_copernicus_coordinates(temperature, static, static_id))
     ds_all = xr.merge(datasets, compat="no_conflicts", join="exact")
     ds_all = ds_all.rename({"latitude": "lat", "longitude": "lon"})
@@ -729,7 +746,7 @@ def load_model(
 
 #: Default candidates for :func:`list_reference_models`: daily-mean 3D
 #: potential temperature datasets (``dataset_id`` -> ``product_id``).
-REFERENCE_MODEL_CANDIDATES = {
+_REFERENCE_MODEL_CANDIDATES = {
     "cmems_mod_glo_phy_my_0.083deg_P1D-m": "GLOBAL_MULTIYEAR_PHY_001_030",
     "cmems_mod_ibi_phy-temp_my_0.027deg_P1D-m": "IBI_MULTIYEAR_PHY_005_002",
     "cmems_mod_nws_phy-t_my_7km-3D_P1D-m": "NWSHELF_MULTIYEAR_PHY_004_009",
@@ -742,19 +759,48 @@ REFERENCE_MODEL_CANDIDATES = {
 
 _KM_PER_DEGREE = 111.32
 
+_REFERENCE_MODEL_COLUMNS = [
+    "dataset_id",
+    "product_id",
+    "version",
+    "lon_step",
+    "lat_step",
+    "dx_km",
+    "dy_km",
+    "lon_range",
+    "lat_range",
+    "time_start",
+    "time_end",
+    "bbox_share",
+    "covers_bbox",
+    "covers_period",
+    "load_model",
+    "note",
+]
+
 
 def _describe_version(dataset):
-    """Latest version of a described dataset (largest label)."""
-    return max(dataset.versions, key=lambda version: version.label or "")
+    """Version that ``copernicusmarine.open_dataset`` opens by default.
+
+    ``copernicusmarine`` sorts the versions of each described dataset so that
+    the default one comes first (released before not yet released, not
+    retired before retired, then the largest label), and ``open_dataset``
+    without ``dataset_version`` takes that first version. During a version
+    transition the largest label may not be the default yet, so do not
+    compare labels here.
+    """
+    return dataset.versions[0]
 
 
 def _describe_part(version, name=None):
-    """Part chosen like ``copernicusmarine``: ``name``, else ``default``/first."""
+    """Part opened like ``copernicusmarine``: ``name``, else the first part.
+
+    As for versions, the toolbox sorts parts so that the default one comes
+    first. Returns ``None`` if ``name`` is not a part of ``version``.
+    """
     if name is not None:
         return next((part for part in version.parts if part.name == name), None)
-    return next(
-        (part for part in version.parts if part.name == "default"), version.parts[0]
-    )
+    return version.parts[0]
 
 
 def _describe_variables(part):
@@ -812,17 +858,9 @@ def _load_model_support(dataset_id, catalogue):
     ``catalogue`` maps ``dataset_id`` to described datasets of the same
     product. Returns ``(supported, note)``.
     """
-    temperature_id, ssh_id, static_id, static_part = _resolve_copernicus_datasets(
-        dataset_id
-    )
-    required = [(temperature_id, None, ["thetao"])]
-    if ssh_id == temperature_id:
-        required[0][2].append("zos")
-    else:
-        required.append((ssh_id, None, ["zos"]))
-    required.append((static_id, static_part, ["deptho", "mask"]))
-
-    for required_id, part_name, variables in required:
+    requests = _copernicus_requests(dataset_id)
+    temperature_id = requests[0][0]
+    for required_id, part_name, variables in requests:
         if required_id not in catalogue:
             return False, f"companion dataset {required_id!r} not found"
         part = _describe_part(_describe_version(catalogue[required_id]), part_name)
@@ -830,10 +868,73 @@ def _load_model_support(dataset_id, catalogue):
             return False, f"{required_id!r} has no part {part_name!r}"
         missing = sorted(set(variables) - set(_describe_variables(part)))
         if missing == ["zos"] and required_id == temperature_id:
-            return False, "zos is in a separate dataset not mapped by load_model"
+            return False, (
+                "no zos in this dataset (load_model maps a separate SSH dataset "
+                "only for the IBI reanalysis)"
+            )
         if missing:
             return False, f"{required_id!r} lacks {', '.join(missing)}"
     return True, ""
+
+
+def _reference_model_row(dataset_id, catalogue, bbox, start, stop):
+    """Coverage of ``bbox`` and ``[start, stop]`` by one described dataset.
+
+    ``catalogue`` maps ``dataset_id`` to described datasets of its product.
+    Returns the table columns other than ``dataset_id`` and ``product_id``.
+    """
+    if dataset_id not in catalogue:
+        return {"note": "dataset not found in product"}
+    version = _describe_version(catalogue[dataset_id])
+    variables = _describe_variables(_describe_part(version))
+    if "thetao" not in variables:
+        return {"note": "no thetao variable"}
+    coords = {c.coordinate_id: c for c in variables["thetao"].coordinates}
+    lon_min, lon_max, lon_step = _coordinate_extent(coords["longitude"])
+    lat_min, lat_max, lat_step = _coordinate_extent(coords["latitude"])
+    time_min, time_max, _ = _coordinate_extent(coords["time"])
+    unit = coords["time"].coordinate_unit
+    time_start = _describe_time(time_min, unit)
+    time_end = _describe_time(time_max, unit)
+    share = _bbox_share(bbox, (lon_min, lon_max), (lat_min, lat_max))
+    supported, note = _load_model_support(dataset_id, catalogue)
+    mid_lat = np.deg2rad(np.mean(bbox["latitude"]))
+    return {
+        "version": version.label,
+        "lon_step": lon_step,
+        "lat_step": lat_step,
+        "dx_km": lon_step * _KM_PER_DEGREE * np.cos(mid_lat),
+        "dy_km": lat_step * _KM_PER_DEGREE,
+        "lon_range": (lon_min, lon_max),
+        "lat_range": (lat_min, lat_max),
+        "time_start": time_start.normalize(),
+        "time_end": time_end.normalize(),
+        "bbox_share": share,
+        "covers_bbox": share >= 0.999,
+        "covers_period": bool(time_start <= start and time_end >= stop),
+        "load_model": supported,
+        "note": note,
+    }
+
+
+def _describe_product(product_id):
+    """Described datasets of ``product_id`` by ``dataset_id``, or the error.
+
+    Only a missing product and network failures (``requests`` errors are
+    ``OSError``) are reported as a row note; any other error, such as a
+    change in the shape of the ``describe`` response, is raised.
+    """
+    try:
+        described = copernicusmarine.describe(
+            product_id=product_id, disable_progress_bar=True
+        )
+    except (copernicusmarine.ProductNotFound, OSError) as error:
+        return error
+    return {
+        dataset.dataset_id: dataset
+        for product in described.products
+        for dataset in product.datasets
+    }
 
 
 def list_reference_models(
@@ -855,21 +956,21 @@ def list_reference_models(
     time_slice : slice
         Period of the tag, e.g. ``slice("2023-05-03", "2023-06-08")``.
     candidates : dict, optional
-        Mapping of ``dataset_id`` to ``product_id`` to check. Defaults to
-        :data:`REFERENCE_MODEL_CANDIDATES` (daily 3D temperature of GLORYS,
-        IBI, NWS, MED and BAL reanalyses and of the GLO, IBI and NWS
-        analysis/forecast products).
+        Mapping of ``dataset_id`` to ``product_id`` to check. Defaults to the
+        daily 3D temperature datasets of the GLORYS, IBI, NWS, MED and BAL
+        reanalyses and of the GLO, IBI and NWS analysis/forecast products.
 
     Returns
     -------
     table : pandas.DataFrame
-        One row per dataset with the grid spacing (``lon_step``/``lat_step``
-        in degrees, ``dx_km``/``dy_km`` at the bbox centre latitude), the
-        time coverage, ``bbox_share`` (area-weighted share of the bbox inside
-        the model extent), ``covers_bbox``, ``covers_period``, ``load_model``
-        (whether :func:`load_model` can open it directly with
-        ``copernicus_model_name``) and a ``note``. Rows are sorted with full
-        coverage and finest grids first.
+        One row per dataset with the default ``version`` (the one
+        ``copernicusmarine.open_dataset`` opens), the grid spacing
+        (``lon_step``/``lat_step`` in degrees, ``dx_km``/``dy_km`` at the bbox
+        centre latitude), the time coverage, ``bbox_share`` (area-weighted
+        share of the bbox inside the model extent), ``covers_bbox``,
+        ``covers_period``, ``load_model`` (whether :func:`load_model` can open
+        it directly with ``copernicus_model_name``) and a ``note``. Rows are
+        sorted with full coverage and finest grids first.
 
     Notes
     -----
@@ -879,88 +980,23 @@ def list_reference_models(
     SSH and static datasets and required variables exist), not a test open.
     """
     if candidates is None:
-        candidates = REFERENCE_MODEL_CANDIDATES
+        candidates = _REFERENCE_MODEL_CANDIDATES
     start = pd.Timestamp(time_slice.start).normalize()
     stop = pd.Timestamp(time_slice.stop).normalize()
-    mid_lat = np.deg2rad(np.mean(bbox["latitude"]))
 
     catalogues = {}
     rows = []
     for dataset_id, product_id in candidates.items():
-        row = {"dataset_id": dataset_id, "product_id": product_id}
         if product_id not in catalogues:
-            try:
-                described = copernicusmarine.describe(
-                    product_id=product_id, disable_progress_bar=True
-                )
-                catalogues[product_id] = {
-                    dataset.dataset_id: dataset
-                    for product in described.products
-                    for dataset in product.datasets
-                }
-            except Exception as error:  # network or unknown product
-                catalogues[product_id] = error
+            catalogues[product_id] = _describe_product(product_id)
         catalogue = catalogues[product_id]
         if isinstance(catalogue, Exception):
-            rows.append(row | {"note": f"describe failed: {catalogue}"})
-            continue
-        if dataset_id not in catalogue:
-            rows.append(row | {"note": "dataset not found in product"})
-            continue
+            details = {"note": f"describe failed: {catalogue}"}
+        else:
+            details = _reference_model_row(dataset_id, catalogue, bbox, start, stop)
+        rows.append({"dataset_id": dataset_id, "product_id": product_id} | details)
 
-        version = _describe_version(catalogue[dataset_id])
-        variables = _describe_variables(_describe_part(version))
-        if "thetao" not in variables:
-            rows.append(row | {"note": "no thetao variable"})
-            continue
-        coords = {c.coordinate_id: c for c in variables["thetao"].coordinates}
-        lon_min, lon_max, lon_step = _coordinate_extent(coords["longitude"])
-        lat_min, lat_max, lat_step = _coordinate_extent(coords["latitude"])
-        time_min, time_max, _ = _coordinate_extent(coords["time"])
-        unit = coords["time"].coordinate_unit
-        time_start = _describe_time(time_min, unit)
-        time_end = _describe_time(time_max, unit)
-        share = _bbox_share(bbox, (lon_min, lon_max), (lat_min, lat_max))
-        supported, note = _load_model_support(dataset_id, catalogue)
-        rows.append(
-            row
-            | {
-                "version": version.label,
-                "lon_step": lon_step,
-                "lat_step": lat_step,
-                "dx_km": lon_step * _KM_PER_DEGREE * np.cos(mid_lat),
-                "dy_km": lat_step * _KM_PER_DEGREE,
-                "lon_range": (lon_min, lon_max),
-                "lat_range": (lat_min, lat_max),
-                "time_start": time_start.normalize(),
-                "time_end": time_end.normalize(),
-                "bbox_share": share,
-                "covers_bbox": share >= 0.999,
-                "covers_period": bool(time_start <= start and time_end >= stop),
-                "load_model": supported,
-                "note": note,
-            }
-        )
-
-    columns = [
-        "dataset_id",
-        "product_id",
-        "version",
-        "lon_step",
-        "lat_step",
-        "dx_km",
-        "dy_km",
-        "lon_range",
-        "lat_range",
-        "time_start",
-        "time_end",
-        "bbox_share",
-        "covers_bbox",
-        "covers_period",
-        "load_model",
-        "note",
-    ]
-    table = pd.DataFrame(rows).reindex(columns=columns)
+    table = pd.DataFrame(rows).reindex(columns=_REFERENCE_MODEL_COLUMNS)
     for name in ("covers_bbox", "covers_period", "load_model"):
         table[name] = table[name].fillna(False).astype(bool)
     table = table.assign(_area=table["dx_km"] * table["dy_km"])
