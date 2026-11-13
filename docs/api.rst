@@ -17,7 +17,6 @@ High-level Functions
    plot_tag
    load_model
    compute_diff
-   diagnose_depth_vs_bathymetry
    open_diff_dataset
    regrid_dataset
    estimate_refinement_costs
@@ -42,6 +41,7 @@ Diagnostics
    :toctree: generated
 
    check_event_position
+   diagnose_depth_vs_bathymetry
 
 
 I/O

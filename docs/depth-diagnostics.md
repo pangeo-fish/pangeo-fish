@@ -28,7 +28,7 @@ deepest value within a box of the model resolution:
 import xarray as xr
 
 from pangeo_fish.bathy import sample_max_depth
-from pangeo_fish.helpers import diagnose_depth_vs_bathymetry
+from pangeo_fish.diagnostics import diagnose_depth_vs_bathymetry
 
 url = "https://data-taos.ifremer.fr/demo/database/gebco_2024_new.zarr/"
 gebco = xr.open_zarr(url)["elevation"]
@@ -51,12 +51,18 @@ diagnostic[["model_too_shallow", "reference_too_shallow"]].to_dataframe()
 Variables (along `time`):
 
 - `tag_max_depth`: deepest tag record of the time step;
-- `model_too_shallow` / `reference_too_shallow`: share of valid cells whose
-  depth is lower than `relative_depth_threshold * tag_max_depth`;
-- `model_only_too_shallow`: share of valid cells that are too shallow in the
-  model but deep enough in the reference, i.e. the cells a threshold would
-  remove because of the model bathymetry only;
+- `n_valid_cells` / `reference_n_valid_cells`: cells inside `mask` where the
+  model (reference) depth is defined;
+- `model_too_shallow` / `reference_too_shallow`: share of these valid cells
+  whose depth is lower than `relative_depth_threshold * tag_max_depth`;
+- `model_only_too_shallow`: share of the cells valid in both bathymetries that
+  are too shallow in the model but deep enough in the reference, i.e. the cells
+  a threshold would remove because of the model bathymetry only;
 - `model_max_depth` / `reference_max_depth`: deepest valid cell.
+
+The model time steps come from one source only: the `time` coordinate of
+`bathymetry` when it depends on time (e.g. `diff["H0"] + diff["XE"]`), or the
+`time` argument otherwise.
 
 A `UserWarning` is emitted when, at some time steps, every valid cell is too
 shallow in the model.
@@ -73,7 +79,7 @@ shallow in the model.
   (`compute_healpix_histogram_region_bin_size` and `batch_compute_pdf_bathy`),
   which uses the GEBCO depth distribution inside each HEALPix cell.
 - Both close to 1: check the tag depths first, e.g. the pressure unit and offset
-  (see #67).
+  (see [pangeo-fish#67](https://github.com/pangeo-fish/pangeo-fish/issues/67)).
 
 Example: twaite shad A19845 (`shad_scheldt_dst`, IBI, HEALPix level 11) in the
 Western Scheldt (98 cells). The tag reaches 13–40 m per day. The IBI depth is

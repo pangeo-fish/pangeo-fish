@@ -315,68 +315,55 @@ def sample_max_depth(elevation, latitude, longitude, *, window=None):
 
     Returns
     -------
-    depth : xarray.DataArray or numpy.ndarray
+    depth : xarray.DataArray
         Depth in meters (positive downwards; land is negative), with the shape
-        of ``latitude``. An :py:class:`xarray.DataArray` if ``latitude`` is one.
-    """
-    from scipy import ndimage
+        (and, for :py:class:`xarray.DataArray` positions, the dimensions and
+        coordinates) of ``latitude``. ``NaN`` where the position is ``NaN``.
 
+    Notes
+    -----
+    :py:func:`compute_healpix_histogram_region_bin_size` also describes the
+    depths inside each cell, but its deepest non-empty bin is not a usable
+    maximum depth: the histogram is smoothed over two bins on each side, its
+    output drops the last 10 bins (it keeps ``nb_depth_bins`` columns, of
+    which the first 10 are a buffer) and it only works on HEALPix cells.
+    """
     names = {"latitude": "lat", "longitude": "lon"}
     elevation = elevation.rename(
         {k: v for k, v in names.items() if k in elevation.dims}
     )
+    # ascending coordinates, so that the area of interest can be sliced
+    for dim in ("lat", "lon"):
+        if elevation[dim].values[0] > elevation[dim].values[-1]:
+            elevation = elevation.isel({dim: slice(None, None, -1)})
 
-    lat = np.asarray(latitude, dtype="float64")
-    lon = np.asarray(longitude, dtype="float64")
-    finite = np.isfinite(lat) & np.isfinite(lon)
-    result = np.full(lat.shape, np.nan)
+    lat = xr.DataArray(latitude).astype("float64")
+    lon = xr.DataArray(longitude).astype("float64")
+    finite = lat.notnull() & lon.notnull()
     if not finite.any():
-        return _like(latitude, result)
+        return xr.full_like(lat, np.nan).rename("depth").assign_attrs(units="m")
 
     half = 0.0 if window is None else float(window) / 2
-    dlat = float(np.abs(np.diff(elevation["lat"].values[:2])).item())
-    dlon = float(np.abs(np.diff(elevation["lon"].values[:2])).item())
+    dlat = float(np.abs(elevation["lat"].diff("lat")[0]))
+    dlon = float(np.abs(elevation["lon"].diff("lon")[0]))
     margin_lat = half + 2 * dlat
     margin_lon = half + 2 * dlon
-
-    lat_slice = slice(lat[finite].min() - margin_lat, lat[finite].max() + margin_lat)
-    lon_slice = slice(lon[finite].min() - margin_lon, lon[finite].max() + margin_lon)
-    if elevation["lat"].values[0] > elevation["lat"].values[-1]:
-        lat_slice = slice(lat_slice.stop, lat_slice.start)
-    if elevation["lon"].values[0] > elevation["lon"].values[-1]:
-        lon_slice = slice(lon_slice.stop, lon_slice.start)
-
-    subset = elevation.sel(lat=lat_slice, lon=lon_slice).transpose("lat", "lon")
-    depth = -np.asarray(subset.values, dtype="float64")
+    depth = -elevation.sel(
+        lat=slice(float(lat.min()) - margin_lat, float(lat.max()) + margin_lat),
+        lon=slice(float(lon.min()) - margin_lon, float(lon.max()) + margin_lon),
+    )
     if window is not None:
-        size = (
-            2 * int(np.ceil(half / dlat)) + 1,
-            2 * int(np.ceil(half / dlon)) + 1,
-        )
-        filled = np.where(np.isnan(depth), -np.inf, depth)
-        depth = ndimage.maximum_filter(filled, size=size, mode="nearest")
-        depth = np.where(np.isinf(depth), np.nan, depth)
+        size = {
+            "lat": 2 * int(np.ceil(half / dlat)) + 1,
+            "lon": 2 * int(np.ceil(half / dlon)) + 1,
+        }
+        depth = depth.rolling(size, center=True, min_periods=1).max()
 
-    sub_lat = subset["lat"].values
-    sub_lon = subset["lon"].values
-    i = _nearest_index(sub_lat, lat[finite])
-    j = _nearest_index(sub_lon, lon[finite])
-    result[finite] = depth[i, j]
-
-    return _like(latitude, result)
-
-
-def _nearest_index(coord, values):
-    order = np.argsort(coord)
-    sorted_coord = coord[order]
-    pos = np.clip(np.searchsorted(sorted_coord, values), 1, sorted_coord.size - 1)
-    left = sorted_coord[pos - 1]
-    right = sorted_coord[pos]
-    pos = np.where(np.abs(values - left) <= np.abs(right - values), pos - 1, pos)
-    return order[pos]
-
-
-def _like(template, values):
-    if isinstance(template, xr.DataArray):
-        return template.copy(data=values).rename("depth").assign_attrs(units="m")
-    return values
+    # NaN positions cannot be looked up: use any finite position, then mask
+    sampled = depth.sel(
+        lat=lat.where(finite, float(lat.where(finite).max())),
+        lon=lon.where(finite, float(lon.where(finite).max())),
+        method="nearest",
+    )
+    sampled = sampled.drop_vars(["lat", "lon"]).where(finite)
+    return sampled.rename("depth").assign_attrs(units="m")
