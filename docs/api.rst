@@ -32,6 +32,15 @@ High-level Functions
    render_distributions
 
 
+Diagnostics
+-----------
+
+.. currentmodule:: pangeo_fish.diagnostics
+.. autosummary::
+   :toctree: generated
+
+   diagnose_depth_vs_bathymetry
+
 
 I/O
 ---
@@ -86,6 +95,7 @@ Emission Computations
    pdf.normal
    pdf.combine_emission_pdf
    diff.diff_z
+   bathy.sample_max_depth
 
 
 Tag/time Operations
