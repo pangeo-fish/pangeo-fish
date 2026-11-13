@@ -998,7 +998,8 @@ def list_reference_models(
 
     table = pd.DataFrame(rows).reindex(columns=_REFERENCE_MODEL_COLUMNS)
     for name in ("covers_bbox", "covers_period", "load_model"):
-        table[name] = table[name].fillna(False).astype(bool)
+        # ``fillna`` on an object column warns about silent downcasting (pandas 2.2)
+        table[name] = table[name].eq(True)
     table = table.assign(_area=table["dx_km"] * table["dy_km"])
     table = table.sort_values(
         ["covers_period", "covers_bbox", "bbox_share", "_area"],
