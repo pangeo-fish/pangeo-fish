@@ -75,7 +75,6 @@ __all__ = [
     "compute_diff",
     "open_diff_dataset",
     "regrid_dataset",
-    "check_event_position",
     "compute_emission_pdf",
     "compute_acoustic_pdf",
     "combine_pdfs",
@@ -1121,165 +1120,6 @@ def regrid_dataset(
     return reshaped, figure
 
 
-def _ocean_share(log_weights: np.ndarray, is_ocean: np.ndarray) -> float:
-    """Share of ``exp(log_weights)`` located on ``is_ocean`` cells (underflow-safe)."""
-    if not is_ocean.any():
-        return 0.0
-    total = np.logaddexp.reduce(log_weights)
-    ocean = np.logaddexp.reduce(log_weights[is_ocean])
-    return float(np.exp(ocean - total))
-
-
-def check_event_position(
-    *,
-    grid: xr.Dataset,
-    position,
-    sigma: float,
-    mask: xr.DataArray,
-    event_name: str = "release",
-    min_ocean_mass: float = 0.01,
-    target_ocean_mass: float = 0.1,
-    warn: bool = True,
-) -> dict:
-    """Check that a tagging event leaves probability mass on the ocean cells.
-
-    The initial (release) and final (recapture) distributions are Gaussians
-    centred on the event position (see
-    :py:func:`pangeo_fish.distributions.healpix.normal_at`). If the position is
-    on land or outside the model domain and ``sigma`` is small, the whole
-    distribution falls on cells that the ocean mask removes, and the filter
-    starts (or ends) from an empty or degenerate distribution without any error.
-
-    Parameters
-    ----------
-    grid : xarray.Dataset
-        HEALPix grid (decoded with ``xdggs``), e.g. the ``latitude`` and
-        ``longitude`` of the regridded diff dataset.
-    position : mapping
-        Event position with ``latitude`` and ``longitude`` (degrees), e.g.
-        ``tag["tagging_events"].ds.sel(event_name="release")``.
-    sigma : float
-        Standard deviation of the Gaussian, in radians (``initial_std`` or
-        ``recapture_std``).
-    mask : xarray.DataArray
-        Ocean mask along ``cells`` (``True`` / ``1`` on ocean cells).
-    event_name : str, default: "release"
-        Name of the event, used in the messages only.
-    min_ocean_mass : float, default: 0.01
-        A warning is emitted when the share of the Gaussian mass on ocean cells
-        is below this value.
-    target_ocean_mass : float, default: 0.1
-        Ocean share used to compute ``suggested_sigma``.
-    warn : bool, default: True
-        Whether to emit a :py:class:`UserWarning` when the check fails.
-
-    Returns
-    -------
-    report : dict
-        ``event_name``, ``latitude``, ``longitude``, ``sigma`` (rad),
-        ``ocean_mass`` (share of the Gaussian on ocean cells, 0 to 1),
-        ``distance_to_ocean`` (rad, from the cell containing the event to the
-        nearest ocean cell), ``nearest_ocean_latitude`` /
-        ``nearest_ocean_longitude`` (a possible pseudo-event position),
-        ``suggested_sigma`` (rad, smallest sigma whose ocean share reaches
-        ``target_ocean_mass``; ``None`` if no sigma does), the same distances
-        in km (``*_km``, using the Earth radius of the grid) and ``ok``.
-    """
-    distances = distrib.healpix.angular_distances(grid, position).data
-    is_ocean = np.asarray(mask.data, dtype=float)
-    is_ocean = np.where(np.isnan(is_ocean), 0.0, is_ocean) > 0
-    if is_ocean.shape != distances.shape:
-        raise ValueError(
-            f"mask has shape {is_ocean.shape}, expected {distances.shape} (one value per cell)"
-        )
-
-    def ocean_share(s):
-        return _ocean_share(-0.5 * (distances / s) ** 2, is_ocean)
-
-    try:
-        radius_km = float(_earth_radius_from_grid(grid).magnitude)
-    except Exception:
-        radius_km = float(earth_radius_from_ellipsoid("sphere").magnitude)
-
-    report = {
-        "event_name": event_name,
-        "latitude": float(np.asarray(position["latitude"])),
-        "longitude": float(np.asarray(position["longitude"])),
-        "sigma": float(sigma),
-        "sigma_km": float(sigma) * radius_km,
-        "ocean_mass": ocean_share(sigma),
-        "distance_to_ocean": None,
-        "distance_to_ocean_km": None,
-        "nearest_ocean_latitude": None,
-        "nearest_ocean_longitude": None,
-        "suggested_sigma": None,
-        "suggested_sigma_km": None,
-    }
-
-    if is_ocean.any():
-        nearest = int(np.flatnonzero(is_ocean)[np.argmin(distances[is_ocean])])
-        report["distance_to_ocean"] = float(distances[nearest])
-        report["distance_to_ocean_km"] = float(distances[nearest]) * radius_km
-        if "latitude" in grid.variables and "longitude" in grid.variables:
-            lat = np.asarray(grid["latitude"].data).reshape(-1)
-            lon = np.asarray(grid["longitude"].data).reshape(-1)
-            report["nearest_ocean_latitude"] = float(lat[nearest])
-            report["nearest_ocean_longitude"] = float(lon[nearest])
-
-        if report["ocean_mass"] >= target_ocean_mass:
-            report["suggested_sigma"] = float(sigma)
-        else:
-            positive = distances[distances > 0]
-            lower = float(positive.min()) / 4 if positive.size else float(sigma)
-            upper = max(float(distances.max()), lower)
-            candidates = np.geomspace(lower, upper, 256)
-            shares = np.array([ocean_share(s) for s in candidates])
-            reached = np.flatnonzero(shares >= target_ocean_mass)
-            if reached.size > 0:
-                report["suggested_sigma"] = float(candidates[reached[0]])
-    if report["suggested_sigma"] is not None:
-        report["suggested_sigma_km"] = report["suggested_sigma"] * radius_km
-
-    report["ok"] = report["ocean_mass"] >= min_ocean_mass
-
-    if warn and not report["ok"]:
-        position_text = (
-            f"({report['latitude']:.4f} N, {report['longitude']:.4f} E)"
-            if np.isfinite(report["latitude"])
-            else "(unknown position)"
-        )
-        message = (
-            f"Only {report['ocean_mass']:.3g} of the {event_name} probability "
-            f"(sigma = {sigma:.3g} rad ≈ {report['sigma_km']:.3g} km) lies on ocean "
-            f"cells: the {event_name} position {position_text} is on land or "
-            "outside the ocean mask of the model."
-        )
-        if report["distance_to_ocean"] is None:
-            message += " The ocean mask has no ocean cell."
-        else:
-            nearest_text = (
-                f" ({report['nearest_ocean_latitude']:.4f} N, "
-                f"{report['nearest_ocean_longitude']:.4f} E)"
-                if report["nearest_ocean_latitude"] is not None
-                else ""
-            )
-            message += (
-                f" The nearest ocean cell{nearest_text} is "
-                f"{report['distance_to_ocean_km']:.3g} km away."
-                " Consider using that cell as a pseudo-event position"
-            )
-            if report["suggested_sigma"] is not None:
-                message += (
-                    f", or a sigma of at least {report['suggested_sigma']:.3g} rad "
-                    f"(≈ {report['suggested_sigma_km']:.3g} km), which puts "
-                    f"{target_ocean_mass:.0%} of the mass on ocean cells"
-                )
-            message += "."
-        warnings.warn(message, UserWarning, stacklevel=2)
-
-    return report
-
-
 def compute_emission_pdf(
     *,
     diff_ds: xr.Dataset,
@@ -1327,9 +1167,8 @@ def compute_emission_pdf(
         Only used if ``save=True``
     check_positions : bool, default: True
         Whether to warn when the release (or recapture) distribution has almost
-        no mass on the ocean cells (see :py:func:`check_event_position`). Ocean
-        cells are cells where ``ocean_mask`` is positive and, if present, ``H0``
-        is defined.
+        no mass on the ocean cells, i.e. the cells where ``ocean_mask`` is
+        positive (see :py:func:`pangeo_fish.diagnostics.check_event_position`).
 
     Returns
     -------
@@ -1365,12 +1204,13 @@ def compute_emission_pdf(
         )
 
     if check_positions:
-        # cells with a model bathymetry are the cells the filter can use, even
-        # when ``ocean_mask`` was regridded with a permissive threshold
-        ocean_mask = diff_ds["ocean_mask"].fillna(0) > 0
-        if "H0" in diff_ds.variables:
-            ocean_mask = ocean_mask & diff_ds["H0"].notnull()
-        ocean_mask = ocean_mask.compute()
+        # imported here because pangeo_fish.diagnostics imports this module
+        from pangeo_fish.diagnostics import check_event_position
+
+        # same mask as the one stored in the emission dataset. The ocean_mask
+        # written by regrid_dataset_hpresample(..., mask_threshold=0.0) can be
+        # positive on cells without H0; fixing that mask is a separate follow-up.
+        ocean_mask = diff_ds["ocean_mask"].compute()
         check_event_position(
             grid=grid,
             position=initial_position,
