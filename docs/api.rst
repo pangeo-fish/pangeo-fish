@@ -50,6 +50,16 @@ I/O
    tz_convert
 
 
+ETN Acoustic Detections
+-----------------------
+
+.. currentmodule:: pangeo_fish.etn_acoustic
+.. autosummary::
+   :toctree: generated
+
+   find_etn_acoustic_detections
+
+
 DGGS Zarr Output
 ----------------
 
@@ -188,14 +198,3 @@ HMM Filtering
    forward
    backward
    forward_backward
-
-
-ETN Acoustic Detections
------------------------
-
-.. currentmodule:: pangeo_fish.etn_acoustic
-.. autosummary::
-   :toctree: generated
-
-   find_etn_acoustic_detections
-   ETNAcousticDetections

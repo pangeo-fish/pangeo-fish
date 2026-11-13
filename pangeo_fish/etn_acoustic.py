@@ -12,23 +12,24 @@ ETN publishes its data as parquet files (https://www.lifewatch.be/etn/parquet/):
 
 :func:`find_etn_acoustic_detections` tells whether an animal (e.g. one carrying
 a DST) also carries an acoustic tag and returns its detections and the receiver
-deployments that detected it; :meth:`ETNAcousticDetections.write` writes them as
-the ``acoustic.csv`` and ``stations.csv`` files of the tag folder format (see
+deployments that detected it as the ``acoustic`` and ``stations`` nodes of a tag
+:py:class:`xarray.DataTree` (see :func:`pangeo_fish.io.open_tag` and
 ``docs/format.md``).
 """
 
-import dataclasses
-import os
 import warnings
 
 import fsspec
 import pandas as pd
+import xarray as xr
 
+# ETN_PARQUET_ROOT, _storage_options, _read_parquet and the de-duplication of
+# the animals table (in _select_animal) are copies of those of
+# pangeo_fish.etn_archival (PR #295): whichever of the two modules is merged
+# second imports them from the first instead of keeping a copy.
 ETN_PARQUET_ROOT = "https://www.lifewatch.be/etn/parquet"
 
 ACOUSTIC_TAG_TYPES = ("acoustic", "acoustic-archival")
-
-_TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
 _STATION_COLUMNS = {
     "deployment_id": "deployment_id",
@@ -66,132 +67,28 @@ def _naive_utc(values):
     return values
 
 
-@dataclasses.dataclass
-class ETNAcousticDetections:
-    """Acoustic information of an ETN animal.
-
-    Attributes
-    ----------
-    animal_id : int
-        ETN animal id.
-    animal_project_code : str
-        ETN animal project.
-    double_tagged : bool
-        Whether the animal carries both an acoustic and an archival tag.
-    acoustic_tag_ids : list of str
-        Acoustic transmitter ids of the animal, including the alternative ids
-        of sensor tags (empty if none).
-    detections : pandas.DataFrame
-        Detections with the columns ``time`` (time zone naive, UTC),
-        ``deployment_id``, ``longitude``, ``latitude``, ``station_name``,
-        ``acoustic_tag_id`` and ``receiver_id``.
-    stations : pandas.DataFrame
-        The receiver deployments of the detections, indexed by ``deployment_id``,
-        with the columns of ``stations.csv``.
-    message : str
-        Human readable summary, explaining why nothing was found if applicable.
-    """
-
-    animal_id: int
-    animal_project_code: str
-    double_tagged: bool
-    acoustic_tag_ids: list
-    detections: pd.DataFrame
-    stations: pd.DataFrame
-    message: str
-
-    @property
-    def found(self):
-        """Whether any detection was found."""
-        return len(self.detections) > 0
-
-    def write(self, root, name):
-        """Write the detections and stations to a tag folder.
-
-        Writes ``{root}/{name}/acoustic.csv`` and ``{root}/stations.csv``.
-        Deployments already present in an existing ``stations.csv`` are kept
-        (the new rows replace those with the same ``deployment_id``).
-
-        Parameters
-        ----------
-        root : str or os.PathLike
-            Local root folder of the tags.
-        name : str
-            Name of the tag folder (usually the DST id).
-
-        Returns
-        -------
-        paths : list of str
-            The files written.
-        """
-        root = os.fspath(root)
-        folder = os.path.join(root, name)
-        os.makedirs(folder, exist_ok=True)
-
-        acoustic = self.detections[["time", "deployment_id", "longitude", "latitude"]]
-        acoustic = acoustic.assign(time=acoustic["time"].dt.tz_localize("UTC"))
-        acoustic_path = os.path.join(folder, "acoustic.csv")
-        acoustic.to_csv(
-            acoustic_path, index=False, date_format=_TIME_FORMAT, na_rep="NA"
+def _select_animal(animals, project, tag_id):
+    """All the tag rows of the animal carrying ``tag_id`` in ``project``."""
+    # the ETN animals table has duplicated rows
+    animals = animals.drop_duplicates(["animal_id", "tag_serial_number"])
+    animals = animals[animals["animal_project_code"] == project]
+    ids = animals.loc[animals["tag_serial_number"] == str(tag_id), "animal_id"]
+    ids = ids.unique()
+    if len(ids) == 0:
+        raise ValueError(
+            f"tag {tag_id!r} not found in the ETN animals table of project {project!r}"
         )
-
-        stations = self.stations
-        stations_path = os.path.join(root, "stations.csv")
-        if os.path.exists(stations_path):
-            existing = pd.read_csv(
-                stations_path,
-                index_col="deployment_id",
-                parse_dates=["deploy_time", "recover_time"],
-            )
-            for column in ["deploy_time", "recover_time"]:
-                existing[column] = _naive_utc(existing[column])
-            existing = existing[~existing.index.isin(stations.index)]
-            stations = pd.concat([existing, stations]).sort_index()
-        stations = stations.assign(
-            **{
-                column: stations[column].dt.tz_localize("UTC")
-                for column in ["deploy_time", "recover_time"]
-            }
+    if len(ids) > 1:
+        raise ValueError(
+            f"tag {tag_id!r} is attached to several animals of project {project!r}"
+            f" ({sorted(ids.tolist())}): pass the animals table restricted to one"
+            " of them as `animals`"
         )
-        stations.to_csv(stations_path, date_format=_TIME_FORMAT, na_rep="NA")
-
-        return [acoustic_path, stations_path]
-
-
-def _select_animal(animals, animal_id, tag_serial_number, project):
-    if (animal_id is None) == (tag_serial_number is None):
-        raise ValueError("pass exactly one of animal_id or tag_serial_number")
-    if project is not None:
-        animals = animals[animals["animal_project_code"] == project]
-    if animal_id is not None:
-        rows = animals[animals["animal_id"] == int(animal_id)]
-        what = f"animal {animal_id!r}"
-    else:
-        ids = animals.loc[
-            animals["tag_serial_number"] == str(tag_serial_number), "animal_id"
-        ].unique()
-        if len(ids) > 1:
-            raise ValueError(
-                f"tag {tag_serial_number!r} is attached to several animals"
-                f" ({sorted(ids.tolist())}): pass animal_id or project"
-            )
-        rows = animals[animals["animal_id"].isin(ids)]
-        what = f"tag {tag_serial_number!r}"
-    if rows.empty:
-        raise ValueError(f"{what} not found in the ETN animals table")
-    return rows
-
-
-def _empty_stations():
-    return pd.DataFrame(columns=list(_STATION_COLUMNS.values())).set_index(
-        "deployment_id"
-    )
+    return animals[animals["animal_id"] == ids[0]]
 
 
 def _read_stations(root, storage_options, detections):
     ids = detections["deployment_id"].dropna().unique().tolist()
-    if not ids:
-        return _empty_stations()
     deployments = _read_parquet(
         f"{root}/acoustic/deployments/part-0.parquet",
         storage_options,
@@ -208,8 +105,9 @@ def _read_stations(root, storage_options, detections):
     if missing:
         warnings.warn(
             f"deployments {missing} are not in the ETN deployments table:"
-            " using the positions of the detections, without deploy/recover times",
+            " using the positions of the detections",
             UserWarning,
+            stacklevel=3,
         )
         fallback = (
             detections[detections["deployment_id"].isin(missing)]
@@ -221,11 +119,30 @@ def _read_stations(root, storage_options, detections):
         deployments = pd.concat(
             [deployments, fallback.reindex(columns=deployments.columns)]
         )
-    if deployments["recover_time"].isna().any():
+    deployments = deployments.set_index("deployment_id").sort_index()
+
+    # stations without deploy / recover time are never active in the acoustic
+    # emission: use the first / last detection at the deployment instead
+    by_deployment = detections.groupby("deployment_id")["time"]
+    bounds = {"deploy_time": by_deployment.min(), "recover_time": by_deployment.max()}
+    filled = {}
+    for column, values in bounds.items():
+        unknown = deployments[column].isna()
+        if unknown.any():
+            deployments.loc[unknown, column] = values.reindex(
+                deployments.index[unknown]
+            )
+            filled[column] = deployments.index[unknown].tolist()
+        deployments[column] = pd.to_datetime(deployments[column])
+    if filled:
+        details = "; ".join(f"{column}: {ids}" for column, ids in filled.items())
         warnings.warn(
-            "some deployments have no recover time in ETN", UserWarning, stacklevel=3
+            "deployments without deploy or recover time in ETN: using the first"
+            f" or last detection at the deployment instead ({details})",
+            UserWarning,
+            stacklevel=3,
         )
-    return deployments.set_index("deployment_id").sort_index()
+    return deployments
 
 
 def _moratorium(root, storage_options, project):
@@ -242,25 +159,38 @@ def _moratorium(root, storage_options, project):
 
 
 def find_etn_acoustic_detections(
-    animal_id=None,
-    tag_serial_number=None,
+    project,
+    tag_id,
     *,
-    project=None,
     root=ETN_PARQUET_ROOT,
     storage_options=None,
     animals=None,
 ):
     """Find the acoustic tags and detections of an ETN animal.
 
+    The animal is identified like in
+    :func:`pangeo_fish.etn_archival.open_etn_archival`: by its project and the
+    serial number of any of its tags (e.g. its DST). A tag attached to several
+    animals of ``project`` raises an error: pass ``animals`` restricted to the
+    right animal.
+
+    Deployments without deploy or recover time in ETN would never be active in
+    the acoustic emission probability: their missing bounds are replaced by the
+    first or last detection at that deployment, with a warning.
+
+    .. note::
+        The returned nodes can be added to a tag (e.g. from
+        :func:`pangeo_fish.etn_archival.open_etn_archival`) and written with
+        :func:`pangeo_fish.io.write_tag`. To keep the stations of an existing
+        ``stations.csv``, merge them first with
+        :func:`pangeo_fish.helpers.update_stations`.
+
     Parameters
     ----------
-    animal_id : int, optional
-        ETN animal id.
-    tag_serial_number : str, optional
-        Serial number of any tag of the animal (e.g. its DST). Exactly one of
-        ``animal_id`` and ``tag_serial_number`` must be given.
-    project : str, optional
-        ETN animal project code, to disambiguate reused tag serial numbers.
+    project : str
+        ETN animal project code.
+    tag_id : str
+        Serial number of any tag of the animal.
     root : str, default: ETN_PARQUET_ROOT
         Root of the ETN parquet export (or of a local copy with the same layout).
     storage_options : mapping, optional
@@ -270,23 +200,22 @@ def find_etn_acoustic_detections(
 
     Returns
     -------
-    result : ETNAcousticDetections
-        ``result.found`` tells whether detections were found and
-        ``result.message`` explains the result.
+    detections : xarray.DataTree
+        Tree with the attributes ``etn_animal_id``, ``animal_project_code``,
+        ``double_tagged`` (whether the animal carries both an acoustic and an
+        archival tag) and ``acoustic_tag_ids`` (its transmitter ids, including
+        the alternative ids of sensor tags). If detections are found, it has
+        the nodes ``acoustic`` (``deployment_id``, ``longitude`` and
+        ``latitude`` along the time zone naive, UTC ``time``) and ``stations``
+        (receiver deployments along ``deployment_id``, with the columns of
+        ``stations.csv``); otherwise it has no nodes and a warning explains why.
     """
     if animals is None:
         animals = _read_parquet(
             f"{root}/acoustic/animals/part-0.parquet", storage_options
         )
-    # the ETN animals table has duplicated rows
-    rows = _select_animal(
-        animals.drop_duplicates(["animal_id", "tag_serial_number"]),
-        animal_id,
-        tag_serial_number,
-        project,
-    )
+    rows = _select_animal(animals, project, tag_id)
     animal_id = int(rows["animal_id"].iloc[0])
-    project = str(rows["animal_project_code"].iloc[0])
 
     tag_types = set(rows["tag_type"].dropna())
     double_tagged = (
@@ -309,32 +238,21 @@ def find_etn_acoustic_detections(
     )
     acoustic_tag_ids = [tag_id for tag_id in acoustic_tag_ids if tag_id]
 
-    empty = pd.DataFrame(
-        {
-            "time": pd.Series(dtype="datetime64[ns]"),
-            "deployment_id": pd.Series(dtype="int64"),
-            "longitude": pd.Series(dtype=float),
-            "latitude": pd.Series(dtype=float),
-            "station_name": pd.Series(dtype=object),
-            "acoustic_tag_id": pd.Series(dtype=object),
-            "receiver_id": pd.Series(dtype=object),
-        }
-    )
+    attrs = {
+        "etn_animal_id": animal_id,
+        "animal_project_code": project,
+        "double_tagged": double_tagged,
+        "acoustic_tag_ids": acoustic_tag_ids,
+    }
 
-    def result(detections, stations, message):
-        return ETNAcousticDetections(
-            animal_id=animal_id,
-            animal_project_code=project,
-            double_tagged=double_tagged,
-            acoustic_tag_ids=acoustic_tag_ids,
-            detections=detections,
-            stations=stations,
-            message=message,
+    def nothing_found(reason):
+        warnings.warn(
+            f"animal {animal_id} ({project}): {reason}", UserWarning, stacklevel=3
         )
+        return xr.DataTree(xr.Dataset(attrs=attrs))
 
-    who = f"animal {animal_id} ({project})"
     if not acoustic_tag_ids:
-        return result(empty, _empty_stations(), f"{who} has no acoustic tag in ETN")
+        return nothing_found("no acoustic tag in ETN")
 
     source = f"{root}/acoustic/detections/{project}/part-0.parquet"
     try:
@@ -347,7 +265,6 @@ def find_etn_acoustic_detections(
                 "deploy_longitude",
                 "deploy_latitude",
                 "station_name",
-                "acoustic_tag_id",
                 "receiver_id",
                 "animal_id",
             ],
@@ -360,17 +277,11 @@ def find_etn_acoustic_detections(
             False: "the project has no published detections",
             None: "the project may be under moratorium or absent from the export",
         }[moratorium]
-        return result(
-            empty,
-            _empty_stations(),
-            f"{who}: no detection file for project {project!r} ({reason})",
-        )
+        return nothing_found(f"no detection file for project {project!r} ({reason})")
 
     if raw.empty:
-        return result(
-            empty,
-            _empty_stations(),
-            f"{who} has acoustic tag(s) {acoustic_tag_ids} but 0 detections in ETN",
+        return nothing_found(
+            f"acoustic tag(s) {acoustic_tag_ids} but 0 detections in ETN"
         )
 
     detections = (
@@ -387,9 +298,12 @@ def find_etn_acoustic_detections(
         .reset_index(drop=True)
     )
     stations = _read_stations(root, storage_options, detections)
-    message = (
-        f"{who}: {len(detections)} detections"
-        f" (transmitter ids {sorted(detections['acoustic_tag_id'].dropna().unique())})"
-        f" at {detections['deployment_id'].nunique()} deployments"
+    acoustic = detections.set_index("time")[["deployment_id", "longitude", "latitude"]]
+
+    return xr.DataTree.from_dict(
+        {
+            "/": xr.Dataset(attrs=attrs),
+            "acoustic": acoustic.to_xarray(),
+            "stations": stations.to_xarray(),
+        }
     )
-    return result(detections, stations, message)
