@@ -22,6 +22,7 @@ import xarray as xr
 
 from pangeo_fish.pressure_offset import estimate_pressure_offset
 from pangeo_fish.track_bounds import (
+    _timedelta,
     detect_end_of_track,
     detect_start_of_track,
     flag_records,
@@ -78,7 +79,7 @@ def _records_summary(df, gap_factor):
         "last_record": times[-1] if len(times) else None,
         "n_records": int(len(df)),
         "duration_days": (
-            float((times[-1] - times[0]) / pd.Timedelta("1D")) if len(times) else 0.0
+            float((times[-1] - times[0]) / pd.Timedelta(1, "D")) if len(times) else 0.0
         ),
         "sampling_interval": interval,
         "regular_sampling": bool(len(steps) == 0 or (steps == interval).all()),
@@ -131,7 +132,7 @@ def _out_of_range(records, sensor_ranges, tolerance, after):
 def _tide_summary(records, tag_name, start, end, after_end):
     from pangeo_fish.tide import detect_tide
 
-    stop = end + pd.Timedelta(after_end) if end is not None else None
+    stop = end + _timedelta(after_end) if end is not None else None
     subset = records[["pressure"]].sel(time=slice(start, stop))
     # detect_tide prints progress (print and tqdm in tide.tide_behav_extr): silence
     # it here until tide.py gets a verbose / progress option (separate follow-up
@@ -153,7 +154,7 @@ def _tide_summary(records, tag_name, start, end, after_end):
         "first_found": track.index[track.to_numpy()].min() if track.any() else None,
     }
     if len(track):
-        last_days = track[track.index > track.index[-1] - pd.Timedelta("3D")]
+        last_days = track[track.index > track.index[-1] - pd.Timedelta(3, "D")]
         summary["fraction_last_3_days"] = float(last_days.mean())
     if end is not None:
         after = found[found.index > end]
@@ -162,7 +163,7 @@ def _tide_summary(records, tag_name, start, end, after_end):
 
 
 def _days(delta):
-    return float(delta / pd.Timedelta("1D"))
+    return float(delta / pd.Timedelta(1, "D"))
 
 
 def describe_tag(
