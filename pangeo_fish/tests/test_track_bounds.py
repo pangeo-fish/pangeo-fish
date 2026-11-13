@@ -19,8 +19,8 @@ def synthetic_tag(*, in_air_before=True, end="stranded", seed=0, sensor_ranges=N
     rng = np.random.default_rng(seed)
     first = pd.Timestamp("2023-05-03 08:00") if in_air_before else RELEASE
     stranded = STRANDED
-    time = pd.date_range(first, stranded + pd.Timedelta(days=3), freq="1min")
-    hours = ((time - time[0]) / pd.Timedelta("1h")).to_numpy()
+    time = pd.date_range(first, stranded + pd.Timedelta(3, "D"), freq="1min")
+    hours = ((time - time[0]) / pd.Timedelta(1, "h")).to_numpy()
 
     # swimming fish: depth changing by metres every few minutes
     pressure = 10 + 4 * np.sin(2 * np.pi * hours / 0.7) + rng.normal(0, 1.5, len(time))
@@ -31,7 +31,7 @@ def synthetic_tag(*, in_air_before=True, end="stranded", seed=0, sensor_ranges=N
     temperature[before] = 12 + rng.normal(0, 0.3, before.sum())
 
     after = time >= stranded
-    hours_after = ((time[after] - stranded) / pd.Timedelta("1h")).to_numpy()
+    hours_after = ((time[after] - stranded) / pd.Timedelta(1, "h")).to_numpy()
     if end == "stranded":
         pressure[after] = 5.4 + rng.normal(0, 0.02, after.sum())
         # day / night cycle of a tag in the air
@@ -79,12 +79,12 @@ def test_flag_records():
         "temperature_outside_water_range",
         "suspect",
     }
-    failure = flags.sel(time=slice(STRANDED + pd.Timedelta("1h"), None))
+    failure = flags.sel(time=slice(STRANDED + pd.Timedelta(1, "h"), None))
     assert bool(failure["out_of_sensor_range"].all())
     assert bool(failure["temperature_outside_water_range"].all())
     assert not bool(
         flags["out_of_sensor_range"]
-        .sel(time=slice(None, STRANDED - pd.Timedelta("1min")))
+        .sel(time=slice(None, STRANDED - pd.Timedelta(1, "min")))
         .any()
     )
 
@@ -93,7 +93,7 @@ def test_detect_start_of_track():
     ds = synthetic_tag()
     actual = track_bounds.detect_start_of_track(ds)
 
-    assert abs(actual["start"] - RELEASE) <= pd.Timedelta("5min")
+    assert abs(actual["start"] - RELEASE) <= pd.Timedelta(5, "min")
     assert actual["pre_release_period"][0] == pd.Timestamp("2023-05-03 08:00")
     assert actual["pre_release_level"] == pytest.approx(1.8, abs=0.1)
 
@@ -124,21 +124,21 @@ class TestDetectEndOfTrack:
             pytest.param(
                 lambda: synthetic_tag(end="stranded"),
                 None,
-                "5min",
+                pd.Timedelta(5, "min"),
                 "out_of_water",
                 id="stranded",
             ),
             pytest.param(
                 lambda: synthetic_tag(end="seabed"),
                 RELEASE,
-                "1h",
+                pd.Timedelta(1, "h"),
                 "no_vertical_movement",
                 id="seabed",
             ),
             pytest.param(
                 sensor_failure_tree,
                 None,
-                "5min",
+                pd.Timedelta(5, "min"),
                 "out_of_sensor_range",
                 id="sensor-failure",
             ),
@@ -147,7 +147,7 @@ class TestDetectEndOfTrack:
     def test_cause(self, make_tag, start, tolerance, expected_cause):
         actual = track_bounds.detect_end_of_track(make_tag(), start=start)
 
-        assert abs(actual["end"] - STRANDED) <= pd.Timedelta(tolerance)
+        assert abs(actual["end"] - STRANDED) <= tolerance
         assert actual["likely_cause"] == expected_cause
 
     def test_stranded_details(self):
@@ -179,12 +179,14 @@ class TestDetectEndOfTrack:
     def test_resumed_activity_warning(self):
         ds = synthetic_tag(end="seabed")
         # active again for a day after the end
-        revival = slice(STRANDED + pd.Timedelta("1D"), STRANDED + pd.Timedelta("2D"))
+        revival = slice(
+            STRANDED + pd.Timedelta(1, "D"), STRANDED + pd.Timedelta(2, "D")
+        )
         swimming = synthetic_tag(end="none")["pressure"].sel(time=revival)
         ds["pressure"].loc[{"time": revival}] = swimming.to_numpy()
         actual = track_bounds.detect_end_of_track(ds, start=RELEASE)
 
-        assert abs(actual["end"] - STRANDED) <= pd.Timedelta("1h")
+        assert abs(actual["end"] - STRANDED) <= pd.Timedelta(1, "h")
         assert actual["warning"] is not None
 
     def test_start_detection_uses_the_same_thresholds(self, monkeypatch):
