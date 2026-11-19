@@ -11,7 +11,7 @@ from pathlib import Path
 
 import nbformat
 import papermill as pm
-from demo_configuration import demo_settings
+from demo_configuration import demo_settings, tag_source_parameters
 from papermill.iorw import LocalHandler, papermill_io
 
 
@@ -58,6 +58,8 @@ def main(name):
     settings, parameters = demo_settings(
         notebook, os.environ.get("DEMO_TAG_NAME", "A19124")
     )
+    tag_source = tag_source_parameters(os.environ.get("DEMO_TAG_SOURCE", "data-taos"))
+    settings, parameters = settings | tag_source, parameters | tag_source
     if settings["tag_name"] == "A18828" and name != "base":
         raise ValueError("A18828 trials are restricted to base-demo")
     # Stored outputs are not evidence of this run.
