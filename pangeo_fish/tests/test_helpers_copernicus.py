@@ -17,6 +17,11 @@ IBI_HOURLY_STATIC = "cmems_mod_ibi_phy_anfc_0.027deg-3D_static"
 NWS_HOURLY = "cmems_mod_nws_phy-tem_anfc_1.5km-3D_PT1H-i"
 NWS_HOURLY_SSH = "cmems_mod_nws_phy-ssh_anfc_1.5km-2D_PT1H-i"
 NWS_HOURLY_STATIC = "cmems_mod_nws_phy_anfc_1.5km_static"
+GLO_6H = "cmems_mod_glo_phy-thetao_anfc_0.083deg_PT6H-i"
+GLO_6H_SSH = "cmems_mod_glo_phy_anfc_0.083deg_PT1H-m"
+GLO_DAILY = "cmems_mod_glo_phy-thetao_anfc_0.083deg_P1D-m"
+GLO_DAILY_SSH = "cmems_mod_glo_phy_anfc_0.083deg_P1D-m"
+GLO_STATIC = "cmems_mod_glo_phy_anfc_0.083deg_static"
 BBOX = {"latitude": [48, 49], "longitude": [-5, -4], "max_depth": 20}
 PERIOD = slice("2021-06-01", "2021-06-03")
 
@@ -72,6 +77,8 @@ def client(monkeypatch, fields):
         (GLOBAL, (GLOBAL, GLOBAL, "cmems_mod_glo_phy_my_0.083deg_static", None)),
         (IBI_HOURLY, (IBI_HOURLY, IBI_HOURLY_SSH, IBI_HOURLY_STATIC, "bathy")),
         (NWS_HOURLY, (NWS_HOURLY, NWS_HOURLY_SSH, NWS_HOURLY_STATIC, "bathy")),
+        (GLO_6H, (GLO_6H, GLO_6H_SSH, GLO_STATIC, "bathy")),
+        (GLO_DAILY, (GLO_DAILY, GLO_DAILY_SSH, GLO_STATIC, "bathy")),
         # Do not invent companions for other temperature products.
         (
             "other-temp_P1D-m",
@@ -366,3 +373,78 @@ def test_daily_time_bounds_unchanged():
     )
     with pytest.raises(ValueError, match="time_slice"):
         helpers._copernicus_time_bounds(IBI, None, None)
+
+
+@pytest.mark.parametrize(
+    "dataset, expected",
+    [
+        (IBI, False),
+        (GLOBAL, False),
+        (GLO_DAILY, False),
+        (IBI_HOURLY, True),
+        (NWS_HOURLY, True),
+        (GLO_6H, True),
+        ("cmems_mod_glo_phy_anfc_0.083deg_P1M-m", False),
+        ("cmems_mod_glo_phy_anfc_0.083deg_PT15M-i", True),
+    ],
+)
+def test_subdaily_detection(dataset, expected):
+    assert helpers._copernicus_is_subdaily(dataset) is expected
+
+
+def test_six_hourly_time_bounds():
+    assert helpers._copernicus_time_bounds(GLO_6H, PERIOD, None) == (
+        "2021-06-01T00:00:00",
+        "2021-06-03T23:59:59",
+    )
+
+
+def six_hourly_fields(fields):
+    hours = np.arange("2021-06-01T00", "2021-06-04T00", dtype="datetime64[h]").astype(
+        "datetime64[ns]"
+    )
+    hourly = fields.isel(time=[0] * hours.size).assign_coords(time=hours)
+    hourly["zos"] = hourly["zos"] + xr.DataArray(
+        np.arange(hours.size) / 100, dims="time"
+    )
+    return hourly.isel(time=slice(None, None, 6)), hourly
+
+
+def test_six_hourly_temperature_samples_hourly_ssh(client, fields):
+    mock, datasets = client
+    six_hourly, hourly = six_hourly_fields(fields)
+    datasets[GLO_6H] = six_hourly[["thetao"]]
+    # as in the real product, ``zos`` carries a single surface depth level
+    datasets[GLO_6H_SSH] = hourly[["zos"]].expand_dims(depth=[0.494025])
+    datasets[GLO_STATIC] = fields[["deptho", "mask"]]
+
+    actual = helpers._open_copernicus_model(GLO_6H, BBOX, PERIOD)
+
+    xr.testing.assert_identical(
+        actual, prepare_dataset(six_hourly.rename(latitude="lat", longitude="lon"))
+    )
+    assert actual.time.size == 12
+    calls = [c.kwargs for c in mock.call_args_list]
+    assert [(c["dataset_id"], c["variables"]) for c in calls] == [
+        (GLO_6H, ["thetao"]),
+        (GLO_6H_SSH, ["zos"]),
+        (GLO_STATIC, ["deptho", "mask"]),
+    ]
+    assert calls[2]["dataset_part"] == "bathy"
+    assert calls[0]["end_datetime"] == "2021-06-03T23:59:59"
+    assert (calls[1]["start_datetime"], calls[1]["end_datetime"]) == (
+        "2021-06-01T00:00:00",
+        "2021-06-03T18:00:00",
+    )
+
+
+def test_six_hourly_rejects_ssh_without_matching_times(client, fields):
+    _, datasets = client
+    six_hourly, hourly = six_hourly_fields(fields)
+    # hourly means stamped at half past the hour never match 6-hourly times
+    shifted = hourly.assign_coords(time=hourly.time + np.timedelta64(30, "m"))
+    datasets[GLO_6H] = six_hourly[["thetao"]]
+    datasets[GLO_6H_SSH] = shifted[["zos"]]
+    datasets[GLO_STATIC] = fields[["deptho", "mask"]]
+    with pytest.raises(ValueError, match="do not include all temperature times"):
+        helpers._open_copernicus_model(GLO_6H, BBOX, PERIOD)
