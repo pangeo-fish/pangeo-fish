@@ -43,10 +43,10 @@ from pangeo_fish.hmm.estimator import EagerEstimator
 from pangeo_fish.hmm.optimize import EagerBoundsSearch
 from pangeo_fish.hmm.optimize.scipy import group_sigma_indices
 from pangeo_fish.hmm.prediction import (
+    FFTGaussian1DHealpix,
     Foscat1DHealpix,
     Gaussian1DHealpix,
     UpDownGaussian1DHealpix,
-    FFTGaussian1DHealpix,
 )
 from pangeo_fish.io import (
     open_copernicus_catalog,
@@ -1808,12 +1808,12 @@ def optimize_pdf(
      dims : list of str, default: ["cells"]
          The list of the dimensions. Either ``["x", "y"]`` or ``["cells"]``
     conv_method : str, default "FFTGaussian1DHealpix"
-        Define the convolution used by the predictor. It can be:        
-         -"LargeHealpixConv"=>"UpDownGaussian1DHealpix": convolution method based on working on upper cell size (Up) before going back to lower (Down),  
+        Define the convolution used by the predictor. It can be:
+         -"LargeHealpixConv"=>"UpDownGaussian1DHealpix": convolution method based on working on upper cell size (Up) before going back to lower (Down),
          -"FoscatConv"=>"Foscat1DHealpix",\\
          -"HealpixConv"=>"Gaussian1DHealpix": Simple convolution, slow,\\
          -"FFTConv"=>"FFTGaussian1DHealpix": Default, verry fast multiplies in fft space then come back to real space,
-        
+
      final : bool, default: False
          If True, optimize sigma by matching the predicted final state to the
          observed final position (``score_final_pos``) instead of the standard
@@ -2113,9 +2113,7 @@ def _build_estimator(emission, target_root, storage_options, ellipsoid=None):
     truncate_raw = predictor_kwargs.get("truncate")
     truncate = float(truncate_raw) if truncate_raw is not None else None
     max_sigma_raw = predictor_kwargs.get("max_sigma")
-    max_sigma = (
-        float(max_sigma_raw) if max_sigma_raw not in (None, "None") else None
-    )
+    max_sigma = float(max_sigma_raw) if max_sigma_raw not in (None, "None") else None
 
     cls_name = params["predictor_factory"]["class"]  # type: str
     if "Gaussian2DCartesian" in cls_name:
@@ -2129,9 +2127,9 @@ def _build_estimator(emission, target_root, storage_options, ellipsoid=None):
             conv_method="LargeHealpixConv",
             dims=["cells"],
             ellipsoid=ellipsoid,
-        )    
+        )
     elif "FFTGaussian1DHealpix" in cls_name:
-            predictor_factory = _get_predictor_factory(
+        predictor_factory = _get_predictor_factory(
             emission,
             truncate=truncate,
             conv_method="FFTConv",
@@ -3029,7 +3027,7 @@ def create_parameters(
         One predictor index per time step, used to build ``sigma_indices``
         when it is not provided.
     class_name : str, default "FFTGaussian1DHealpix"
-        Define the convolution used by the predictor. It can be:        
+        Define the convolution used by the predictor. It can be:
         "Foscat1DHealpix",
         "UpDownGaussian1DHealpix",
         "Gaussian1DHealpix",
@@ -3061,7 +3059,7 @@ def create_parameters(
         "UpDownGaussian1DHealpix",
         "Gaussian1DHealpix",
         "FFTGaussian1DHealpix",
-        "OldUpDownGaussian1DHealpix"
+        "OldUpDownGaussian1DHealpix",
     ]:
         raise ValueError(
             f'Unknown class_name "{class_name}". Expected "Gaussian1DHealpix", "Foscat1DHealpix", "FFTGaussian1DHealpix" or "UpDownGaussian1DHealpix".'

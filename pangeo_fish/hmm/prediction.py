@@ -364,6 +364,7 @@ class OldUpDownGaussian1DHealpix(Predictor):
         if mask is not None:
             filtered = np.where(mask, filtered, 0)
         return filtered
+
     def check_impulse_response(self, centre_index=None):
         """Diagnostic: apply the filter to a Dirac and measure the effective sigma.
 
@@ -380,7 +381,9 @@ class OldUpDownGaussian1DHealpix(Predictor):
         resp = np.asarray(self.predict(x)).ravel()
 
         lon, lat = hpg_n.healpix_to_lonlat(
-            np.asarray(self.cell_ids), self.grid_info.level, ellipsoid=self.layer.ellipsoid
+            np.asarray(self.cell_ids),
+            self.grid_info.level,
+            ellipsoid=self.layer.ellipsoid,
         )
 
         # drop float32 noise so it does not count as weight at large distances
@@ -401,6 +404,8 @@ class OldUpDownGaussian1DHealpix(Predictor):
 
 import healpix_geo.nested as hpg_n
 from healpix_analyse import LargeConv
+
+
 @dataclass
 class UpDownGaussian1DHealpix(Predictor):
     """Gaussian filter on a HEALPix patch, built on a multi-resolution LargeConv.
@@ -538,9 +543,7 @@ class UpDownGaussian1DHealpix(Predictor):
         xx, yy = np.meshgrid(x, x)
         W = np.exp(-(xx**2 + yy**2) / (2 * sigma_c**2))
         W = (W / W.sum()).reshape(1, 1, k * k).astype(np.float32)
-        layer.set_compact_kernel(
-            W, bias=np.zeros(1, np.float32), requires_grad=False
-        )
+        layer.set_compact_kernel(W, bias=np.zeros(1, np.float32), requires_grad=False)
 
         # Kept for diagnostics / debugging
         self.sigma_downup_rad = s_du
@@ -599,7 +602,9 @@ class UpDownGaussian1DHealpix(Predictor):
         resp = np.asarray(self.predict(x)).ravel()
 
         lon, lat = hpg_n.healpix_to_lonlat(
-            np.asarray(self.cell_ids), self.grid_info.level, ellipsoid=self.layer.ellipsoid
+            np.asarray(self.cell_ids),
+            self.grid_info.level,
+            ellipsoid=self.layer.ellipsoid,
         )
 
         # drop float32 noise so it does not count as weight at large distances
@@ -755,12 +760,12 @@ class FFTGaussian1DHealpix(Predictor):
     def predict(self, X, mask=None):
         bcp, original_info = self._ensure_bcp(X)
         with torch.no_grad():
-            out = self.layer(bcp)                       # pas de cast float32
+            out = self.layer(bcp)  # pas de cast float32
         out_np = out if isinstance(out, np.ndarray) else out.detach().cpu().numpy()
         filtered = self._restore_shape(out_np, original_info)
 
-        filtered = np.maximum(filtered, 0.0)            # bruit négatif de la FFT
-        filtered[filtered < 1e-12* filtered.max()] = 0.0   # bruit relatif, à ajuster
+        filtered = np.maximum(filtered, 0.0)  # bruit négatif de la FFT
+        filtered[filtered < 1e-12 * filtered.max()] = 0.0  # bruit relatif, à ajuster
         if mask is not None:
             filtered = np.where(mask, filtered, 0)
         return filtered

@@ -453,7 +453,6 @@ def build_transitions(cell_ids, level, sigmas, truncate=4.0, ellipsoid="sphere")
         all_nbr.append(nbr.astype(np.int32))
         all_logT.append(logT.astype(np.float32))
 
-
     # Each sigma has a different support radius and hence a different row width.
     # Keep its sparse table intact: stacking requires equal widths and padding
     # everything to the widest table wastes memory without changing the model.
@@ -539,7 +538,7 @@ def viterbi_healpix(emission, sigmas, truncate=4.0, ellipsoid="sphere", level=No
         nbr, lt, buf = neighbors[s], logT[s], bufs[s]
 
         np.take(M, nbr, out=buf, mode="clip")  # buf = M[nbr], sans allocation
-        buf += lt                              # buf = M[nbr] + logT, en place
+        buf += lt  # buf = M[nbr] + logT, en place
 
         k = buf.argmax(axis=1)
         back[t] = nbr[rows, k]
