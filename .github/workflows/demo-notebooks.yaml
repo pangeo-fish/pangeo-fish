@@ -21,6 +21,11 @@ on:
         type: choice
         options: [A19124-both, A18828-base]
         default: A19124-both
+      tag_source:
+        description: eosc-minio reads the tags from the public EOSC mirror (complete still needs data-taos for bathymetry and tides)
+        type: choice
+        options: [data-taos, eosc-minio]
+        default: data-taos
 
 permissions:
   contents: read
@@ -41,6 +46,7 @@ jobs:
         timeout-minutes: ${{ inputs.dataset_case == 'A18828-base' && 45 || 160 }}
         env:
           DEMO_TAG_NAME: ${{ inputs.dataset_case == 'A18828-base' && 'A18828' || 'A19124' }}
+          DEMO_TAG_SOURCE: ${{ inputs.tag_source || 'data-taos' }}
           COPERNICUS_CREDENTIALS_FILE_CONTENT: ${{ secrets.DEMO_COPERNICUS_CREDENTIALS }}
         run: |
           python - <<'PY'
@@ -63,7 +69,7 @@ jobs:
           docker pull "$image"
           docker image inspect "$image" > demo-results/image.json
           docker run --rm --user root --entrypoint bash \
-            -e HOME=/tmp -e COPERNICUS_CREDENTIALS_FILE_CONTENT -e MPLBACKEND=Agg -e DEMO_TAG_NAME \
+            -e HOME=/tmp -e COPERNICUS_CREDENTIALS_FILE_CONTENT -e MPLBACKEND=Agg -e DEMO_TAG_NAME -e DEMO_TAG_SOURCE \
             -e NUMBA_NUM_THREADS=2 -e OMP_NUM_THREADS=2 -e CUDA_VISIBLE_DEVICES= \
             -v "$PWD:/work" -w /work "$image" -c \
             'bash ci/run_demo_notebook.sh "$1"' \

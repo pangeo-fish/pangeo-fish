@@ -24,3 +24,26 @@ def demo_settings(notebook, tag_name="A19124"):
         values[node.targets[0].id] = ast.literal_eval(node.value)
     parameters = {"tag_name": tag_name}
     return values | parameters, parameters
+
+
+# Where the demo tag files are read from. "eosc-minio" is the public read-only
+# mirror of the data-taos demo tags on the Pangeo@EOSC MinIO, for when
+# data-taos.ifremer.fr is unreachable. Only the tag files are mirrored.
+TAG_SOURCES = {
+    "data-taos": {},
+    "eosc-minio": {
+        "tag_root": "s3://todaka-pangeo-fish-demo/tag",
+        "tag_storage_options": {
+            "anon": True,
+            "client_kwargs": {
+                "endpoint_url": "https://pangeo-eosc-minioapi.vm.fedcloud.eu"
+            },
+        },
+    },
+}
+
+
+def tag_source_parameters(source="data-taos"):
+    if source not in TAG_SOURCES:
+        raise ValueError(f"Unknown tag source {source!r}")
+    return dict(TAG_SOURCES[source])
