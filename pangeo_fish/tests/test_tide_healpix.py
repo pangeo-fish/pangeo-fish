@@ -463,3 +463,106 @@ def test_writer_roundtrip_with_merge(tmp_path, synthetic_astronomy):
     merged, tide_mask, _ = tide.merge_tide_with_total(tmp_path)
     np.testing.assert_allclose(merged["pdf_tide"].values, lik["pdf"].values)
     assert (tide_mask.values == 1).all()  # merge broadcasts it over cells
+
+
+# --------------------------------------------------------------------------
+# model-based detection, harmonic analysis, misfit, storage
+# --------------------------------------------------------------------------
+
+
+def test_model_based_detection(synthetic_astronomy):
+    cells = region_cells()
+    const = random_constants(cells, seed=11)
+    record = _synthetic_record(const, 60, days=4, noise=0.03)
+    # day 2: flat record (no tide), day 3: noise only (no tide of any cell)
+    rng = np.random.default_rng(0)
+    day2 = (record.index >= "2023-08-02") & (record.index < "2023-08-03")
+    day3 = (record.index >= "2023-08-03") & (record.index < "2023-08-04")
+    record[day2] = 19.0
+    record[day3] = 19.0 + rng.normal(0, 0.5, day3.sum())
+    lik = th.still_tag_tide_likelihood(record, const, sigma=0.3, detection_ratio=0.5)
+    assert lik["tide_found"].values.tolist() == [1, 0, 0, 1]
+    allowed = lik["ocean_mask"].values
+    for k in (1, 2):
+        np.testing.assert_allclose(
+            lik["pdf"].isel(time=k).values[allowed], 1 / allowed.sum()
+        )
+    assert lik["best_rms"].isel(time=0) < 0.1 < lik["no_tide_rms"].isel(time=0)
+    # without detection every window with data is used
+    plain = th.still_tag_tide_likelihood(record, const, sigma=0.3)
+    assert plain["tide_found"].values.tolist() == [1, 1, 1, 1]
+
+
+def test_harmonic_analysis_recovers_constants():
+    pytest.importorskip("pyfes")
+    cells = region_cells()[:1]
+    names = ["M2", "S2", "K1", "O1"]
+    const = random_constants(cells, names, seed=4)
+    times = pd.date_range("2023-08-01", periods=30 * 24 * 6, freq="10min")
+    eta = th.predict_tide(const, times.values).values[:, 0]
+    rng = np.random.default_rng(1)
+    record = pd.Series(18.0 + eta + rng.normal(0, 0.02, times.size), index=times)
+    ha = th.harmonic_analysis(record, names, freq=None)
+    c_true = th.as_complex(const).values[:, 0]
+    c_fit = (ha["tide_real"] + 1j * ha["tide_imag"]).values
+    np.testing.assert_allclose(c_fit, c_true, atol=0.01)
+    # hourly means (default): no phase shift, only the ~1 % box-average attenuation
+    hourly = th.harmonic_analysis(record, names)
+    c_hour = (hourly["tide_real"] + 1j * hourly["tide_imag"]).values
+    np.testing.assert_allclose(np.angle(c_hour / c_true), 0, atol=np.radians(0.5))
+    np.testing.assert_allclose(np.abs(c_hour / c_true), 1, atol=0.02)
+    assert abs(ha.attrs["mean_depth"] - 18.0) < 0.01 and ha.attrs["residual_rms"] < 0.025
+    # the misfit is ~0 at the true cell and larger elsewhere
+    other = random_constants(region_cells()[:6], names, seed=9)
+    for name in ("tide_real", "tide_imag"):
+        other[name][:, 0] = const[name][:, 0]
+    mis = th.constants_misfit(ha, other)
+    assert mis.dims == ("cells",) and mis.values[0] < 0.01 < mis.values[1:].min()
+    with pytest.raises(ValueError, match="Rayleigh"):
+        th.harmonic_analysis(record[:"2023-08-10"], ["M2", "N2"])
+
+
+def test_constants_misfit_latlon():
+    lat = np.arange(51.0, 52.0, 0.1)
+    lon = np.arange(2.0, 3.0, 0.1)
+    field = (lon[None, :] - 2.5) + 1j * (lat[:, None] - 51.5)
+    src = _linear_latlon(field, lat, lon)
+    obs = xr.Dataset(
+        {"tide_real": ("constituent", [0.0]), "tide_imag": ("constituent", [0.0])},
+        coords={"constituent": ["m2"]},
+    )
+    mis = th.constants_misfit(obs, src)
+    assert mis.dims == ("lat", "lon")
+    i, j = np.unravel_index(int(np.argmin(mis.values)), mis.shape)
+    assert abs(lat[i] - 51.5) < 0.06 and abs(lon[j] - 2.5) < 0.06
+
+
+def test_write_harmonic_constants(tmp_path):
+    cells = region_cells()
+    const = random_constants(cells).isel(cells=slice(None, None, -1))  # unsorted
+    th.write_harmonic_constants(const, tmp_path / "c.zarr", chunk_cells=100)
+    out = th.open_harmonic_constants(tmp_path / "c.zarr")
+    assert out["tide_real"].dtype == np.float32
+    assert (np.diff(out["cell_ids"].values.astype(np.int64)) > 0).all()
+    assert out["tide_real"].chunks == (
+        (4,),
+        tuple([100] * (cells.size // 100))
+        + ((cells.size % 100,) if cells.size % 100 else ()),
+    )
+    back = th.select_constants(out, cell_ids=const["cell_ids"]).load()
+    np.testing.assert_allclose(
+        back["tide_real"].values, const["tide_real"].values, rtol=1e-6
+    )
+
+
+def test_hourly_means_at_mean_sample_time():
+    times = pd.date_range("2023-08-01", periods=24 * 6, freq="10min")
+    series = pd.Series(np.arange(times.size, dtype=float), index=times)
+    out = th._bin_average(series, "1h")
+    assert out.index[0] == pd.Timestamp("2023-08-01 00:25")  # samples :00..:50
+    assert out.iloc[0] == 2.5
+    tz = series.copy()
+    tz.index = tz.index.tz_localize("UTC")
+    assert th._bin_average(th._as_series(tz), "1h").index[0] == pd.Timestamp(
+        "2023-08-01 00:25"
+    )

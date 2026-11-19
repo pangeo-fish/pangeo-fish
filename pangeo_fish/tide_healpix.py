@@ -24,7 +24,10 @@ Contents
 --------
 - containers: :func:`harmonic_constants_dataset`, :func:`open_harmonic_constants`;
 - prediction: :func:`nodal_modulations`, :func:`predict_tide`;
-- evidence: :func:`still_tag_tide_likelihood`, :func:`write_tide_pdf_healpix`;
+- evidence: :func:`still_tag_tide_likelihood` (with model-based tide detection),
+  :func:`write_tide_pdf_healpix`;
+- record analysis: :func:`harmonic_analysis`, :func:`constants_misfit`;
+- storage: :func:`write_harmonic_constants`;
 - interim builders from latitude/longitude sources (until the constants are
   produced by the GRID4EARTH preprocessing): :func:`latlon_constants_from_tmd`,
   :func:`latlon_constants_from_amplitude_phase`, :func:`constants_to_healpix`.
@@ -328,6 +331,26 @@ def _as_series(depth):
     return pd.Series(depth.values, index=index).sort_index()
 
 
+def _bin_average(series, freq):
+    """Average over ``freq`` intervals, each mean at the mean time of its samples.
+
+    pandas labels a resampled mean with the start of its interval; predicting the
+    tide at that label would shift it by half an interval (15 degrees of M2 for
+    hourly means). The mean sample time is exact for any sampling (e.g. 10 min
+    samples at :00..:50 average at :25). ``freq=None`` keeps the samples as they are.
+    """
+    series = series.dropna()
+    if freq is None:
+        return series
+    t0 = series.index[0]
+    seconds = pd.Series((series.index - t0) / pd.Timedelta("1s"), index=series.index)
+    values = series.resample(freq).mean()
+    keep = values.notna().values
+    mean_seconds = seconds.resample(freq).mean().values[keep]
+    index = pd.DatetimeIndex(t0 + pd.to_timedelta(mean_seconds, unit="s"))
+    return pd.Series(values.values[keep], index=index)
+
+
 def still_tag_tide_likelihood(
     depth,
     constants,
@@ -340,6 +363,8 @@ def still_tag_tide_likelihood(
     n_eff=None,
     ocean_mask=None,
     min_samples=12,
+    detection_ratio=None,
+    min_tidal_signal=0.05,
 ):
     """Tidal likelihood of a tag lying still on the seabed, on HEALPix cells.
 
@@ -374,8 +399,9 @@ def still_tag_tide_likelihood(
         Mean water depth (m, positive) per cell, same bathymetry as the depth evidence.
     valid : pandas.Series of bool, optional
         True where the tag is still on the seabed. Other samples are ignored.
-    freq : str, default "1h"
-        Averaging period of the depth record.
+    freq : str or None, default "1h"
+        Averaging period of the depth record; each mean is attributed to the mean
+        time of its samples. None: use the samples as they are.
     time_step : str or None, default "1D"
         Window of the likelihood (the HMM time step). None: one window for the whole
         record.
@@ -385,21 +411,30 @@ def still_tag_tide_likelihood(
         Cells allowed (in addition to the cells with constants).
     min_samples : int, default 12
         Windows with fewer valid samples get a uniform pdf.
+    detection_ratio : float, optional
+        Model-based tide detection. A window has a tide when the best cell explains
+        it: ``min_c rms_c < detection_ratio * no_tide_rms``, with ``no_tide_rms`` the
+        RMS of the record around its window mean, and ``no_tide_rms >=
+        min_tidal_signal``. Windows without a tide get a uniform pdf. This works for
+        semidiurnal, mixed and diurnal regimes alike (no frequency band or amplitude
+        threshold). Default: no detection, every window with enough samples is used.
+    min_tidal_signal : float, default 0.05
+        Minimum ``no_tide_rms`` (m) for a detection (a flat record has no tide).
 
     Returns
     -------
     xarray.Dataset
         ``pdf`` (time, cells), normalised over the allowed cells, ``log_likelihood``,
-        ``rms`` (residual RMS, m), ``n_samples`` (time) and ``tide_found`` (time, 1
-        when the window has evidence), with ``cell_ids`` and its grid attributes.
-        ``time`` is the start of each window.
+        ``rms`` (residual RMS, m), ``n_samples``, ``no_tide_rms``, ``best_rms`` and
+        ``tide_found`` (time, 1 when the window is used as evidence), with
+        ``cell_ids`` and its grid attributes. ``time`` is the start of each window.
     """
     series = _as_series(depth)
     record_start, record_end = series.index.min(), series.index.max()
     if valid is not None:
         valid = _as_series(valid).reindex(series.index).fillna(0).astype(bool)
         series = series[valid]
-    hourly = series.resample(freq).mean().dropna()
+    hourly = _bin_average(series, freq)
 
     n_cells = constants.sizes[CELL_DIM]
     allowed = np.isfinite(constants["tide_real"]).all(CONSTITUENT_DIM).values
@@ -422,11 +457,13 @@ def still_tag_tide_likelihood(
     loglik = np.full((n_win, n_cells), np.nan)
     rms = np.full((n_win, n_cells), np.nan)
     n_samples = np.zeros(n_win, dtype=int)
+    no_tide_rms = np.full(n_win, np.nan)
     for w in range(n_win):
         sel = hourly[labels == w]
         n_samples[w] = len(sel)
         if len(sel) < max(min_samples, 1):
             continue
+        no_tide_rms[w] = float(np.sqrt(((sel - sel.mean()) ** 2).mean()))
         eta = predict_tide(constants, sel.index.values).values  # (time, cells)
         r = sel.values[:, None] - eta
         if water_column is None:
@@ -438,17 +475,28 @@ def still_tag_tide_likelihood(
         loglik[w] = -0.5 * n * ms / sigma**2
         rms[w] = np.sqrt(ms)
 
+    best_rms = np.full(n_win, np.nan)
+    for w in range(n_win):
+        r = np.where(allowed, rms[w], np.nan)
+        if np.isfinite(r).any():
+            best_rms[w] = np.nanmin(r)
+    used = np.isfinite(best_rms)
+    if detection_ratio is not None:
+        used &= (best_rms < detection_ratio * no_tide_rms) & (
+            no_tide_rms >= min_tidal_signal
+        )
+
     pdf = np.zeros((n_win, n_cells))
     uniform = allowed / max(allowed.sum(), 1)
     for w in range(n_win):
         ll = np.where(allowed, loglik[w], np.nan)
-        if not np.isfinite(ll).any():
+        if not used[w] or not np.isfinite(ll).any():
             pdf[w] = uniform
             continue
         p = np.where(np.isfinite(ll), np.exp(ll - np.nanmax(ll)), 0.0)
         pdf[w] = p / p.sum()
 
-    tide_found = np.isfinite(loglik).any(axis=1).astype(int)
+    tide_found = used.astype(int)
     dims = ("time", CELL_DIM)
     ds = xr.Dataset(
         {
@@ -456,6 +504,8 @@ def still_tag_tide_likelihood(
             "log_likelihood": (dims, loglik),
             "rms": (dims, rms, {"units": "m"}),
             "n_samples": ("time", n_samples),
+            "no_tide_rms": ("time", no_tide_rms, {"units": "m"}),
+            "best_rms": ("time", best_rms, {"units": "m"}),
             "tide_found": ("time", tide_found),
             "ocean_mask": (CELL_DIM, allowed),
         },
@@ -466,9 +516,134 @@ def still_tag_tide_likelihood(
             "depth_reference": "water_column" if water_column is not None else "mean",
             "freq": freq,
             "time_step": "segment" if time_step is None else time_step,
+            "detection_ratio": (
+                "none" if detection_ratio is None else float(detection_ratio)
+            ),
         },
     )
     return ds
+
+
+def _frequencies_rad_per_hour(constituents):
+    pyfes = _require_pyfes()
+    names = _pyfes_names(constituents)
+    table = pyfes.wave_table_factory(pyfes.EngineType.DARWIN, names)
+    return np.array([table[n].frequency(pyfes.RADIAN_PER_HOUR) for n in names])
+
+
+def harmonic_analysis(depth, constituents=("M2", "S2", "K1", "O1"), freq="1h"):
+    """Least-squares harmonic constants of a depth record (Greenwich convention).
+
+    Fits ``d(t) = D + sum_k f_k(t) (a_k cos(V_k + u_k) + b_k sin(V_k + u_k))`` with the
+    pyfes arguments, so that ``a_k + i b_k = A_k exp(+iG_k)`` is directly comparable
+    with the harmonic constants of a tide model.
+
+    Parameters
+    ----------
+    depth : pandas.Series or xarray.DataArray
+        Depth (m, positive down) indexed by UTC time.
+    constituents : sequence of str
+        Constituents to fit. Pairs that the record cannot separate (Rayleigh
+        criterion: frequency difference times record length < one cycle) raise.
+    freq : str or None, default "1h"
+        Averaging period applied before the fit (means at the mean sample time).
+
+    Returns
+    -------
+    xarray.Dataset
+        ``tide_real``, ``tide_imag`` (constituent), ``amplitude`` (m), ``phase``
+        (degrees, Greenwich lag), with attributes ``mean_depth``, ``residual_rms``
+        and ``n_samples``.
+    """
+    series = _bin_average(_as_series(depth), freq)
+    constituents = list(constituents)
+    omega = _frequencies_rad_per_hour(constituents)
+    hours = (series.index.max() - series.index.min()) / pd.Timedelta("1h")
+    for i in range(len(omega)):
+        for j in range(i + 1, len(omega)):
+            if abs(omega[i] - omega[j]) * hours < 2 * np.pi:
+                raise ValueError(
+                    f"{constituents[i]} and {constituents[j]} cannot be separated"
+                    f" with {hours / 24:.1f} days of data (Rayleigh criterion)"
+                )
+    mod = nodal_modulations(series.index.values, constituents)
+    f, vu = mod["f"].values, mod["vu"].values
+    design = np.column_stack([np.ones(len(series)), f * np.cos(vu), f * np.sin(vu)])
+    coef, *_ = np.linalg.lstsq(design, series.values, rcond=None)
+    n = len(constituents)
+    c = coef[1 : 1 + n] + 1j * coef[1 + n :]
+    residual = series.values - design @ coef
+    dims = CONSTITUENT_DIM
+    return xr.Dataset(
+        {
+            "tide_real": (dims, c.real, {"units": "m"}),
+            "tide_imag": (dims, c.imag, {"units": "m"}),
+            "amplitude": (dims, np.abs(c), {"units": "m"}),
+            "phase": (dims, np.degrees(np.angle(c)) % 360, {"units": "degree"}),
+        },
+        coords={CONSTITUENT_DIM: constituents},
+        attrs={
+            "mean_depth": float(coef[0]),
+            "residual_rms": float(np.sqrt(np.mean(residual**2))),
+            "n_samples": len(series),
+            "phase_convention": PHASE_CONVENTION,
+        },
+    )
+
+
+def constants_misfit(observed, constants):
+    """Distance (m) between observed constants and the constants of each cell.
+
+    ``sqrt(sum_k |C_obs,k - C_cell,k|^2)`` over the constituents of ``observed``
+    (e.g. the output of :func:`harmonic_analysis`). Works on HEALPix constants
+    (``cells``) and on latitude/longitude constants alike.
+    """
+    names = {str(c).lower(): str(c) for c in constants[CONSTITUENT_DIM].values}
+    missing = [
+        c for c in observed[CONSTITUENT_DIM].values if str(c).lower() not in names
+    ]
+    if missing:
+        raise KeyError(f"constituents not in the model constants: {missing}")
+    model = constants.sel(
+        {
+            CONSTITUENT_DIM: [
+                names[str(c).lower()] for c in observed[CONSTITUENT_DIM].values
+            ]
+        }
+    )
+    obs_c = (observed["tide_real"] + 1j * observed["tide_imag"]).values
+    mod_c = (model["tide_real"] + 1j * model["tide_imag"]).values
+    shape = (-1,) + (1,) * (mod_c.ndim - 1)
+    dist = np.sqrt((np.abs(mod_c - obs_c.reshape(shape)) ** 2).sum(axis=0))
+    other = [d for d in model["tide_real"].dims if d != CONSTITUENT_DIM]
+    coords = {k: v for k, v in model.coords.items() if k != CONSTITUENT_DIM}
+    return xr.DataArray(dist, dims=other, coords=coords, name="constants_misfit")
+
+
+def write_harmonic_constants(constants, store, chunk_cells=2**16, dtype="float32"):
+    """Write harmonic constants to Zarr: all constituents in one chunk, cells chunked.
+
+    Parameters
+    ----------
+    constants : xarray.Dataset
+        Output of :func:`harmonic_constants_dataset` or :func:`constants_to_healpix`.
+    store : str or path
+    chunk_cells : int
+        Cells per chunk (contiguous nested ranges when the cells are sorted).
+    dtype : str
+        Storage type of ``tide_real`` and ``tide_imag`` (float32: < 1e-7 m error per metre).
+    """
+    from pangeo_fish.storage import _with_dggs_attrs
+
+    _grid_info(constants["cell_ids"])
+    order = np.argsort(constants["cell_ids"].values, kind="stable")
+    ds = constants.isel({CELL_DIM: order})
+    ds = ds.assign(
+        {name: ds[name].astype(dtype) for name in ("tide_real", "tide_imag")}
+    )
+    ds = _with_dggs_attrs(ds).chunk({CONSTITUENT_DIM: -1, CELL_DIM: chunk_cells})
+    ds.to_zarr(store, mode="w", zarr_format=2, consolidated=True)
+    return store
 
 
 def write_tide_pdf_healpix(likelihood, target_root, behav_found=None, step=200):
