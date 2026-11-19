@@ -48,11 +48,14 @@ dependencies:
   - eccodes>=2.35.0
   - altair
   - cdshealpix
-  - copernicusmarine
+  - copernicusmarine=2.3.*
   - dask-image
+  # torch
+  - pytorch
   - pip
   - pip:
       - cdshealpix
       - dask-hpcconfig
       - pangeo-fish
       - jupyterhub==4.1.6
+      - git+https://github.com/GRID4EARTH/healpix-analyse.git

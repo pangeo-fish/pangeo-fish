@@ -15,7 +15,7 @@ def test_single_emission_with_final():
     em = xr.DataArray(
         np.full((3, len(latitudes), len(longitudes)), 2.0),
         dims=("time", "latitude", "longitude"),
-        name="pdf",
+        name="normalised_pdf",
     )
 
     # "Final"
@@ -38,7 +38,9 @@ def test_single_emission_with_final():
 
     # Time 0 and 1: sum is 4 → pdf = 2/4 = 0.5
     # Time 2: sum is 12 → pdf = 6/12 = 0.5
-    expected = ds.assign(pdf=xr.full_like(em, fill_value=0.5)).drop_vars("em")
+    expected = ds.assign(pdf_normalized=xr.full_like(em, fill_value=0.5)).drop_vars(
+        "em"
+    )
     xr.testing.assert_allclose(result, expected, rtol=1e-7, atol=1e-7)
 
 
@@ -65,6 +67,6 @@ def test_single_emission_without_final():
     # Time 0: em = [[3], [1]] → sum = 3+1 = 4 → pdf = [[3/4], [1/4]] = [[0.75], [0.25]]
     # Time 1: em = [[2], [2]] → sum = 2+2 = 4 → pdf = [[0.5], [0.5]]
     expected = ds.assign(
-        pdf=em.copy(data=np.array([[[0.75], [0.25]], [[0.5], [0.5]]]))
+        pdf_normalized=em.copy(data=np.array([[[0.75], [0.25]], [[0.5], [0.5]]]))
     ).drop_vars("em")
     xr.testing.assert_allclose(result, expected, rtol=1e-7, atol=1e-7)

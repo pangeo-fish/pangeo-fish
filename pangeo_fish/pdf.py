@@ -43,7 +43,7 @@ def normal(samples, mean, std, *, dims):
         _pdf,
         samples,
         mean,
-        std**2,
+        std,  # **2,
         dask="parallelized",
         input_core_dims=[dims, param_dims, param_dims],
         output_core_dims=[dims],
@@ -71,4 +71,5 @@ def combine_emission_pdf(raw, exclude=("initial", "final", "mask")):
         pdf[{"time": -1}] = pdf[{"time": -1}] * raw["final"]
 
     spatial_dims = _detect_spatial_dims(raw)
-    return xr.merge([raw[exclude], pdf.pipe(normalize, spatial_dims)])
+    normalized = pdf.pipe(normalize, spatial_dims).rename("pdf_normalized")
+    return xr.merge([raw[exclude], normalized])
