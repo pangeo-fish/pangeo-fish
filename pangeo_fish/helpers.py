@@ -924,50 +924,31 @@ def regrid_dataset_hpresample(
     n_left = int((is_ocean & ~valid & ~valid_b).sum())
     print(f"iocean cells  not covered by CT nor by rewrap : {n_left}")
 
-    # def to_full(cell_data, variable):
-    #     """Align CT values, fill ocean gaps with bilinear values, and mask land."""
-    #     out = np.full(cell_data.shape[:-1] + (ref_cell_ids.size,), np.nan)
-    #     out[..., valid] = cell_data[..., idx[valid]]
-    #     fallback = is_ocean & valid_b
-    #     current = out[..., fallback]
-    #     if not np.isfinite(current).all():
-    #         replacement = resampler_bil.resample(variable).cell_data[
-    #             ..., idx_b[fallback]
-    #         ]
-    #         out[..., fallback] = np.where(np.isfinite(current), current, replacement)
-    #     out[..., ~is_ocean] = np.nan
-    #     return out
+    def to_full(cell_data, variable):
+        """Align CT values, fill ocean gaps with bilinear values, and mask land.
+
+        Values are not clipped: ``diff`` is a signed field. Non-negative
+        inputs (e.g. the tide pdf) can get small negative CT overshoots,
+        which callers handle (see the complete demo notebook).
+        """
+        out = np.full(cell_data.shape[:-1] + (ref_cell_ids.size,), np.nan)
+        out[..., valid] = cell_data[..., idx[valid]]
+        fallback = is_ocean & valid_b
+        current = out[..., fallback]
+        if not np.isfinite(current).all():
+            replacement = resampler_bil.resample(variable).cell_data[
+                ..., idx_b[fallback]
+            ]
+            out[..., fallback] = np.where(np.isfinite(current), current, replacement)
+        out[..., ~is_ocean] = np.nan
+        return out
+
     # def to_full_bil(cell_data):
     #     """Test only: place bilinear values using bilinear indices."""
     #     out = np.full(cell_data.shape[:-1] + (ref_cell_ids.size,), np.nan)
     #     out[..., valid_b] = cell_data[..., idx_b[valid_b]]
     #     out[..., ~is_ocean] = np.nan
     #     return out
-    def to_full(cell_data, variable):
-        """Align CT values, fill gaps with bilinear, replace CT negatives, mask land."""
-        out = np.full(cell_data.shape[:-1] + (ref_cell_ids.size,), np.nan)
-        out[..., valid] = cell_data[..., idx[valid]]
-
-        # Compute bilinear values once, aligned on all HEALPix cells
-        bil = resampler_bil.resample(variable).cell_data
-        bil_full = np.full(out.shape, np.nan)
-        bil_full[..., valid_b] = bil[..., idx_b[valid_b]]
-
-        # Fill CT gaps with bilinear values (original behaviour)
-        fallback = is_ocean & valid_b
-        gap = fallback & ~np.isfinite(out)
-        out = np.where(gap, bil_full, out)
-
-        # CT negative overshoots: replace with bilinear where available
-        neg = np.isfinite(out) & (out < 0)
-        out = np.where(neg & np.isfinite(bil_full), bil_full, out)
-
-        # Remaining negatives outside bilinear coverage: set to zero
-        out = np.where(np.isfinite(out) & (out < 0), 0.0, out)
-
-        # Mask land cells
-        out[..., ~is_ocean] = np.nan
-        return out
 
     # ------------------------------------------------------------------
     # Output Dataset

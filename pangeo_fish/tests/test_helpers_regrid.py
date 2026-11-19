@@ -120,3 +120,25 @@ def test_regrid_coastal_constant_with_real_resamplers():
     np.testing.assert_allclose(result.temperature.values[:, fallback], 17.0)
     assert np.isnan(result.temperature.values[:, ~ocean]).all()
     assert np.isnan(result.temperature.values[:, unsupported]).all()
+
+
+def test_regrid_keeps_negative_values_of_signed_fields():
+    """``diff`` is signed: regridding must not clip negative values to zero."""
+    lon, lat = np.meshgrid(np.arange(-8.0, -3.0, 0.1), np.arange(47.0, 51.0, 0.1))
+    sea = lon < -5.5
+    source = xr.Dataset(
+        {
+            "diff": (("time", "yi", "xi"), np.where(sea, -2.5, np.nan)[None]),
+            "ocean_mask": (("yi", "xi"), sea),
+        },
+        coords={
+            "time": [0],
+            "longitude": (("yi", "xi"), lon),
+            "latitude": (("yi", "xi"), lat),
+        },
+    )
+    result, _ = helpers.regrid_dataset_hpresample(ds=source, refinement_level=8)
+    values = result["diff"].values
+    finite = np.isfinite(values)
+    assert finite.any()
+    np.testing.assert_allclose(values[finite], -2.5)
