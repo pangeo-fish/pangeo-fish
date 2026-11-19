@@ -1606,6 +1606,7 @@ def _get_predictor_factory(
     conv_method: str,
     device: str = "cpu",
     ellipsoid=None,
+    max_sigma: float | None = None,
 ):
     if dims == ["x", "y"]:
         raise ValueError("dims must be ['cells'], ['x','y'] is not used anymore")
@@ -1642,6 +1643,8 @@ def _get_predictor_factory(
                 grid_info=ds.dggs.grid_info,
                 device=device,
                 ellipsoid=ellipsoid,
+                max_sigma=max_sigma,
+                **({} if truncate is None else {"truncate": truncate}),
             )
         elif conv_method == "FoscatConv":
             predictor = curry(
@@ -1866,16 +1869,6 @@ def optimize_pdf(
     )
     if final:
         max_sigma = 0.01
-    predictor_factory = _get_predictor_factory(
-        ds=ds,
-        truncate=truncate,
-        dims=dims,
-        conv_method=conv_method,
-        ellipsoid=ellipsoid,
-    )
-
-    estimator = EagerEstimator(sigma=None, predictor_factory=predictor_factory)
-    # ds.attrs["max_sigma"] = max_sigma  # limitation of the helper
     if "predictor_index" in ds:
         speed_bounds_dict = ds.attrs.get("sigma_bounds", None)
         if speed_bounds_dict is None:
@@ -1892,6 +1885,22 @@ def optimize_pdf(
             print(f"dictionnaire des sigma:{sigma_bounds_dict}")
     else:
         sigma_bounds_dict = None
+
+    # The largest sigma the optimiser can try bounds the convolution kernel.
+    largest_sigma = max(
+        [max_sigma] + [upper for _, upper in (sigma_bounds_dict or {}).values()]
+    )
+    predictor_factory = _get_predictor_factory(
+        ds=ds,
+        truncate=truncate,
+        dims=dims,
+        conv_method=conv_method,
+        ellipsoid=ellipsoid,
+        max_sigma=largest_sigma,
+    )
+
+    estimator = EagerEstimator(sigma=None, predictor_factory=predictor_factory)
+    # ds.attrs["max_sigma"] = max_sigma  # limitation of the helper
 
     optimizer = EagerBoundsSearch(
         estimator,
@@ -2103,6 +2112,10 @@ def _build_estimator(emission, target_root, storage_options, ellipsoid=None):
     predictor_kwargs = params["predictor_factory"].get("kwargs", {})
     truncate_raw = predictor_kwargs.get("truncate")
     truncate = float(truncate_raw) if truncate_raw is not None else None
+    max_sigma_raw = predictor_kwargs.get("max_sigma")
+    max_sigma = (
+        float(max_sigma_raw) if max_sigma_raw not in (None, "None") else None
+    )
 
     cls_name = params["predictor_factory"]["class"]  # type: str
     if "Gaussian2DCartesian" in cls_name:
@@ -2124,6 +2137,7 @@ def _build_estimator(emission, target_root, storage_options, ellipsoid=None):
             conv_method="FFTConv",
             dims=["cells"],
             ellipsoid=ellipsoid,
+            max_sigma=max_sigma,
         )
     elif "Gaussian1DHealpix" in cls_name:
         predictor_factory = _get_predictor_factory(

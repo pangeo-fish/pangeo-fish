@@ -618,6 +618,11 @@ class UpDownGaussian1DHealpix(Predictor):
         }
 
 
+# Fallback for FFTGaussian1DHealpix when `max_sigma` is unknown: the limit of the
+# former fixed cap (129 pixels, 3 sigma) at level 10, about 136 km per step.
+_DEFAULT_MAX_SIGMA_RAD = 64 / 3 * np.sqrt(np.pi / 3) / 2**10
+
+
 @dataclass
 class FFTGaussian1DHealpix(Predictor):
     """Gaussian filter on a HEALPix patch, using a tangent-plane FFT convolution."""
@@ -626,8 +631,15 @@ class FFTGaussian1DHealpix(Predictor):
     grid_info: DGGSInfo
 
     sigma: float  # standard deviation, in radians
+    truncate: float = 5.0  # kernel radius, in multiples of sigma
     kernel_size: int | None = None
-    max_kernel_size: int | None = 129  # None = no cap (the FFT absorbs the cost)
+    # Largest sigma the fish can reach in one step (radians), from the maximum
+    # speed; optimize_pdf passes it. With max_kernel_size=None, the kernel cap is
+    # truncate * max_sigma expressed in pixels of the current level, so no sigma
+    # within the optimiser's bounds is ever capped.
+    max_sigma: float | None = None
+    # An int sets the cap directly instead.
+    max_kernel_size: int | None = None
     pixel_size_rad: float | None = None  # projected pixel size; None = nominal
     ellipsoid: str | None = None
     max_patch_radius_deg: float = 10.0
@@ -657,10 +669,16 @@ class FFTGaussian1DHealpix(Predictor):
                 RuntimeWarning,
             )
 
-        # Truncation at 3 sigma
-        radius = int(np.ceil(3 * sigma_px))
+        # Truncation at `truncate` sigma. 3 sigma drops ~1% of the 2-D Gaussian,
+        # so the cost jumps each time the radius gains a pixel; 5 sigma makes
+        # those jumps negligible.
+        radius = int(np.ceil(self.truncate * sigma_px))
         kernel_size = 2 * radius + 1
-        if self.max_kernel_size is not None and kernel_size > self.max_kernel_size:
+        if self.max_kernel_size is None:
+            max_sigma = self.max_sigma or _DEFAULT_MAX_SIGMA_RAD
+            max_radius = int(np.ceil(self.truncate * max_sigma / self.pixel_size_rad))
+            self.max_kernel_size = 2 * max_radius + 1
+        if kernel_size > self.max_kernel_size:
             warnings.warn(
                 f"kernel_size truncated from {kernel_size} to {self.max_kernel_size} "
                 f"(sigma_px={sigma_px:.2f}): the effective sigma will be smaller "
