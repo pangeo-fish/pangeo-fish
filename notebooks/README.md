@@ -61,7 +61,11 @@ using `pip install -e '.[notebooks]'` before executing through Papermill.
 
 Configure Copernicus Marine authentication in your environment before running;
 never pass credentials as notebook parameters or commit them in parameter files.
-The fork's demo workflow uses the `DEMO_COPERNICUS_CREDENTIALS` Actions secret.
+The demo workflow uses the `DEMO_COPERNICUS_CREDENTIALS` Actions secret. It runs
+the A19124 demos (about 5 minutes) on pushes and on pull requests to `main` and
+`DEV` that touch `pangeo_fish/` or the demo files. GitHub does not pass secrets to
+pull requests from forks, so there the demo steps are skipped with a notice; the
+push run in the fork, which has its own secret, covers those changes.
 
 The [archive](archive/README.md) contains historical experiments, not supported
 demos for this release.

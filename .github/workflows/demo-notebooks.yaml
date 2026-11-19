@@ -2,8 +2,23 @@ name: Execute base and complete demo notebooks
 
 on:
   push:
-    branches: ["feat/parameterized-demo-ci"]
+    branches: ["**"]
     paths:
+      - "pangeo_fish/**"
+      - ".github/workflows/demo-notebooks.yaml"
+      - "ci/run_demo_notebook.py"
+      - "ci/demo_configuration.py"
+      - "ci/check_papermill.py"
+      - "ci/run_demo_notebook.sh"
+      - "ci/requirements/demo-constraints.txt"
+      - "ci/notebook_environment.py"
+      - "pyproject.toml"
+      - "notebooks/pangeo-fish-base-demo.ipynb"
+      - "notebooks/pangeo-fish-complete-demo.ipynb"
+  pull_request:
+    branches: [main, DEV]
+    paths:
+      - "pangeo_fish/**"
       - ".github/workflows/demo-notebooks.yaml"
       - "ci/run_demo_notebook.py"
       - "ci/demo_configuration.py"
@@ -37,7 +52,18 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+      - name: Check that Copernicus Marine credentials are available
+        id: credentials
+        env:
+          HAS_CREDENTIALS: ${{ secrets.DEMO_COPERNICUS_CREDENTIALS != '' }}
+        run: |
+          if [ "$HAS_CREDENTIALS" = true ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::DEMO_COPERNICUS_CREDENTIALS is not available (for example a pull request from a fork); the demo notebooks are skipped."
+          fi
       - name: Run the parameterized demo in the pinned Notebook image
+        if: steps.credentials.outputs.available == 'true'
         timeout-minutes: ${{ inputs.dataset_case == 'A18828-base' && 45 || 160 }}
         env:
           DEMO_TAG_NAME: ${{ inputs.dataset_case == 'A18828-base' && 'A18828' || 'A19124' }}
@@ -69,7 +95,7 @@ jobs:
             'bash ci/run_demo_notebook.sh "$1"' \
             bash '${{ matrix.notebook }}'
       - uses: actions/upload-artifact@v6
-        if: always()
+        if: always() && steps.credentials.outputs.available == 'true'
         with:
           name: demo-${{ matrix.notebook }}-summary
           path: |
@@ -79,7 +105,7 @@ jobs:
             demo-results/${{ matrix.notebook }}/after.json
             demo-results/${{ matrix.notebook }}/comparison.json
       - uses: actions/upload-artifact@v6
-        if: always()
+        if: always() && steps.credentials.outputs.available == 'true'
         with:
           name: demo-${{ matrix.notebook }}
           path: |
