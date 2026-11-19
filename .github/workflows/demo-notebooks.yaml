@@ -9,6 +9,7 @@ on:
       - "ci/demo_configuration.py"
       - "ci/check_papermill.py"
       - "ci/run_demo_notebook.sh"
+      - "ci/requirements/demo-constraints.txt"
       - "ci/notebook_environment.py"
       - "pyproject.toml"
       - "notebooks/pangeo-fish-base-demo.ipynb"
