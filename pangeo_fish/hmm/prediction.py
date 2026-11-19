@@ -653,7 +653,8 @@ class FFTGaussian1DHealpix(Predictor):
         nside = 2**level
         np_dtype = np.float64 if self.dtype == torch.float64 else np.float32
         if self.ellipsoid is None:
-            self.ellipsoid = self.cell_ids.attrs.get("ellipsoid", "sphere")
+            attrs = getattr(self.cell_ids, "attrs", {})
+            self.ellipsoid = attrs.get("ellipsoid", "sphere")
 
         # Projected pixel size, passed explicitly to LocalFFT so that the
         # radians -> pixels conversion is exact in the projected plane.
@@ -672,8 +673,12 @@ class FFTGaussian1DHealpix(Predictor):
         # Truncation at `truncate` sigma. 3 sigma drops ~1% of the 2-D Gaussian,
         # so the cost jumps each time the radius gains a pixel; 5 sigma makes
         # those jumps negligible.
-        radius = int(np.ceil(self.truncate * sigma_px))
-        kernel_size = 2 * radius + 1
+        if self.kernel_size is not None:
+            kernel_size = int(self.kernel_size)
+            kernel_size += 1 - kernel_size % 2  # keep it odd
+        else:
+            radius = int(np.ceil(self.truncate * sigma_px))
+            kernel_size = 2 * radius + 1
         if self.max_kernel_size is None:
             max_sigma = self.max_sigma or _DEFAULT_MAX_SIGMA_RAD
             max_radius = int(np.ceil(self.truncate * max_sigma / self.pixel_size_rad))

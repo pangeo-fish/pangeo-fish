@@ -110,3 +110,17 @@ def test_prediction_is_continuous_across_a_radius_switch():
     x = np.zeros(below.cell_ids.size)
     x[x.size // 2] = 1.0
     np.testing.assert_allclose(above.predict(x), below.predict(x), atol=1e-5)
+
+
+def test_explicit_kernel_size_is_used():
+    predictor = _predictor(8, 0.02, kernel_size=11)
+    assert predictor.kernel_size == 11
+
+
+def test_numpy_cell_ids_without_ellipsoid():
+    predictor = FFTGaussian1DHealpix(
+        cell_ids=np.asarray(_patch(8).data),
+        grid_info=HealpixInfo(level=8, indexing_scheme="nested"),
+        sigma=0.02,
+    )
+    assert predictor.ellipsoid == "sphere"
