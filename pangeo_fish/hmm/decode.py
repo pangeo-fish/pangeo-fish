@@ -528,7 +528,8 @@ def viterbi_healpix(emission, sigmas, truncate=4.0, ellipsoid="sphere", level=No
     )
     print("fin neighbors")
     rows = np.arange(n)
-    M = np.where(ocean, logE[0], -np.inf)
+    # float64 like the work buffers: np.take(..., out=buf) refuses to cast
+    M = np.where(ocean, logE[0], -np.inf).astype(np.float64, copy=False)
     back = np.zeros((T, n), dtype=np.int32)
 
     bufs = [np.empty(nb.shape, dtype=np.float64) for nb in neighbors]
