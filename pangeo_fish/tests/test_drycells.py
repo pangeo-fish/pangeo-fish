@@ -85,7 +85,7 @@ def test_dry_mask_threshold_and_land():
     assert not dry_mask(model, 10.0).values[0, 0, 3]
 
 
-@pytest.mark.parametrize("value", [-0.1, np.nan, np.inf, "x"])
+@pytest.mark.parametrize("value", [-0.1, np.nan, np.inf, "x", True])
 def test_invalid_min_water_depth(value):
     with pytest.raises(ValueError, match="min_water_depth"):
         dry_mask(make_model(), value)
@@ -139,7 +139,7 @@ def test_compute_diff_default_unchanged_and_warns():
 
 def test_compute_diff_min_water_depth_masks_dry_cells():
     model = make_model()
-    with pytest.warns(DryCellWarning, match="Masked 4"):
+    with pytest.warns(DryCellWarning, match="Masking up to 4"):
         masked = run_compute_diff(model, min_water_depth=0.0)
     with pytest.warns(DryCellWarning):
         default = run_compute_diff(model)
@@ -207,6 +207,51 @@ def test_compute_diff_with_extra_dimension():
     model["H0"] = H0
     with pytest.warns(DryCellWarning, match="at most 2 of 3 sea cells"):
         diff = run_compute_diff(model)
-    with pytest.warns(DryCellWarning, match="Masked 8"):
+    with pytest.warns(DryCellWarning, match="Masking up to 8"):
         masked = run_compute_diff(model, min_water_depth=0.0)
     assert int(masked["diff"].isnull().sum() - diff["diff"].isnull().sum()) == 8
+
+
+def test_compute_diff_default_stays_lazy():
+    import dask
+
+    calls = []
+
+    class Counter(dask.callbacks.Callback):
+        def _start(self, dsk):
+            calls.append(
+                {str(key[0] if isinstance(key, tuple) else key) for key in dsk}
+            )
+
+    model = make_model().chunk({"time": 1})
+    with Counter(), pytest.warns(DryCellWarning):
+        diff, _ = helpers.compute_diff(
+            reference_model=model,
+            tag_log=make_tag(),
+            relative_depth_threshold=0,
+            chunk_time=1,
+        )
+    assert diff["diff"].chunks is not None
+    # only the dry-cell count (H0 and XE) is computed, not the diff
+    assert len(calls) == 1
+    assert not any("diff_z" in key for key in calls[0])
+
+
+def test_time_step_with_missing_tag_data_is_not_reported_as_all_dry():
+    ds = make_model()[["H0", "XE"]]
+    values = np.ones((3, 1, 4))
+    values[2] = np.nan  # no tag data at t=2, where cells 2 and 3 are dry
+    ds = ds.assign(diff=(("time", "lat", "lon"), values))
+    with pytest.warns(DryCellWarning) as record:
+        masked = _apply(ds)
+    assert "Every sea cell is dry" not in str(record[0].message)
+    np.testing.assert_array_equal(
+        np.isfinite(masked["diff"].values[:, 0, :]),
+        [[1, 1, 1, 1], [1, 1, 0, 0], [0, 0, 0, 0]],
+    )
+
+
+def _apply(ds):
+    from pangeo_fish.drycells import _apply_min_water_depth
+
+    return _apply_min_water_depth(ds, 0.0)

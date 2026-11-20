@@ -922,7 +922,7 @@ def compute_diff(
         Water column (m) at or below which a sea cell is considered dry
         (``H0 + XE <= min_water_depth``, on the native model grid).
         If a number (>= 0), the ``diff`` of the dry (cell, time) pairs is set to NaN,
-        except at time steps where every sea cell is dry, and
+        except at time steps without any wet sea cell with a valid ``diff``, and
         ``diff.attrs["min_water_depth"]`` is set. ``0.0`` excludes dry cells only;
         a positive value also excludes nearly dry cells.
         If None (default), the values are unchanged and a

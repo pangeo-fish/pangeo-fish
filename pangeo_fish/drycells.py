@@ -33,6 +33,10 @@ class DryCellWarning(UserWarning):
 
 
 def _validate(min_water_depth):
+    if isinstance(min_water_depth, (bool, np.bool_)):
+        raise ValueError(
+            f"min_water_depth must be a finite number >= 0, got {min_water_depth!r}"
+        )
     try:
         value = float(min_water_depth)
     except (TypeError, ValueError):
@@ -154,29 +158,26 @@ def _apply_min_water_depth(diff, min_water_depth=None):
 
     threshold = 0.0 if min_water_depth is None else min_water_depth
     spatial = _spatial_dims(diff)
-    dry = dry_mask(diff, threshold) & _sea(diff)
+    sea = _sea(diff)
+    # only H0 and XE are read here: the diff itself stays lazy
     stats = xr.Dataset(
         {
-            "n_sea": _sea(diff).sum(spatial),
-            "n_dry": dry.sum(spatial),
-            "n_wet_valid": (_sea(diff) & diff["diff"].notnull() & ~dry).sum(spatial),
+            "n_sea": sea.sum(spatial),
+            "n_dry": (dry_mask(diff, threshold) & sea).sum(spatial),
         }
     ).compute()
-    other = [dim for dim in stats["n_dry"].dims if dim != "time"]
-    n_dry = stats["n_dry"].max(other) if other else stats["n_dry"]
-    total = int(stats["n_dry"].sum())
+    n_dry_all = stats["n_dry"]
+    total = int(n_dry_all.sum())
     if total == 0:
         if min_water_depth is None:
             return diff
         return diff.assign_attrs(min_water_depth=min_water_depth)
 
+    other = [dim for dim in n_dry_all.dims if dim != "time"]
+    n_dry = n_dry_all.max(other) if other else n_dry_all
     has_time = "time" in n_dry.dims
     worst = int(n_dry.max())
     n_sea = int(stats["n_sea"].max())
-    n_wet_valid = stats["n_wet_valid"]
-    if has_time:
-        all_dry = (n_wet_valid == 0) & (stats["n_dry"] > 0)
-        all_dry = all_dry.any(other) if other else all_dry
 
     if min_water_depth is None:
         where = ""
@@ -191,16 +192,22 @@ def _apply_min_water_depth(diff, min_water_depth=None):
         )
         return diff
 
+    every_sea_cell_dry = (n_dry_all >= stats["n_sea"]) & (stats["n_sea"] > 0)
+    masked = int(n_dry_all.where(~every_sea_cell_dry, 0).sum())
     message = (
-        f"Masked {total} dry sea (cell, time) pairs (H0 + XE <= {min_water_depth} m),"
-        f" at most {worst} of {n_sea} sea cells per time step."
+        f"Masking up to {masked} dry sea (cell, time) pairs"
+        f" (H0 + XE <= {min_water_depth} m), at most {worst} of {n_sea} sea cells"
+        " per time step. Time steps without any wet sea cell with a valid diff"
+        " are left unmasked."
     )
-    if has_time and bool(all_dry.any()):
-        times = n_dry.time.values[all_dry.values]
-        message += (
-            f" Every sea cell is dry at {len(times)} time steps"
-            f" ({_format_times(times)}); these are left unmasked."
-        )
+    if has_time:
+        all_dry = every_sea_cell_dry.any(other) if other else every_sea_cell_dry
+        if bool(all_dry.any()):
+            times = n_dry.time.values[all_dry.values]
+            message += (
+                f" Every sea cell is dry at {len(times)} time steps"
+                f" ({_format_times(times)})."
+            )
     warnings.warn(message, DryCellWarning, stacklevel=3)
     return mask_dry_cells(diff, min_water_depth).assign_attrs(
         min_water_depth=min_water_depth
