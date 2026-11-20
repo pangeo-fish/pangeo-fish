@@ -511,7 +511,9 @@ def test_harmonic_analysis_recovers_constants():
     c_hour = (hourly["tide_real"] + 1j * hourly["tide_imag"]).values
     np.testing.assert_allclose(np.angle(c_hour / c_true), 0, atol=np.radians(0.5))
     np.testing.assert_allclose(np.abs(c_hour / c_true), 1, atol=0.02)
-    assert abs(ha.attrs["mean_depth"] - 18.0) < 0.01 and ha.attrs["residual_rms"] < 0.025
+    assert (
+        abs(ha.attrs["mean_depth"] - 18.0) < 0.01 and ha.attrs["residual_rms"] < 0.025
+    )
     # the misfit is ~0 at the true cell and larger elsewhere
     other = random_constants(region_cells()[:6], names, seed=9)
     for name in ("tide_real", "tide_imag"):
