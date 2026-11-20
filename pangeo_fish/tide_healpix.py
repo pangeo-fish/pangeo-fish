@@ -46,6 +46,15 @@ PHASE_CONVENTION = (
 TMD_EPOCH = pd.Timestamp("1992-01-01T00:00:00")
 
 
+def _names(constituents):
+    """Constituent names as an object array.
+
+    A fixed-width or pandas string index cannot be encoded to Zarr by some
+    xarray/pandas combinations (xarray 2025.7 with pandas 3); object arrays always can.
+    """
+    return np.array([str(c) for c in constituents], dtype=object)
+
+
 # ----------------------------------------------------------------------------
 # grid helpers
 # ----------------------------------------------------------------------------
@@ -141,7 +150,7 @@ def harmonic_constants_dataset(constants, constituents, cell_ids, attrs=None):
             "tide_imag": (dims, constants.imag, var_attrs | {"long_name": "A sin G"}),
         },
         coords={
-            CONSTITUENT_DIM: (CONSTITUENT_DIM, [str(c) for c in constituents]),
+            CONSTITUENT_DIM: (CONSTITUENT_DIM, _names(constituents)),
             "cell_ids": (CELL_DIM, np.asarray(cell_ids.values, "uint64"), info),
         },
         attrs=dict(attrs or {}),
@@ -274,7 +283,7 @@ def nodal_modulations(times, constituents):
     dims = ("time", CONSTITUENT_DIM)
     coords = {
         "time": epoch.astype("datetime64[ns]"),
-        CONSTITUENT_DIM: list(constituents),
+        CONSTITUENT_DIM: _names(constituents),
     }
     return xr.Dataset(
         {"f": (dims, f[rows].T), "vu": (dims, vu[rows].T, {"units": "rad"})},
@@ -502,9 +511,10 @@ def still_tag_tide_likelihood(
         starts = pd.date_range(first, last, freq=time_step)
         labels = starts.get_indexer(hourly.index.floor(time_step))
     if time_step is not None and freq is not None:
-        full_window = (
-            pd.Timedelta(time_step).total_seconds() / pd.Timedelta(freq).total_seconds()
-        )
+        # integer nanoseconds: no timedelta division (NumPy generic-unit deprecation)
+        window = np.diff(pd.date_range("2000-01-01", periods=2, freq=time_step).asi8)
+        sample = np.diff(pd.date_range("2000-01-01", periods=2, freq=freq).asi8)
+        full_window = float(window[0] / sample[0])
     else:
         full_window = None
 
@@ -618,7 +628,7 @@ def harmonic_analysis(depth, constituents=("M2", "S2", "K1", "O1"), freq="1h"):
     series = _bin_average(_as_series(depth), freq)
     constituents = list(constituents)
     omega = _frequencies_rad_per_hour(constituents)
-    hours = (series.index.max() - series.index.min()).total_seconds() / 3600.0
+    hours = float(np.ptp(_seconds_since(series.index, series.index[0]))) / 3600.0
     for i in range(len(omega)):
         for j in range(i + 1, len(omega)):
             if abs(omega[i] - omega[j]) * hours < 2 * np.pi:
@@ -641,7 +651,7 @@ def harmonic_analysis(depth, constituents=("M2", "S2", "K1", "O1"), freq="1h"):
             "amplitude": (dims, np.abs(c), {"units": "m"}),
             "phase": (dims, np.degrees(np.angle(c)) % 360, {"units": "degree"}),
         },
-        coords={CONSTITUENT_DIM: constituents},
+        coords={CONSTITUENT_DIM: _names(constituents)},
         attrs={
             "mean_depth": float(coef[0]),
             "residual_rms": float(np.sqrt(np.mean(residual**2))),
@@ -701,6 +711,7 @@ def write_harmonic_constants(constants, store, chunk_cells=2**16, dtype="float32
     ds = ds.assign(
         {name: ds[name].astype(dtype) for name in ("tide_real", "tide_imag")}
     )
+    ds = ds.assign_coords({CONSTITUENT_DIM: _names(ds[CONSTITUENT_DIM].values)})
     ds = _with_dggs_attrs(ds).chunk({CONSTITUENT_DIM: -1, CELL_DIM: chunk_cells})
     for var in ds.variables.values():
         for key in (
@@ -775,7 +786,7 @@ def _latlon_constants(constants, constituents, lat, lon, mask, attrs):
             "mask": (("lat", "lon"), mask),
         },
         coords={
-            CONSTITUENT_DIM: list(constituents),
+            CONSTITUENT_DIM: _names(constituents),
             "lat": lat[ilat],
             "lon": lon[ilon],
         },
