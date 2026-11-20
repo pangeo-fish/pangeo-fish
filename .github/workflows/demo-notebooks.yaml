@@ -12,6 +12,7 @@ on:
       - "ci/run_demo_notebook.sh"
       - "ci/requirements/demo-constraints.txt"
       - "ci/notebook_environment.py"
+      - "ci/notebook-image.txt"
       - "pyproject.toml"
       - "notebooks/pangeo-fish-base-demo.ipynb"
       - "notebooks/pangeo-fish-complete-demo.ipynb"
@@ -26,6 +27,7 @@ on:
       - "ci/run_demo_notebook.sh"
       - "ci/requirements/demo-constraints.txt"
       - "ci/notebook_environment.py"
+      - "ci/notebook-image.txt"
       - "pyproject.toml"
       - "notebooks/pangeo-fish-base-demo.ipynb"
       - "notebooks/pangeo-fish-complete-demo.ipynb"
@@ -40,8 +42,22 @@ on:
 permissions:
   contents: read
 
+# One run per pull request or branch; a new push cancels the older run,
+# except on main and DEV where every commit is checked.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/DEV' }}
+
 jobs:
   demo:
+    # In the upstream repository, branches other than main and DEV are checked
+    # through their pull request, so their push runs would be duplicates.
+    # Forks keep the push runs: their pull requests get no secrets upstream.
+    if: >-
+      github.event_name != 'push'
+      || github.repository != 'pangeo-fish/pangeo-fish'
+      || github.ref == 'refs/heads/main'
+      || github.ref == 'refs/heads/DEV'
     runs-on: ubuntu-latest
     timeout-minutes: ${{ inputs.dataset_case == 'A18828-base' && 55 || 180 }}
     strategy:
@@ -60,7 +76,10 @@ jobs:
           if [ "$HAS_CREDENTIALS" = true ]; then
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::notice::DEMO_COPERNICUS_CREDENTIALS is not available (for example a pull request from a fork); the demo notebooks are skipped."
+            message="DEMO_COPERNICUS_CREDENTIALS is not available (for example a pull request from a fork), so the ${{ matrix.notebook }} demo notebook was NOT run. Check the push run on the fork, or run this workflow by hand."
+            echo "::warning::$message"
+            echo "### Demo notebook skipped" >> "$GITHUB_STEP_SUMMARY"
+            echo "$message" >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Run the parameterized demo in the pinned Notebook image
         if: steps.credentials.outputs.available == 'true'
