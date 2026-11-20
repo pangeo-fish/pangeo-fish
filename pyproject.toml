@@ -64,7 +64,7 @@ dependencies = [
   "cmocean",
   "imageio[ffmpeg]",
   "ipywidgets",
-    "pyproj>=3.7,<3.8",  
+  "pyproj>=3.7,<3.8",
   # CLI / progress
   "rich",
   "rich-click",
