@@ -48,7 +48,7 @@ def synthetic_astronomy(monkeypatch):
 
     def fake(times, constituents):
         t = pd.DatetimeIndex(np.atleast_1d(times))
-        hours = ((t - pd.Timestamp("2000-01-01")) / pd.Timedelta("1h")).values
+        hours = th._seconds_since(t, pd.Timestamp("2000-01-01")) / 3600.0
         omega = np.radians([OMEGA_DEG_PER_HOUR[c] for c in constituents])
         vu = hours[:, None] * omega[None, :]
         dims = ("time", th.CONSTITUENT_DIM)

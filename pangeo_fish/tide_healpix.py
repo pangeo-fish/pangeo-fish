@@ -331,6 +331,12 @@ def _as_series(depth):
     return pd.Series(depth.values, index=index).sort_index()
 
 
+def _seconds_since(index, t0):
+    """Seconds from ``t0`` as floats (integer nanoseconds, no timedelta division)."""
+    ns = pd.DatetimeIndex(index).as_unit("ns").asi8
+    return (ns - pd.Timestamp(t0).as_unit("ns").value) / 1e9
+
+
 def _bin_average(series, freq):
     """Average over ``freq`` intervals, each mean at the mean time of its samples.
 
@@ -343,7 +349,7 @@ def _bin_average(series, freq):
     if freq is None:
         return series
     t0 = series.index[0]
-    seconds = pd.Series((series.index - t0) / pd.Timedelta("1s"), index=series.index)
+    seconds = pd.Series(_seconds_since(series.index, t0), index=series.index)
     values = series.resample(freq).mean()
     keep = values.notna().values
     mean_seconds = seconds.resample(freq).mean().values[keep]
@@ -558,7 +564,7 @@ def harmonic_analysis(depth, constituents=("M2", "S2", "K1", "O1"), freq="1h"):
     series = _bin_average(_as_series(depth), freq)
     constituents = list(constituents)
     omega = _frequencies_rad_per_hour(constituents)
-    hours = (series.index.max() - series.index.min()) / pd.Timedelta("1h")
+    hours = (series.index.max() - series.index.min()).total_seconds() / 3600.0
     for i in range(len(omega)):
         for j in range(i + 1, len(omega)):
             if abs(omega[i] - omega[j]) * hours < 2 * np.pi:
