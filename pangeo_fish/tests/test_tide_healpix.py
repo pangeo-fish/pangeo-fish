@@ -449,7 +449,9 @@ def test_writer_roundtrip_with_merge(tmp_path, synthetic_astronomy):
     const = random_constants(cells)
     record = _synthetic_record(const, 40, days=3)
     lik = th.still_tag_tide_likelihood(record, const, sigma=0.3)
-    th.write_tide_pdf_healpix(lik, tmp_path)
+    with pytest.raises(ValueError, match="behav_found"):
+        th.write_tide_pdf_healpix(lik, tmp_path, behav_found=[0, 1])
+    th.write_tide_pdf_healpix(lik, tmp_path, behav_found=[0, 1, 0])
 
     total = xr.Dataset(
         {"pdf": (("time", "cells"), np.full((3, cells.size), 1.0 / cells.size))},
@@ -460,9 +462,10 @@ def test_writer_roundtrip_with_merge(tmp_path, synthetic_astronomy):
         attrs={"sources": ["temperature"]},
     )
     total.to_zarr(tmp_path / "total_pdf.zarr", zarr_format=2, consolidated=True)
-    merged, tide_mask, _ = tide.merge_tide_with_total(tmp_path)
+    merged, tide_mask, behav_mask = tide.merge_tide_with_total(tmp_path)
     np.testing.assert_allclose(merged["pdf_tide"].values, lik["pdf"].values)
     assert (tide_mask.values == 1).all()  # merge broadcasts it over cells
+    assert (behav_mask.isel(cells=0).values == [0, 1, 0]).all()
 
 
 # --------------------------------------------------------------------------
@@ -568,3 +571,92 @@ def test_hourly_means_at_mean_sample_time():
     assert th._bin_average(th._as_series(tz), "1h").index[0] == pd.Timestamp(
         "2023-08-01 00:25"
     )
+
+
+# --------------------------------------------------------------------------
+# review fixes: detection with a bathymetry bias, empty windows, alignment,
+# partial windows, constituent names, bbox
+# --------------------------------------------------------------------------
+
+
+def test_detection_not_hidden_by_bathymetry_bias(synthetic_astronomy):
+    cells = region_cells()
+    const = random_constants(cells, seed=5)
+    record = _synthetic_record(const, 123, days=3, noise=0.01)
+    wc = np.full(cells.size, 20.0)  # 1 m deeper than the record mean everywhere
+    lik = th.still_tag_tide_likelihood(
+        record, const, sigma=0.3, water_column=wc, detection_ratio=0.5
+    )
+    assert (lik["tide_found"].values == 1).all()
+    assert (lik["best_rms"] < 0.05).all()
+    assert (lik["rms"].isel(cells=123) > 0.9).all()  # rms keeps the offset
+
+
+def test_no_valid_sample_gives_uniform(synthetic_astronomy):
+    cells = region_cells()
+    const = random_constants(cells)
+    record = _synthetic_record(const, 5, days=2)
+    valid = pd.Series(False, index=record.index)
+    lik = th.still_tag_tide_likelihood(record, const, sigma=0.3, valid=valid)
+    assert (lik["tide_found"].values == 0).all()
+    np.testing.assert_allclose(lik["pdf"].values, 1.0 / cells.size)
+    with pytest.raises(ValueError, match="no samples"):
+        th.still_tag_tide_likelihood(record.iloc[:0], const, sigma=0.3)
+
+
+def test_per_cell_inputs_aligned_on_cell_ids(synthetic_astronomy):
+    cells = region_cells()
+    const = random_constants(cells, seed=5)
+    record = _synthetic_record(const, 123, days=2)
+    wc = np.full(cells.size, 30.0)
+    wc[123] = 19.0
+    mask = np.ones(cells.size, dtype=bool)
+    mask[:20] = False
+    ref = th.still_tag_tide_likelihood(
+        record, const, sigma=0.3, water_column=wc, ocean_mask=mask
+    )
+    order = np.random.default_rng(0).permutation(cells.size)
+    coords = {"cell_ids": ("cells", cells.values[order], cells.attrs)}
+    shuffled = th.still_tag_tide_likelihood(
+        record,
+        const,
+        sigma=0.3,
+        water_column=xr.DataArray(wc[order], dims="cells", coords=coords),
+        ocean_mask=xr.DataArray(mask[order], dims="cells", coords=coords),
+    )
+    np.testing.assert_allclose(shuffled["pdf"].values, ref["pdf"].values)
+    with pytest.raises(ValueError, match="water_column"):
+        th.still_tag_tide_likelihood(record, const, sigma=0.3, water_column=wc[:-1])
+    missing = xr.DataArray(
+        wc[:-1], dims="cells", coords={"cell_ids": ("cells", cells.values[:-1])}
+    )
+    with pytest.raises(ValueError, match="lacks 1 cells"):
+        th.still_tag_tide_likelihood(record, const, sigma=0.3, water_column=missing)
+
+
+def test_n_eff_scaled_by_window_coverage(synthetic_astronomy):
+    cells = region_cells()
+    const = random_constants(cells, seed=2)
+    record = _synthetic_record(const, 10, days=2, noise=0.2)
+    record = record[record.index < pd.Timestamp("2023-08-02T12:00")]  # 1.5 days
+    lik = th.still_tag_tide_likelihood(record, const, sigma=0.4, n_eff=8)
+    n = -2 * 0.4**2 * lik["log_likelihood"] / lik["rms"] ** 2
+    np.testing.assert_allclose(n.isel(cells=0).values, [8.0, 4.0])
+
+
+def test_predict_tide_modulation_names_any_case(synthetic_astronomy):
+    const = random_constants(region_cells()[:5])
+    times = pd.date_range("2023-08-01", periods=4, freq="1h")
+    names = [str(c) for c in const[th.CONSTITUENT_DIM].values]
+    mod = th.nodal_modulations(times, names[::-1])
+    mod = mod.assign_coords({th.CONSTITUENT_DIM: [n.lower() for n in names[::-1]]})
+    np.testing.assert_allclose(
+        th.predict_tide(const, modulations=mod).values,
+        th.predict_tide(const, times.values).values,
+    )
+
+
+def test_bbox_across_antimeridian_raises():
+    bbox = {"latitude": [-10, 10], "longitude": [172, -172]}
+    with pytest.raises(ValueError, match="antimeridian"):
+        th._bbox_slices(np.arange(-20, 21.0), np.arange(-180, 180.0), bbox, 0.1)

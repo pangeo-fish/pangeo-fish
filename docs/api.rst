@@ -93,6 +93,7 @@ lying still on the seabed.
    harmonic_constants_dataset
    open_harmonic_constants
    select_constants
+   as_complex
    write_harmonic_constants
    nodal_modulations
    predict_tide

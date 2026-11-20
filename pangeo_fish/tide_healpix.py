@@ -303,9 +303,14 @@ def predict_tide(constants, times=None, modulations=None):
             raise ValueError("give times or modulations")
         modulations = nodal_modulations(times, list(constants[CONSTITUENT_DIM].values))
     else:
+        available = {str(c).lower(): c for c in modulations[CONSTITUENT_DIM].values}
+        wanted = [str(c) for c in constants[CONSTITUENT_DIM].values]
+        missing = [c for c in wanted if c.lower() not in available]
+        if missing:
+            raise KeyError(f"constituents missing from the modulations: {missing}")
         modulations = modulations.sel(
-            {CONSTITUENT_DIM: list(constants[CONSTITUENT_DIM].values)}
-        )
+            {CONSTITUENT_DIM: [available[c.lower()] for c in wanted]}
+        ).assign_coords({CONSTITUENT_DIM: constants[CONSTITUENT_DIM].values})
     fcos = modulations["f"] * np.cos(modulations["vu"])
     fsin = modulations["f"] * np.sin(modulations["vu"])
     eta = xr.dot(fcos, constants["tide_real"], dim=CONSTITUENT_DIM) + xr.dot(
@@ -346,7 +351,7 @@ def _bin_average(series, freq):
     samples at :00..:50 average at :25). ``freq=None`` keeps the samples as they are.
     """
     series = series.dropna()
-    if freq is None:
+    if freq is None or series.empty:
         return series
     t0 = series.index[0]
     seconds = pd.Series(_seconds_since(series.index, t0), index=series.index)
@@ -355,6 +360,29 @@ def _bin_average(series, freq):
     mean_seconds = seconds.resample(freq).mean().values[keep]
     index = pd.DatetimeIndex(t0 + pd.to_timedelta(mean_seconds, unit="s"))
     return pd.Series(values.values[keep], index=index)
+
+
+def _per_cell(values, constants, name, dtype):
+    """Per-cell values in the order of ``constants``: aligned on ``cell_ids`` when given."""
+    cell_ids = constants["cell_ids"].values
+    if isinstance(values, xr.DataArray) and "cell_ids" in values.coords:
+        if values.dims != (CELL_DIM,):
+            raise ValueError(f"{name} must have the single dimension {CELL_DIM!r}")
+        if "level" in values["cell_ids"].attrs:
+            _check_same_grid(
+                _grid_info(constants["cell_ids"]), _grid_info(values["cell_ids"])
+            )
+        pos = pd.Index(np.asarray(values["cell_ids"].values)).get_indexer(cell_ids)
+        if (pos < 0).any():
+            raise ValueError(f"{name} lacks {int((pos < 0).sum())} cells of constants")
+        return np.asarray(values.values[pos], dtype=dtype)
+    out = np.asarray(getattr(values, "values", values), dtype=dtype)
+    if out.shape != cell_ids.shape:
+        raise ValueError(
+            f"{name} has shape {out.shape}, constants have {cell_ids.size} cells;"
+            " pass a DataArray with cell_ids to align by cell"
+        )
+    return out
 
 
 def still_tag_tide_likelihood(
@@ -391,7 +419,8 @@ def still_tag_tide_likelihood(
 
     with ``r_c`` the residuals. ``n_eff`` defaults to the number of samples of the
     window (independent errors). The tide model errors are correlated in time, so a
-    smaller ``n_eff`` tempers the evidence.
+    smaller ``n_eff`` tempers the evidence. A partly covered window counts
+    ``n_eff`` times its coverage (number of samples / samples of a full window).
 
     Parameters
     ----------
@@ -403,6 +432,11 @@ def still_tag_tide_likelihood(
         Model error (m) on one ``freq`` sample.
     water_column : array-like or xarray.DataArray, optional
         Mean water depth (m, positive) per cell, same bathymetry as the depth evidence.
+        It must be referenced to mean sea level, the level around which the tide is
+        predicted: charts referenced to the lowest astronomical tide (e.g. EMODnet
+        DTM) are deeper by several metres in macrotidal areas and must be converted
+        first. A DataArray with ``cell_ids`` is aligned on the cells of ``constants``;
+        an array must follow their order.
     valid : pandas.Series of bool, optional
         True where the tag is still on the seabed. Other samples are ignored.
     freq : str or None, default "1h"
@@ -414,14 +448,16 @@ def still_tag_tide_likelihood(
     n_eff : float, optional
         Effective number of independent samples per window.
     ocean_mask : array-like of bool, optional
-        Cells allowed (in addition to the cells with constants).
+        Cells allowed (in addition to the cells with constants). Aligned like
+        ``water_column``.
     min_samples : int, default 12
         Windows with fewer valid samples get a uniform pdf.
     detection_ratio : float, optional
         Model-based tide detection. A window has a tide when the best cell explains
         it: ``min_c rms_c < detection_ratio * no_tide_rms``, with ``no_tide_rms`` the
-        RMS of the record around its window mean, and ``no_tide_rms >=
-        min_tidal_signal``. Windows without a tide get a uniform pdf. This works for
+        RMS of the record around its window mean, ``rms_c`` the RMS of the residuals
+        around their window mean (also with ``water_column``, so that a bathymetry
+        bias does not hide the tide) and ``no_tide_rms >= min_tidal_signal``. Windows without a tide get a uniform pdf. This works for
         semidiurnal, mixed and diurnal regimes alike (no frequency band or amplitude
         threshold). Default: no detection, every window with enough samples is used.
     min_tidal_signal : float, default 0.05
@@ -431,12 +467,19 @@ def still_tag_tide_likelihood(
     -------
     xarray.Dataset
         ``pdf`` (time, cells), normalised over the allowed cells, ``log_likelihood``,
-        ``rms`` (residual RMS, m), ``n_samples``, ``no_tide_rms``, ``best_rms`` and
-        ``tide_found`` (time, 1 when the window is used as evidence), with
+        ``rms`` (residual RMS, m, including the depth offset when ``water_column`` is
+        given), ``n_samples``, ``no_tide_rms``, ``best_rms`` (smallest RMS of the
+        demeaned residuals over the allowed cells, the detection statistic) and
+        ``tide_found`` (time, 1 when the window is used as evidence, else 0), with
         ``cell_ids`` and its grid attributes. ``time`` is the start of each window.
+        Windows without valid samples (e.g. ``valid`` all False) get a uniform pdf.
     """
-    series = _as_series(depth)
+    series = _as_series(depth).dropna()
+    if series.empty:
+        raise ValueError("the depth record has no samples")
     record_start, record_end = series.index.min(), series.index.max()
+    # read the constants once (a Zarr-backed dataset would be read for every window)
+    constants = constants.compute()
     if valid is not None:
         valid = _as_series(valid).reindex(series.index).fillna(0).astype(bool)
         series = series[valid]
@@ -445,9 +488,9 @@ def still_tag_tide_likelihood(
     n_cells = constants.sizes[CELL_DIM]
     allowed = np.isfinite(constants["tide_real"]).all(CONSTITUENT_DIM).values
     if ocean_mask is not None:
-        allowed &= np.asarray(getattr(ocean_mask, "values", ocean_mask), dtype=bool)
+        allowed &= _per_cell(ocean_mask, constants, "ocean_mask", bool)
     if water_column is not None:
-        wc = np.asarray(getattr(water_column, "values", water_column), dtype=float)
+        wc = _per_cell(water_column, constants, "water_column", float)
         allowed &= np.isfinite(wc)
 
     if time_step is None:
@@ -458,12 +501,19 @@ def still_tag_tide_likelihood(
         last = record_end.floor(time_step)
         starts = pd.date_range(first, last, freq=time_step)
         labels = starts.get_indexer(hourly.index.floor(time_step))
+    if time_step is not None and freq is not None:
+        full_window = (
+            pd.Timedelta(time_step).total_seconds() / pd.Timedelta(freq).total_seconds()
+        )
+    else:
+        full_window = None
 
     n_win = len(starts)
     loglik = np.full((n_win, n_cells), np.nan)
     rms = np.full((n_win, n_cells), np.nan)
     n_samples = np.zeros(n_win, dtype=int)
     no_tide_rms = np.full(n_win, np.nan)
+    shape_rms = np.full((n_win, n_cells), np.nan)
     for w in range(n_win):
         sel = hourly[labels == w]
         n_samples[w] = len(sel)
@@ -472,18 +522,22 @@ def still_tag_tide_likelihood(
         no_tide_rms[w] = float(np.sqrt(((sel - sel.mean()) ** 2).mean()))
         eta = predict_tide(constants, sel.index.values).values  # (time, cells)
         r = sel.values[:, None] - eta
-        if water_column is None:
-            r = r - r.mean(axis=0, keepdims=True)
-        else:
-            r = r - wc[None, :]
+        demeaned = r - r.mean(axis=0, keepdims=True)
+        shape_rms[w] = np.sqrt((demeaned**2).mean(axis=0))
+        r = demeaned if water_column is None else r - wc[None, :]
         ms = (r**2).mean(axis=0)
-        n = len(sel) if n_eff is None else n_eff
+        if n_eff is None:
+            n = len(sel)
+        elif full_window is None:
+            n = n_eff
+        else:
+            n = n_eff * min(1.0, len(sel) / full_window)
         loglik[w] = -0.5 * n * ms / sigma**2
         rms[w] = np.sqrt(ms)
 
     best_rms = np.full(n_win, np.nan)
     for w in range(n_win):
-        r = np.where(allowed, rms[w], np.nan)
+        r = np.where(allowed, shape_rms[w], np.nan)
         if np.isfinite(r).any():
             best_rms[w] = np.nanmin(r)
     used = np.isfinite(best_rms)
@@ -648,11 +702,20 @@ def write_harmonic_constants(constants, store, chunk_cells=2**16, dtype="float32
         {name: ds[name].astype(dtype) for name in ("tide_real", "tide_imag")}
     )
     ds = _with_dggs_attrs(ds).chunk({CONSTITUENT_DIM: -1, CELL_DIM: chunk_cells})
+    for var in ds.variables.values():
+        for key in (
+            "chunks",
+            "preferred_chunks",
+            "compressors",
+            "compressor",
+            "shards",
+        ):
+            var.encoding.pop(key, None)
     ds.to_zarr(store, mode="w", zarr_format=2, consolidated=True)
     return store
 
 
-def write_tide_pdf_healpix(likelihood, target_root, behav_found=None, step=200):
+def write_tide_pdf_healpix(likelihood, target_root, behav_found, step=200):
     """Write ``tide_pdf_healpix.zarr`` in the layout read by ``merge_tide_with_total``.
 
     Parameters
@@ -661,16 +724,27 @@ def write_tide_pdf_healpix(likelihood, target_root, behav_found=None, step=200):
         Output of :func:`still_tag_tide_likelihood` with a daily ``time_step``.
     target_root : str or Path
         Folder receiving ``tide_pdf_healpix.zarr``.
-    behav_found : array-like, optional
-        Daily behaviour flag; zeros by default.
+    behav_found : array-like
+        Daily behaviour flag on the time steps of ``likelihood`` (read downstream as
+        the behaviour mask of the multi-sigma fit, e.g. ``behav_found > 0``). It is
+        not derived from the tide likelihood, so it must be given explicitly.
+
+    Notes
+    -----
+    ``tide_found`` is written as 0/1 per window (the window is or is not used as
+    evidence), a special case of the daily fraction written by ``tide_to_healpix``.
     """
     import zarr
 
     from pangeo_fish.storage import _with_dggs_attrs, write_time_blocks
 
     ds = likelihood[["pdf", "ocean_mask", "tide_found"]].copy()
-    flags = np.zeros(ds.sizes["time"]) if behav_found is None else behav_found
-    ds["behav_found"] = ("time", np.asarray(flags, dtype=float))
+    flags = np.asarray(getattr(behav_found, "values", behav_found), dtype=float)
+    if flags.shape != (ds.sizes["time"],):
+        raise ValueError(
+            f"behav_found has shape {flags.shape}, expected ({ds.sizes['time']},)"
+        )
+    ds["behav_found"] = ("time", flags)
     ds["tide_found"] = ds["tide_found"].astype(float)
     ds = _with_dggs_attrs(ds)
     store = f"{target_root}/tide_pdf_healpix.zarr"
@@ -715,6 +789,11 @@ def _bbox_slices(lat, lon, bbox, margin):
     lon = (np.asarray(lon, dtype=float) + 180.0) % 360.0 - 180.0
     lat_min, lat_max = bbox["latitude"]
     lon_min, lon_max = bbox["longitude"]
+    if lon_min > lon_max:
+        raise ValueError(
+            "bbox longitude must be increasing in -180..180; a box across the"
+            " antimeridian is not supported"
+        )
     ilat = np.flatnonzero((lat >= lat_min - margin) & (lat <= lat_max + margin))
     ilon = np.flatnonzero((lon >= lon_min - margin) & (lon <= lon_max + margin))
     return ilat, ilon
@@ -743,6 +822,9 @@ def latlon_constants_from_tmd(source, bbox=None, constituents=None, margin=0.1):
     keep = range(len(names))
     if constituents is not None:
         lower = [n.lower() for n in names]
+        missing = [c for c in constituents if str(c).lower() not in lower]
+        if missing:
+            raise KeyError(f"constituents not in the TMD file {names}: {missing}")
         keep = [lower.index(str(c).lower()) for c in constituents]
     names = [names[k] for k in keep]
     ilat, ilon = _bbox_slices(ds["lat"].values, ds["lon"].values, bbox, margin)
