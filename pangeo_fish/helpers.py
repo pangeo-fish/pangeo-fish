@@ -38,6 +38,7 @@ import pangeo_fish.distributions as distrib
 from pangeo_fish.acoustic import emission_probability
 from pangeo_fish.cf import bounds_to_bins
 from pangeo_fish.diff import diff_z
+from pangeo_fish.drycells import _apply_min_water_depth
 from pangeo_fish.grid import center_longitude
 from pangeo_fish.hmm.estimator import EagerEstimator
 from pangeo_fish.hmm.optimize import EagerBoundsSearch
@@ -897,6 +898,7 @@ def compute_diff(
     tag_log: xr.Dataset,
     relative_depth_threshold: float,
     chunk_time=24,
+    min_water_depth: float | None = None,
     plot=False,
     save=False,
     target_root=".",
@@ -916,6 +918,16 @@ def compute_diff(
         Relative (seabed's) depth threshold to deal with cases where the fish's depths are lower than the seabed's depth
     chunk_time : int, default: 24
         Chunk size for the time dimension
+    min_water_depth : float, optional
+        Water column (m) at or below which a sea cell is considered dry
+        (``H0 + XE <= min_water_depth``, on the native model grid).
+        If a number (>= 0), the ``diff`` of the dry (cell, time) pairs is set to NaN,
+        except at time steps where every sea cell is dry, and
+        ``diff.attrs["min_water_depth"]`` is set. ``0.0`` excludes dry cells only;
+        a positive value also excludes nearly dry cells.
+        If None (default), the values are unchanged and a
+        :class:`~pangeo_fish.drycells.DryCellWarning` reports the dry pairs, if any.
+        See :doc:`dry-cells`.
     plot : bool, default: False
         Whether to return a plot of the dataset
     save : bool, default: False
@@ -964,6 +976,7 @@ def compute_diff(
             }
         )
     )  # type: xr.Dataset
+    diff = _apply_min_water_depth(diff, min_water_depth)
 
     if save:
         _save_zarr(diff, f"{target_root}/diff.zarr", storage_options)

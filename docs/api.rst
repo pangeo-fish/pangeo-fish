@@ -177,3 +177,16 @@ HMM Filtering
    forward
    backward
    forward_backward
+
+
+Dry Cells
+#########
+
+.. currentmodule:: pangeo_fish.drycells
+.. autosummary::
+   :toctree: generated
+
+   dry_mask
+   count_dry_cells
+   mask_dry_cells
+   DryCellWarning
