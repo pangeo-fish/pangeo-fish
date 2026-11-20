@@ -42,10 +42,13 @@ on:
 permissions:
   contents: read
 
-# One run per pull request or branch; a new push cancels the older run,
-# except on main and DEV where every commit is checked.
+# One run per event type and pull request or branch (manual runs also per
+# dataset case), so a push never cancels a manual run. Elsewhere a newer run
+# cancels the older one; on main and DEV the running one finishes, but GitHub
+# keeps only the newest pending run, so quick successive merges can skip an
+# intermediate commit.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}-${{ inputs.dataset_case || 'default' }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/DEV' }}
 
 jobs:
