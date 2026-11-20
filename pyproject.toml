@@ -79,6 +79,8 @@ dynamic = ["version"]
 
 [project.optional-dependencies]
 notebooks = ["papermill>=2.7,<3", "ipykernel>=6.29,<8"]
+# astronomical arguments and nodal corrections for pangeo_fish.tide_healpix
+tide = ["pyfes>=2026.10"]
 
 [project.urls]
 "Homepage" = "https://github.com/pangeo-fish/pangeo-fish"
