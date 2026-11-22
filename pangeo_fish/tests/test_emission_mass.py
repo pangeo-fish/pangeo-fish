@@ -20,7 +20,9 @@ def test_valid_emission_passes():
 
 
 @pytest.mark.parametrize(
-    "row", [[np.nan, np.nan], [0.0, 0.0], [0.0, np.nan]], ids=["nan", "zero", "mixed"]
+    "row",
+    [[np.nan, np.nan], [0.0, 0.0], [0.0, np.nan], [-1.0, 0.5]],
+    ids=["nan", "zero", "mixed", "negative"],
 )
 def test_empty_time_step_raises_with_its_time(row):
     with pytest.raises(ValueError, match=r"at 1 time step\(s\) \(2025-03-31T01:00"):
@@ -35,7 +37,9 @@ def test_dask_and_missing_variable():
 def test_mask_and_extra_dimensions():
     ds = emission([[0.5, 0.5], [1.0, 0.0], [0.2, 0.8]])
     ds["mask"] = ("cells", [False, True])
-    with pytest.raises(ValueError, match="inside the mask at 1 time step"):
+    with pytest.raises(
+        ValueError, match=r"inside the mask \(NaN, 0 or negative\) at 1 time step"
+    ):
         _check_emission_mass(ds)
     ds = ds.drop_vars("mask")
     stacked = xr.concat([ds, ds], dim="member").transpose("member", "time", "cells")
@@ -43,3 +47,10 @@ def test_mask_and_extra_dimensions():
     stacked["pdf"][:, 1] = 0.0
     with pytest.raises(ValueError, match="2025-03-31T01:00"):
         _check_emission_mass(stacked)
+
+
+def test_integer_emission():
+    ds = emission([[1, 0], [0, 0], [0, 2]])
+    ds["pdf"] = ds["pdf"].astype(int)
+    with pytest.raises(ValueError, match="at 1 time step"):
+        _check_emission_mass(ds)

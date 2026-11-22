@@ -1899,8 +1899,8 @@ def _get_speed(
 def _check_emission_mass(ds: xr.Dataset, variable: str = "pdf") -> None:
     """Raise if a time step of the emission has no probability mass.
 
-    A time step whose ``pdf`` is NaN or 0 everywhere (inside ``mask``, when the
-    dataset has one) makes the HMM fail later without a clear error: the states
+    A time step whose ``pdf`` has no positive mass (NaN, 0 or negative everywhere
+    inside ``mask``, when the dataset has one) makes the HMM fail later without a clear error: the states
     become NaN and sigma runs to its bound. Passing this check is necessary, not
     sufficient: the movement model can still leave no reachable cell. Every
     dimension other than ``time`` is summed over.
@@ -1923,8 +1923,8 @@ def _check_emission_mass(ds: xr.Dataset, variable: str = "pdf") -> None:
     shown = ", ".join(str(t)[:16] for t in times[:5])
     more = ", ..." if len(times) > 5 else ""
     raise ValueError(
-        f"The emission probability ({variable!r}) is NaN or 0 everywhere"
-        f"{' inside the mask' if 'mask' in ds else ''} at"
+        f"The emission probability ({variable!r}) has no positive mass"
+        f"{' inside the mask' if 'mask' in ds else ''} (NaN, 0 or negative) at"
         f" {n_empty} time step(s) ({shown}{more}). The HMM cannot run through"
         " them. Check for gaps in the tag data, a mask that removes every cell, or"
         " detections outside the model domain."
