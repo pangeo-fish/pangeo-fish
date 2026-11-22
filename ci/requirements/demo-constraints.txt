@@ -17,7 +17,6 @@ cuda-toolkit==13.2.2
 dask-hpcconfig==2025.6.0
 dask-image==2026.5.0
 entrypoints==0.4.2
-foscat==2026.6.1
 h3ronpy==0.22.0
 healpix-analyse==2026.11.0
 healpix-convolution==0.1.2

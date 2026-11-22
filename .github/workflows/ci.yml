@@ -78,7 +78,7 @@ jobs:
 
       - name: Install pangeo-fish
         run: |
-          python -m pip install -e '.[foscat]' ${{ matrix.constraints }}
+          python -m pip install -e . ${{ matrix.constraints }}
           python -m pip check
 
       - name: Import pangeo-fish
@@ -96,7 +96,7 @@ jobs:
       - name: Run tests
         run: |
           if [ '${{ runner.os }}' = macOS ]; then
-            # The unchanged release also crashes in native foscat/PyTorch after
+            # The unchanged release also crashed in native foscat/PyTorch after
             # earlier test modules on macOS. Isolate native library state while
             # retaining every test and accumulating coverage across processes.
             python -m coverage erase

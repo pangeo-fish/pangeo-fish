@@ -44,7 +44,6 @@ from pangeo_fish.hmm.estimator import EagerEstimator
 from pangeo_fish.hmm.optimize import EagerBoundsSearch
 from pangeo_fish.hmm.optimize.scipy import group_sigma_indices
 from pangeo_fish.hmm.prediction import (
-    Foscat1DHealpix,
     Gaussian1DHealpix,
     UpDownGaussian1DHealpix,
 )
@@ -1738,6 +1737,14 @@ def normalize_pdf(
     return normalized, figure
 
 
+_FOSCAT_REMOVED = (
+    "Foscat1DHealpix (conv_method='FoscatConv') has been removed. Use"
+    " UpDownGaussian1DHealpix (conv_method='LargeHealpixConv'), the default; in a"
+    " saved parameters.json, set predictor_factory.class to"
+    ' "UpDownGaussian1DHealpix".'
+)
+
+
 def _get_predictor_factory(
     ds: xr.Dataset,
     truncate: float | None,
@@ -1775,15 +1782,10 @@ def _get_predictor_factory(
                 ellipsoid=ellipsoid,
             )
         elif conv_method == "FoscatConv":
-            predictor = curry(
-                Foscat1DHealpix,
-                cell_ids=ds["cell_ids"].data,
-                grid_info=ds.dggs.grid_info,
-            )
-
+            raise ValueError(_FOSCAT_REMOVED)
         else:
             raise ValueError(
-                f'Unknown helper "{conv_method}". Expected "HealpixConv", "LargeHealpixConv" or "FoscatConv".'
+                f'Unknown helper "{conv_method}". Expected "HealpixConv" or "LargeHealpixConv".'
             )
     else:
         raise ValueError(f'Unknown dims "{dims}".')
@@ -1973,8 +1975,7 @@ def optimize_pdf(
      conv_method : str, default: "LargeHealpixConv"
          Convolution used for the movement model: ``"LargeHealpixConv"``
          (fast multi-resolution, :py:class:`UpDownGaussian1DHealpix`),
-         ``"HealpixConv"`` (slower reference, needs ``truncate``) or
-         ``"FoscatConv"`` (needs the optional ``foscat`` package).
+         or ``"HealpixConv"`` (slower reference, needs ``truncate``).
      final : bool, default: False
          If True, optimize sigma by matching the predicted final state to the
          observed final position (``score_final_pos``) instead of the standard
@@ -2226,6 +2227,8 @@ def _build_estimator(emission, target_root, storage_options, ellipsoid=None):
         f"{target_root}/parameters.json", mode="r", **(storage_options or {})
     ) as f:
         params = json.load(f)
+    if "Foscat1DHealpix" in params.get("predictor_factory", {}).get("class", ""):
+        raise ValueError(_FOSCAT_REMOVED)
 
     # one sigma value: every time step uses the same predictor
     if len(params["sigma"]) == 1:
@@ -2289,14 +2292,6 @@ def _build_estimator(emission, target_root, storage_options, ellipsoid=None):
             emission,
             truncate=truncate,
             conv_method="HealpixConv",
-            dims=["cells"],
-            ellipsoid=ellipsoid,
-        )
-    elif "Foscat1DHealpix" in cls_name:
-        predictor_factory = _get_predictor_factory(
-            emission,
-            truncate=truncate,
-            conv_method="FoscatConv",
             dims=["cells"],
             ellipsoid=ellipsoid,
         )
@@ -3182,8 +3177,7 @@ def create_parameters(
         Predictor values.
     class_name : str, default="UpDownGaussian1DHealpix"
         Predictor class used when ``predictor_factory`` is None:
-        "UpDownGaussian1DHealpix", "Gaussian1DHealpix" or "Foscat1DHealpix"
-        (the last one needs the optional ``foscat`` package).
+        "UpDownGaussian1DHealpix" or "Gaussian1DHealpix".
     comment : str
         Comment stored in the json file.
     save_parameters : bool, default=False
@@ -3198,13 +3192,14 @@ def create_parameters(
     dict
         Parameters dictionary.
     """
+    if class_name == "Foscat1DHealpix":
+        raise ValueError(_FOSCAT_REMOVED)
     if class_name not in [
-        "Foscat1DHealpix",
         "UpDownGaussian1DHealpix",
         "Gaussian1DHealpix",
     ]:
         raise ValueError(
-            f'Unknown class_name "{class_name}". Expected "Gaussian1DHealpix", "Foscat1DHealpix" or "UpDownGaussian1DHealpix".'
+            f'Unknown class_name "{class_name}". Expected "Gaussian1DHealpix" or "UpDownGaussian1DHealpix".'
         )
     if predictor_factory is None:
         predictor_factory = {
@@ -3304,7 +3299,7 @@ def hand_test_parameter(
     Conv_method : str, default="UpDownGaussian1DHealpix"
         Convolution class name used to build the predictor factory
         (see `create_parameters`). Expected values are
-        "Gaussian1DHealpix", "Foscat1DHealpix" or "UpDownGaussian1DHealpix".
+        "Gaussian1DHealpix" or "UpDownGaussian1DHealpix".
     target_root : str, default=""
         Root directory where the input `combined.zarr` is read from, and
         under which `saving_root` is created for the outputs.

@@ -52,14 +52,11 @@ pip install pangeo-fish
 
 ### Optional extras
 
-- `foscat`: the `Foscat1DHealpix` predictor (`conv_method="FoscatConv"`).
-  The default movement model, `UpDownGaussian1DHealpix`
-  (`conv_method="LargeHealpixConv"`), does not need it.
 - `tide`: tidal predictions with `pangeo_fish.tide_healpix`.
 - `notebooks`: running the demo notebooks with Papermill.
 
 ```console
-pip install -e '.[foscat]'
+pip install -e '.[notebooks,tide]'
 ```
 
 ## For HPC use

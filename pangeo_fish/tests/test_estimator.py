@@ -7,7 +7,7 @@ from tlz.functoolz import curry
 
 from pangeo_fish.hmm.estimator import EagerEstimator
 from pangeo_fish.hmm.optimize import EagerBoundsSearch
-from pangeo_fish.hmm.prediction import Foscat1DHealpix, UpDownGaussian1DHealpix
+from pangeo_fish.hmm.prediction import UpDownGaussian1DHealpix
 
 
 @pytest.fixture
@@ -50,18 +50,8 @@ def sample_dataset():
     ).dggs.assign_latlon_coords()
 
 
-PREDICTORS = ["UpDownGaussian1DHealpix", "Foscat1DHealpix"]
-
-
-def make_predictor_factory(name, ds):
-    """Predictor factory for ``ds``; skips Foscat1DHealpix without foscat."""
-    if name == "Foscat1DHealpix":
-        pytest.importorskip("foscat")
-        return curry(
-            Foscat1DHealpix,
-            cell_ids=ds["cell_ids"].data,
-            grid_info=ds.dggs.grid_info,
-        )
+def make_predictor_factory(ds):
+    """UpDownGaussian1DHealpix predictor factory for ``ds``."""
     return curry(
         UpDownGaussian1DHealpix,
         cell_ids=ds["cell_ids"].data,
@@ -71,10 +61,9 @@ def make_predictor_factory(name, ds):
     )
 
 
-@pytest.fixture(params=PREDICTORS)
-def predictor_factory(request, sample_dataset):
-    """The default UpDownGaussian1DHealpix, and Foscat1DHealpix if installed."""
-    return make_predictor_factory(request.param, sample_dataset)
+@pytest.fixture
+def predictor_factory(sample_dataset):
+    return make_predictor_factory(sample_dataset)
 
 
 @pytest.mark.parametrize("sigma", [[0.0004], [0.0002]])
@@ -152,3 +141,26 @@ def test_updown_predictor_without_ellipsoid(sample_dataset):
     assert predictor.ellipsoid == "sphere"
     state = sample_dataset["initial"].values
     np.testing.assert_allclose(predictor.predict(state).sum(), 1.0, rtol=1e-3)
+
+
+@pytest.mark.parametrize("where", ["create_parameters", "conv_method", "json"])
+def test_foscat_is_removed(tmp_path, sample_dataset, where):
+    import json
+
+    from pangeo_fish import helpers
+
+    with pytest.raises(ValueError, match="UpDownGaussian1DHealpix"):
+        if where == "create_parameters":
+            helpers.create_parameters(sigma=[0.001], class_name="Foscat1DHealpix")
+        elif where == "conv_method":
+            helpers._get_predictor_factory(
+                sample_dataset, None, ["cells"], "FoscatConv"
+            )
+        else:
+            params = {
+                "sigma": [0.001],
+                "sigma_indices": [list(range(sample_dataset.sizes["time"]))],
+                "predictor_factory": {"class": "Foscat1DHealpix", "kwargs": {}},
+            }
+            (tmp_path / "parameters.json").write_text(json.dumps(params))
+            helpers._build_estimator(xr.Dataset(), str(tmp_path), None)
