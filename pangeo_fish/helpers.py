@@ -1896,6 +1896,34 @@ def _get_speed(
     return max_speed.pint.to("km / h")
 
 
+def _check_emission_mass(ds: xr.Dataset, variable: str = "pdf") -> None:
+    """Raise if a time step of the emission has no probability mass.
+
+    A time step whose ``pdf`` is NaN or 0 everywhere makes the HMM fail later
+    without a clear error: the states become NaN and sigma runs to its bound.
+    """
+    if variable not in ds or "time" not in ds[variable].dims:
+        return
+    spatial = [dim for dim in ds[variable].dims if dim != "time"]
+    mass = ds[variable].fillna(0).sum(spatial)
+    empty = ~(mass > 0)
+    if "time" in empty.dims:
+        n_empty = int(empty.sum())
+    else:
+        n_empty = int(bool(empty))
+    if n_empty == 0:
+        return
+    times = np.asarray(ds["time"].values)[np.asarray(empty.values, dtype=bool)]
+    shown = ", ".join(str(t)[:16] for t in times[:5])
+    more = ", ..." if len(times) > 5 else ""
+    raise ValueError(
+        f"The emission probability ({variable!r}) is NaN or 0 everywhere at"
+        f" {n_empty} time steps ({shown}{more}). The HMM cannot run through them."
+        " Check for gaps in the tag data, a mask that removes every cell, or"
+        " detections outside the model domain."
+    )
+
+
 def optimize_pdf(
     *,
     ds: xr.Dataset,
@@ -1972,6 +2000,7 @@ def optimize_pdf(
         )
 
     ds = ds.compute()
+    _check_emission_mass(ds)
 
     if "cells" in ds.dims:
         ds = to_healpix(ds)
@@ -2318,6 +2347,7 @@ def compute_states(
     pangeo_fish.hmm.estimator.EagerEstimator.predict_proba
     """
     emission = _load_emission(ds, target_root, storage_options, chunks)
+    _check_emission_mass(emission)
     estimator, emission, params = _build_estimator(
         emission, target_root, storage_options, ellipsoid
     )
