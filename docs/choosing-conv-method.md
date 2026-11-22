@@ -102,4 +102,4 @@ Fish that enter rivers narrower than one cell need a mixed-level operator (`mult
 
 ## Last word
 
-How well small regional temperature differences pin down the position depends on the observation (emission) model and the reference model, not on the convolution.
+How well small regional temperature differences pin down the position depends on the observation (emission) model and the reference model, not on the convolution. See [Choosing a Copernicus Marine ocean model](copernicus-models.md) for the reference model.

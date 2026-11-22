@@ -482,6 +482,8 @@ def _open_intake_catalog(yaml_url: str, chunks: dict = None):
     return model
 
 
+_COPERNICUS_GLOBAL_6H = "cmems_mod_glo_phy-thetao_anfc_0.083deg_PT6H-i"
+
 # Products whose temperature, SSH and static fields live in separate Copernicus
 # Marine datasets. Key: temperature ``dataset_id``; value: (SSH ``dataset_id``,
 # static ``dataset_id``, static ``dataset_part``). All of them expose
@@ -505,6 +507,20 @@ _COPERNICUS_SPLIT_PRODUCTS = {
         "cmems_mod_nws_phy_anfc_1.5km_static",
         "bathy",
     ),
+    # Global analysis/forecast (1/12 deg, from 2022-06-01), daily mean 3D.
+    "cmems_mod_glo_phy-thetao_anfc_0.083deg_P1D-m": (
+        "cmems_mod_glo_phy_anfc_0.083deg_P1D-m",
+        "cmems_mod_glo_phy_anfc_0.083deg_static",
+        "bathy",
+    ),
+    # Global analysis/forecast, 6-hourly instantaneous 3D. There is no 6-hourly
+    # ``zos``: SSH comes from the hourly-mean 2D dataset (surface ``thetao``
+    # only), stamped on the hour, and is sampled at the temperature times.
+    _COPERNICUS_GLOBAL_6H: (
+        "cmems_mod_glo_phy_anfc_0.083deg_PT1H-m",
+        "cmems_mod_glo_phy_anfc_0.083deg_static",
+        "bathy",
+    ),
 }
 
 
@@ -521,24 +537,29 @@ def _resolve_copernicus_datasets(dataset_id: str):
     return dataset_id, dataset_id, dataset_id.rsplit("_", 1)[0] + "_static", None
 
 
-def _copernicus_is_hourly(dataset_id: str) -> bool:
-    """Whether the Copernicus Marine ``dataset_id`` is an hourly (``PT1H``) product."""
-    return "_PT1H" in dataset_id or "-PT1H" in dataset_id
+def _copernicus_is_subdaily(dataset_id: str) -> bool:
+    """Whether ``dataset_id`` has a sub-daily time step (``PT1H``, ``PT6H``, ...).
+
+    Copernicus Marine encodes the step as an ISO 8601 duration followed by
+    ``-m`` (mean) or ``-i`` (instantaneous), e.g. ``..._PT6H-i``.
+    """
+    return re.search(r"[_-]PT\d+[HM]-[mi]$", dataset_id) is not None
 
 
 def _copernicus_time_bounds(dataset_id, time_slice, tag_log):
     """Return ``start_datetime`` and ``end_datetime`` for ``open_dataset``.
 
-    Daily products are bounded at day resolution. Hourly products are bounded
-    at second resolution; as for ``xarray`` partial string indexing, a ``stop``
+    Daily products are bounded at day resolution. Sub-daily products (hourly,
+    6-hourly, ...) are bounded at second resolution; as for ``xarray`` partial
+    string indexing, a ``stop``
     given as a date (e.g. ``"2021-06-03"``) includes that whole day.
     """
-    hourly = _copernicus_is_hourly(dataset_id)
-    unit = "s" if hourly else "D"
+    subdaily = _copernicus_is_subdaily(dataset_id)
+    unit = "s" if subdaily else "D"
     if time_slice is not None and time_slice.start is not None:
         start = np.datetime64(time_slice.start)
         stop = np.datetime64(time_slice.stop)
-        if hourly and np.datetime_data(stop.dtype)[0] == "D":
+        if subdaily and np.datetime_data(stop.dtype)[0] == "D":
             stop = stop + np.timedelta64(1, "D") - np.timedelta64(1, "s")
     elif tag_log is not None:
         start, stop = tag_log.time.values[0], tag_log.time.values[-1]
@@ -611,6 +632,35 @@ def _warn_if_period_clipped(dataset_id, times, start_datetime, end_datetime):
         )
 
 
+def _sample_ssh_at_times(temperature, ssh, dataset_id):
+    """Restrict both fields to their common period and match exact timestamps."""
+    index = ssh.get_index("time")
+    common = (
+        temperature.sel(time=slice(index.min(), index.max()))
+        if len(index)
+        else temperature.isel(time=slice(0, 0))
+    )
+    times = common["time"].values
+    if not len(times):
+        raise ValueError(
+            f"Copernicus dataset {dataset_id!r}: no overlapping temperature and SSH times."
+        )
+    if not index.is_unique or not pd.Index(times).isin(index).all():
+        raise ValueError(
+            f"Copernicus dataset {dataset_id!r}: SSH times do not include all "
+            "temperature times."
+        )
+    if len(times) < temperature.sizes["time"]:
+        warnings.warn(
+            f"Copernicus dataset {dataset_id!r}: temperature and SSH only overlap "
+            f"from {np.datetime_as_string(times[0], unit='s')} to "
+            f"{np.datetime_as_string(times[-1], unit='s')}; the model is "
+            "restricted to this period.",
+            UserWarning,
+        )
+    return common, ssh.sel(time=times)
+
+
 def _mask_land_depth(static):
     """Set ``deptho`` to NaN on land.
 
@@ -639,15 +689,19 @@ def _open_copernicus_model(
         Copernicus Marine ``dataset_id`` for the physics product (e.g.
         ``"cmems_mod_glo_phy_my_0.083deg_P1D-m"``). The matching static
         product is opened to retrieve ``deptho`` and ``mask``. The IBI daily
-        reanalysis and the hourly (``PT1H``) 3D IBI and North-West European
-        Shelf analysis/forecast products resolve separate temperature/SSH IDs
-        and static ``bathy`` fields internally; callers still provide just the
-        temperature ID. Hourly products are requested at hourly resolution.
+        reanalysis, the hourly (``PT1H``) 3D IBI and North-West European
+        Shelf analysis/forecast products and the global analysis/forecast
+        daily (``P1D-m``) and 6-hourly (``PT6H-i``) temperature products
+        resolve separate temperature/SSH IDs and static ``bathy`` fields
+        internally; callers still provide just the temperature ID. Sub-daily
+        products are requested at second resolution; when the SSH product has
+        a finer step (global: hourly-mean ``zos`` for 6-hourly temperature),
+        SSH is sampled at the temperature times.
     bbox : dict
         Spatial boundaries with keys ``longitude`` and ``latitude``.
     time_slice : slice
         Time slice used to bound ``start_datetime`` / ``end_datetime`` (day
-        resolution for daily products, second resolution for hourly ones). If
+        resolution for daily products, second resolution for sub-daily ones). If
         ``None``, the full extent of ``tag_log`` is used.
     tag_log : xarray.Dataset, optional
         DST data; used as fallback when ``time_slice`` is ``None``.
@@ -691,7 +745,6 @@ def _open_copernicus_model(
     temperature = open_fields(
         temperature_id, ["thetao"] if split else ["thetao", "zos"], **temporal
     )
-    datasets = [temperature]
     if split:
         if "time" not in temperature.coords:
             raise ValueError(
@@ -700,10 +753,14 @@ def _open_copernicus_model(
         # The temperature product may start later than the SSH one (and than the
         # requested period): request SSH over the temperature time range only.
         temperature_times = temperature["time"].values
+        if not len(temperature_times):
+            raise ValueError(
+                f"Copernicus dataset {temperature_id!r}: no temperature times in the requested period."
+            )
         _warn_if_period_clipped(
             temperature_id, temperature_times, start_datetime, end_datetime
         )
-        unit = "s" if _copernicus_is_hourly(temperature_id) else "D"
+        unit = "s" if _copernicus_is_subdaily(temperature_id) else "D"
         ssh_temporal = dict(
             start_datetime=np.datetime_as_string(temperature_times[0], unit=unit),
             end_datetime=np.datetime_as_string(temperature_times[-1], unit=unit),
@@ -711,7 +768,17 @@ def _open_copernicus_model(
         ssh = open_fields(ssh_id, ["zos"], **ssh_temporal)
         if "time" not in ssh.coords:
             raise ValueError(f"Copernicus dataset {ssh_id!r}: missing time coordinate.")
-        datasets.append(_align_copernicus_coordinates(temperature, ssh, ssh_id))
+        if ssh.sizes.get("depth") == 1:
+            # global PT1H-m stores the 2D ``zos`` on its single surface level
+            ssh = ssh.isel(depth=0, drop=True)
+        if temperature_id == _COPERNICUS_GLOBAL_6H:
+            temperature, ssh = _sample_ssh_at_times(temperature, ssh, ssh_id)
+        datasets = [
+            temperature,
+            _align_copernicus_coordinates(temperature, ssh, ssh_id),
+        ]
+    else:
+        datasets = [temperature]
 
     # IBI 202511 catalogue: bathy contains deptho(latitude, longitude) and
     # mask(depth, latitude, longitude), as well as unused deptho_lev.
@@ -775,7 +842,8 @@ def load_model(
     tag_log : xarray.Dataset
         The DST data
     time_slice : slice
-        Time slice to sample the model from
+        Time slice to sample the model from. For sub-daily Copernicus products,
+        a date-only stop includes the entire day.
     bbox : dict
         Spatial boundaries indexed by their coordinates (i.e, ``longitude`` and ``latitude``) as well as the maximum depth indexed by ``max_depth``.
     chunk_time : int, default: 24
@@ -813,10 +881,12 @@ def load_model(
             'Only intake catalogs, "parquet" data or `uri=None` (Copernicus Marine) can be loaded.'
         )
 
+    # Sub-daily Copernicus data are already bounded by the requested timestamps.
+    # Applying adapt_model_time here would cut a date-only stop back to midnight.
+    if uri is not None or not _copernicus_is_subdaily(copernicus_model_name):
+        model = model.sel(time=adapt_model_time(time_slice))
     reference_model = (
-        model.sel(time=adapt_model_time(time_slice))
-        .sel(lat=slice(*bbox["latitude"]), lon=slice(*bbox["longitude"]))
-        .pipe(
+        model.sel(lat=slice(*bbox["latitude"]), lon=slice(*bbox["longitude"])).pipe(
             lambda ds: ds.sel(
                 depth=slice(None, (bbox["max_depth"] - ds["XE"].min()).compute())
             )
