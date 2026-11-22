@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -623,9 +624,9 @@ class FFTGaussian1DHealpix(Predictor):
     max_patch_radius_deg: float = 10.0
     device: str = "cpu"
     dtype: torch.dtype = torch.float64
-    # "average" (default) or "conservative" (a normalised kernel keeps the sum
-    # over the cells); passed to HealPixFFTConv.
-    projection: str = "average"
+    # "conservative" (default: a normalised kernel keeps the sum over the
+    # cells) or "average"; passed to HealPixFFTConv.
+    projection: str = "conservative"
 
     def __post_init__(self):
         from healpix_analyse import HealPixFFTConv
@@ -681,19 +682,32 @@ class FFTGaussian1DHealpix(Predictor):
             kernel_size -= 1 - kernel_size % 2  # keep it odd
         self.kernel_size = kernel_size
 
-        self.layer = HealPixFFTConv(
-            level,
-            1,
-            1,
-            self.kernel_size,
-            cell_ids=self.cell_ids,
-            ellipsoid=self.ellipsoid,
-            max_patch_radius_deg=self.max_patch_radius_deg,
-            pixel_size_rad=self.pixel_size_rad,
-            device=self.device,
-            dtype=self.dtype,
-            projection=self.projection,
-        )
+        try:
+            self.layer = HealPixFFTConv(
+                level,
+                1,
+                1,
+                self.kernel_size,
+                cell_ids=self.cell_ids,
+                ellipsoid=self.ellipsoid,
+                max_patch_radius_deg=self.max_patch_radius_deg,
+                pixel_size_rad=self.pixel_size_rad,
+                device=self.device,
+                dtype=self.dtype,
+                projection=self.projection,
+            )
+        except ValueError as err:
+            match = re.search(r"patch radius is ([0-9.eE+-]+) degrees", str(err))
+            if match is None:
+                raise
+            raise ValueError(
+                f"FFTConv cannot handle this domain: its radius is "
+                f"{float(match.group(1)):.1f} degrees, above the limit of "
+                f"{self.max_patch_radius_deg:g} degrees (one tangent plane). "
+                'Either use a smaller bounding box, or use conv_method='
+                '"HealpixAnalyseLargeConv", which has no such limit but deviates '
+                "from the direct sum by up to about 10 % on the demo tag."
+            ) from err
 
         # Gaussian kernel: exp(-r^2 / (2 sigma^2)), normalised to sum 1
         x = np.arange(self.kernel_size) - self.kernel_size // 2

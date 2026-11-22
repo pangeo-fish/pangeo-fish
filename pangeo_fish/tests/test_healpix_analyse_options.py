@@ -227,3 +227,38 @@ def test_json_round_trip_fft_projection_and_large(emission, tmp_path):
         assert type(restored).__name__ == cls_name
         if method == "FFTConv":
             assert restored.projection == "conservative"
+
+
+def test_fft_default_projection_is_conservative(cells):
+    predictor = FFTGaussian1DHealpix(
+        cell_ids=cells, grid_info=_grid(), sigma=3 * CELL_RAD, ellipsoid="WGS84"
+    )
+    assert predictor.projection == "conservative"
+
+
+@pytest.mark.filterwarnings("ignore:A .predictor_index. entry:RuntimeWarning")
+def test_parameters_file_without_projection_loads_as_conservative(emission, tmp_path):
+    params = {
+        "sigma": [3 * CELL_RAD],
+        "predictor_factory": {
+            "class": "FFTGaussian1DHealpix",
+            "kwargs": {"truncate": "5.0", "max_sigma": "0.1"},
+        },
+    }
+    (tmp_path / "parameters.json").write_text(json.dumps(params))
+    estimator, _, _ = _build_estimator(emission, str(tmp_path), None)
+    assert estimator.predictor_factory(sigma=3 * CELL_RAD).projection == "conservative"
+
+
+def test_fft_domain_too_large_gives_actionable_error(cells):
+    with pytest.raises(ValueError) as err:
+        FFTGaussian1DHealpix(
+            cell_ids=cells,
+            grid_info=_grid(),
+            sigma=3 * CELL_RAD,
+            ellipsoid="WGS84",
+            max_patch_radius_deg=0.01,
+        )
+    msg = str(err.value)
+    assert "radius" in msg and "0.01" in msg
+    assert "smaller bounding box" in msg and "HealpixAnalyseLargeConv" in msg

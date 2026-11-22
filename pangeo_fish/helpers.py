@@ -1620,7 +1620,7 @@ def _get_predictor_factory(
     max_sigma: float | None = None,
     normalization: str = "full_disc",
     land_barrier: bool = False,
-    projection: str = "average",
+    projection: str = "conservative",
 ):
     if dims == ["x", "y"]:
         raise ValueError("dims must be ['cells'], ['x','y'] is not used anymore")
@@ -1813,7 +1813,7 @@ def optimize_pdf(
     target_root=".",
     normalization: str = "full_disc",
     land_barrier: bool = False,
-    projection: str = "average",
+    projection: str = "conservative",
     **kwargs,
 ) -> dict:
     """Optimize a temporal probability distribution.
@@ -1849,7 +1849,7 @@ def optimize_pdf(
      land_barrier : bool, default False
          Only for conv_method="HealpixAnalyseConv": the non-ocean cells of ``mask``
          are passed as blocked cells.
-     projection : {"average", "conservative"}, default "average"
+     projection : {"conservative", "average"}, default "conservative"
          Only for conv_method="FFTConv".
      final : bool, default: False
          If True, optimize sigma by matching the predicted final state to the
@@ -2166,7 +2166,8 @@ def _build_estimator(emission, target_root, storage_options, ellipsoid=None):
 
     normalization = predictor_kwargs.get("normalization") or "full_disc"
     land_barrier = _as_bool(predictor_kwargs.get("land_barrier", False))
-    projection = predictor_kwargs.get("projection") or "average"
+    # files written before this option existed have no key: they get "conservative"
+    projection = predictor_kwargs.get("projection") or "conservative"
 
     cls_name = params["predictor_factory"]["class"]  # type: str
     if "LargeGaussianHealpixAnalyse" in cls_name:
@@ -3142,6 +3143,11 @@ def create_parameters(
                 "sigma": None,
                 "truncate": 4.0 if class_name == "Gaussian1DHealpix" else None,
                 "kernel_size": None,
+                **(
+                    {"projection": "conservative"}
+                    if class_name == "FFTGaussian1DHealpix"
+                    else {}
+                ),
             },
         }
 
