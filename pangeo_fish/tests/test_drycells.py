@@ -129,12 +129,31 @@ def test_mask_dry_cells_is_lazy_and_works_on_healpix_cells():
     xr.testing.assert_identical(lazy.compute(), mask_dry_cells(cells))
 
 
-def test_compute_diff_default_unchanged_and_warns():
+def test_compute_diff_none_keeps_dry_cells_and_warns():
     model = make_model()
     with pytest.warns(DryCellWarning, match="4 sea"):
-        diff = run_compute_diff(model)
+        diff = run_compute_diff(model, min_water_depth=None)
     assert "min_water_depth" not in diff.attrs
     assert np.isfinite(diff["diff"].values[1:, 0, 2:]).all()
+
+
+def test_compute_diff_default_masks_dry_cells_automatically():
+    model = make_model()
+    with pytest.warns(DryCellWarning, match="automatic masking"):
+        auto = run_compute_diff(model)
+    with pytest.warns(DryCellWarning):
+        explicit = run_compute_diff(model, min_water_depth=0.0)
+    xr.testing.assert_identical(auto, explicit)
+
+
+def test_compute_diff_default_is_untouched_without_dry_cells():
+    model = make_model(H0=(np.nan, 10.0, 5.0, 6.0), XE=np.full((3, 4), -0.9))
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DryCellWarning)
+        auto = run_compute_diff(model)
+        none = run_compute_diff(model, min_water_depth=None)
+    xr.testing.assert_identical(auto, none)
+    assert "min_water_depth" not in auto.attrs
 
 
 def test_compute_diff_min_water_depth_masks_dry_cells():
@@ -142,7 +161,7 @@ def test_compute_diff_min_water_depth_masks_dry_cells():
     with pytest.warns(DryCellWarning, match="Masking up to 4"):
         masked = run_compute_diff(model, min_water_depth=0.0)
     with pytest.warns(DryCellWarning):
-        default = run_compute_diff(model)
+        default = run_compute_diff(model, min_water_depth=None)
     dry = dry_mask(model).values
     assert np.isnan(masked["diff"].values[dry]).all()
     np.testing.assert_array_equal(
@@ -169,7 +188,7 @@ def test_compute_diff_min_water_depth_is_a_no_op_without_dry_cells():
     model = make_model(H0=(np.nan, 10.0, 5.0, 6.0), XE=np.full((3, 4), -0.9))
     with warnings.catch_warnings():
         warnings.simplefilter("error", DryCellWarning)
-        default = run_compute_diff(model)
+        default = run_compute_diff(model, min_water_depth=None)
         masked = run_compute_diff(model, min_water_depth=0.0)
     assert default["diff"].values.tobytes() == masked["diff"].values.tobytes()
     assert masked.attrs["min_water_depth"] == 0.0
@@ -206,7 +225,7 @@ def test_compute_diff_with_extra_dimension():
     model = xr.concat([model, model], dim="member")
     model["H0"] = H0
     with pytest.warns(DryCellWarning, match="at most 2 of 3 sea cells"):
-        diff = run_compute_diff(model)
+        diff = run_compute_diff(model, min_water_depth=None)
     with pytest.warns(DryCellWarning, match="Masking up to 8"):
         masked = run_compute_diff(model, min_water_depth=0.0)
     assert int(masked["diff"].isnull().sum() - diff["diff"].isnull().sum()) == 8
@@ -224,7 +243,7 @@ def test_compute_diff_default_stays_lazy():
             )
 
     model = make_model().chunk({"time": 1})
-    with Counter(), pytest.warns(DryCellWarning):
+    with Counter(), pytest.warns(DryCellWarning):  # default "auto" masks lazily
         diff, _ = helpers.compute_diff(
             reference_model=model,
             tag_log=make_tag(),

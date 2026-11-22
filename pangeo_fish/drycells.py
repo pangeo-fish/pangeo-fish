@@ -149,9 +149,17 @@ def _format_times(times, limit=5):
     return ", ".join(values) + suffix
 
 
-def _apply_min_water_depth(diff, min_water_depth=None):
-    """Report (``None``) or mask (number) the dry cells of a diff dataset."""
-    if min_water_depth is not None:
+def _apply_min_water_depth(diff, min_water_depth="auto"):
+    """Mask (``"auto"`` or a number) or report (``None``) the dry cells of a diff.
+
+    ``"auto"`` masks the cells with ``H0 + XE <= 0`` when there are any (in
+    practice only the NWSHELF hourly product) and leaves the dataset untouched
+    otherwise.
+    """
+    auto = isinstance(min_water_depth, str) and min_water_depth == "auto"
+    if auto:
+        min_water_depth = 0.0
+    elif min_water_depth is not None:
         min_water_depth = _validate(min_water_depth)
     if "XE" not in diff or "H0" not in diff:
         return diff
@@ -169,7 +177,7 @@ def _apply_min_water_depth(diff, min_water_depth=None):
     n_dry_all = stats["n_dry"]
     total = int(n_dry_all.sum())
     if total == 0:
-        if min_water_depth is None:
+        if min_water_depth is None or auto:
             return diff
         return diff.assign_attrs(min_water_depth=min_water_depth)
 
@@ -195,7 +203,12 @@ def _apply_min_water_depth(diff, min_water_depth=None):
     every_sea_cell_dry = (n_dry_all >= stats["n_sea"]) & (stats["n_sea"] > 0)
     masked = int(n_dry_all.where(~every_sea_cell_dry, 0).sum())
     message = (
-        f"Masking up to {masked} dry sea (cell, time) pairs"
+        (
+            "Dry cells found (automatic masking, pass min_water_depth=None to keep them). "
+            if auto
+            else ""
+        )
+        + f"Masking up to {masked} dry sea (cell, time) pairs"
         f" (H0 + XE <= {min_water_depth} m), at most {worst} of {n_sea} sea cells"
         " per time step. Time steps without any wet sea cell with a valid diff"
         " are left unmasked."

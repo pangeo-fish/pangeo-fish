@@ -898,7 +898,7 @@ def compute_diff(
     tag_log: xr.Dataset,
     relative_depth_threshold: float,
     chunk_time=24,
-    min_water_depth: float | None = None,
+    min_water_depth: float | str | None = "auto",
     plot=False,
     save=False,
     target_root=".",
@@ -918,15 +918,18 @@ def compute_diff(
         Relative (seabed's) depth threshold to deal with cases where the fish's depths are lower than the seabed's depth
     chunk_time : int, default: 24
         Chunk size for the time dimension
-    min_water_depth : float, optional
+    min_water_depth : float, "auto" or None, default: "auto"
         Water column (m) at or below which a sea cell is considered dry
         (``H0 + XE <= min_water_depth``, on the native model grid).
         If a number (>= 0), the ``diff`` of the dry (cell, time) pairs is set to NaN,
         except at time steps without any wet sea cell with a valid ``diff``, and
         ``diff.attrs["min_water_depth"]`` is set. ``0.0`` excludes dry cells only;
         a positive value also excludes nearly dry cells.
-        If None (default), the values are unchanged and a
-        :class:`~pangeo_fish.drycells.DryCellWarning` reports the dry pairs, if any.
+        If ``"auto"`` (default), dry cells (``H0 + XE <= 0``) are masked as with
+        ``0.0`` when there are any (in practice only with the North-West Shelf
+        hourly product) and a :class:`~pangeo_fish.drycells.DryCellWarning`
+        reports them; without dry cells the dataset is returned unchanged.
+        If None, the values are unchanged and a warning reports the dry pairs, if any.
         See :doc:`dry-cells`.
     plot : bool, default: False
         Whether to return a plot of the dataset

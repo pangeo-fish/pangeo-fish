@@ -26,14 +26,19 @@ show no dry cells.
 
 ## What `compute_diff` does
 
-- `min_water_depth=None` (default): the values are unchanged. If there are dry
-  cells, a `DryCellWarning` (a `UserWarning`) reports how many.
-- `min_water_depth=0.0`: the `diff` of the dry (cell, time) pairs becomes NaN, which
-  gives them a probability of 0 later on. A positive value also excludes nearly
-  dry cells. `diff.attrs["min_water_depth"]` records the value. Older pangeo-fish
-  versions silently ignore the argument, so check this attribute.
-- A time step where no wet cell with a valid `diff` would remain is never masked
-  (the warning lists it).
+- `min_water_depth="auto"` (default): if the model has dry cells (`H0 + XE <= 0`),
+  their `diff` becomes NaN, which gives them a probability of 0 later on, and a
+  `DryCellWarning` (a `UserWarning`) reports how many. **In practice this happens
+  only with the North-West Shelf hourly product, so with NWS the dry cells are
+  excluded automatically.** IBI (hourly and daily) and the global products have no
+  dry cells: their result is returned unchanged.
+- `min_water_depth=0.0` or a positive number: the same masking, always applied.
+  A positive value also excludes nearly dry cells.
+  `diff.attrs["min_water_depth"]` records the value used.
+- `min_water_depth=None`: the dry cells are kept (the behaviour before this option
+  existed); a warning still reports them.
+- A time step without any wet sea cell with a valid `diff` is never masked (the
+  warning lists the time steps where every sea cell is dry).
 - `H0`, `XE` and `ocean_mask` are not modified.
 
 ```python
@@ -41,11 +46,14 @@ diff, _ = compute_diff(
     reference_model=model,
     tag_log=tag["dst"].ds,
     relative_depth_threshold=0,
-    min_water_depth=0.0,
+    # min_water_depth="auto" is the default; pass None to keep dry cells
 )
 ```
 
-With daily products this is a no-op (no dry cells), apart from the attribute.
+Older pangeo-fish versions ignore the argument silently; the warning and the
+`min_water_depth` attribute show that the masking ran.
+
+With daily products and IBI this is a no-op (no dry cells).
 
 ## Things to know
 
