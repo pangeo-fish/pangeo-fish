@@ -84,6 +84,9 @@ Tidal harmonic constants on HEALPix cells, tide prediction with nodal correction
 (requires ``pyfes``, extra ``pangeo-fish[tide]``) and the tidal likelihood of a tag
 lying still on the seabed.
 
+See :ref:`tide-methods` for the Complete demo selector and the comparison
+with the legacy method.
+
 .. currentmodule:: pangeo_fish.tide_healpix
 .. autosummary::
    :toctree: generated

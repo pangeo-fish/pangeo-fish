@@ -8,4 +8,5 @@ Welcome to pangeo-fish's documentation!
     pangeo-notebook
     format
     notebook
+    tide
     api

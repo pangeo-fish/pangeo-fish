@@ -17,7 +17,12 @@ The defaults shared by the demos are identical except for their output folders:
 | Main trajectories                    | Viterbi, mode, mean              |
 | Manual-sigma comparison trajectories | mode, mean                       |
 
-The complete demo retains its bathymetry, tides and two-sigma model. The
+In the Complete demo's **Study settings**, set `tide_method = "legacy"` for
+the original gridded likelihood or `tide_method = "healpix"` to predict tides
+from local harmonic constants directly on the HMM grid. Install `.[notebooks,tide]`
+for the HEALPix method. See the [tide methods guide](../docs/tide.rst) for details.
+
+The Complete demo also includes bathymetry and a two-sigma model. The
 manual-sigma appendix uses a separate `comparison_track_modes` setting in both
 demos; Viterbi with the appendix's large manually chosen sigma can require very
 large transition tables.
@@ -33,6 +38,14 @@ papermill notebooks/pangeo-fish-base-demo.ipynb executed/base-A19124.ipynb \
   -k python3 -p tag_name A19124 -p scratch_root ./results/base
 papermill notebooks/pangeo-fish-complete-demo.ipynb executed/complete-A19124.ipynb \
   -k python3 -p tag_name A19124 -p scratch_root ./results/complete
+```
+
+To compare with the HEALPix tide method, use a separate results folder.
+
+```bash
+python -m pip install -e '.[notebooks,tide]'
+papermill notebooks/pangeo-fish-complete-demo.ipynb executed/complete-healpix-A19124.ipynb \
+  -k python3 -p tide_method healpix -p scratch_root ./results/complete-healpix
 ```
 
 The `parameters` cell contains serializable defaults. Papermill inserts overrides

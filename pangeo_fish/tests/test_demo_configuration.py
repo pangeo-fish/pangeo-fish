@@ -20,6 +20,10 @@ def test_common_defaults_are_identical():
     base, _ = demo_settings(load_demo("base"))
     complete, _ = demo_settings(load_demo("complete"))
     assert base.pop("scratch_root") != complete.pop("scratch_root")
+    assert complete.pop("tide_method") == "legacy"
+    assert complete.pop("tide_model_source").endswith(".nc")
+    assert complete.pop("tide_sigma_m") == 2.0
+    assert complete.pop("tide_min_samples") == 6
     assert base == complete
     assert base["bbox"] == {"latitude": [46, 51.5], "longitude": [-7, 0]}
     assert base["refinement_level"] == 10
