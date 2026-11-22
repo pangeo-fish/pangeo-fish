@@ -33,7 +33,7 @@ class DryCellWarning(UserWarning):
 
 
 def _validate(min_water_depth):
-    if isinstance(min_water_depth, (bool, np.bool_)):
+    if isinstance(min_water_depth, (bool, np.bool_, str)):
         raise ValueError(
             f"min_water_depth must be a finite number >= 0, got {min_water_depth!r}"
         )

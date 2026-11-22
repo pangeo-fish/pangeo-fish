@@ -85,7 +85,7 @@ def test_dry_mask_threshold_and_land():
     assert not dry_mask(model, 10.0).values[0, 0, 3]
 
 
-@pytest.mark.parametrize("value", [-0.1, np.nan, np.inf, "x", True])
+@pytest.mark.parametrize("value", [-0.1, np.nan, np.inf, "x", "0.5", True])
 def test_invalid_min_water_depth(value):
     with pytest.raises(ValueError, match="min_water_depth"):
         dry_mask(make_model(), value)

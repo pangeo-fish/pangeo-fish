@@ -57,6 +57,9 @@ With daily products and IBI this is a no-op (no dry cells).
 
 ## Things to know
 
+- The check reads `H0` and `XE` for the whole period once inside `compute_diff`
+  (2D fields, much smaller than the 3D temperature); `diff` itself stays lazy.
+
 - The check runs on the native model grid, before regridding. Regridding spreads
   NaN by about one ring, so wet neighbours of dry cells are also lost (in the
   Western Scheldt at low spring tide, the wet HEALPix cells drop by about 20 % at
