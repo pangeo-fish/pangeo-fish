@@ -790,3 +790,47 @@ def test_bbox_across_antimeridian_raises():
     bbox = {"latitude": [-10, 10], "longitude": [172, -172]}
     with pytest.raises(ValueError, match="antimeridian"):
         th._bbox_slices(np.arange(-20, 21.0), np.arange(-180, 180.0), bbox, 0.1)
+
+
+@pytest.mark.parametrize("longitude", [3.97, 179.97])
+def test_fes2022b_native_mesh_roundtrip(tmp_path, longitude):
+    pytest.importorskip("pyfes")
+    latitude = 35.0
+    level = 12
+    target_lon = (np.array([longitude, longitude + 1.2]) + 180) % 360 - 180
+    cells = th.make_cell_ids(
+        healpix_geo.nested.lonlat_to_healpix(
+            target_lon, [latitude, latitude + 1.2], level, ellipsoid="WGS84"
+        ),
+        level,
+        "WGS84",
+    )
+    corners = (longitude + np.array([-0.3, 0.3, 0.0]) + 180) % 360 - 180
+    ds = xr.Dataset(
+        {
+            "lon": ("coordinates", corners),
+            "lat": ("coordinates", latitude + np.array([-0.3, -0.3, 0.3])),
+            "triangle": (("triangles", "three"), [[0, 1, 2]]),
+            "lgp2": (("triangles", "six"), [np.arange(6)]),
+            "M2_amplitude": ("lgp2_nodes", np.full(6, 150.0), {"units": "cm"}),
+            "M2_phase": ("lgp2_nodes", np.full(6, 90.0), {"units": "degrees"}),
+            "S2_amplitude": ("lgp2_nodes", np.full(6, 25.0), {"units": "cm"}),
+            "S2_phase": ("lgp2_nodes", np.full(6, -90.0), {"units": "degrees"}),
+        },
+        attrs={"license": "https://example.org/data-license"},
+    )
+    source = tmp_path / "FES2022b_OceanTide_NSgrid.nc"
+    ds.to_netcdf(source)
+
+    result = th.fes2022b_constants_to_healpix(source, cells, ["s2", "m2"])
+    np.testing.assert_array_equal(result.constituent.values, ["S2", "M2"])
+    np.testing.assert_array_equal(result.cell_ids.values, cells.values)
+    np.testing.assert_allclose(th.as_complex(result)[:, 0], [-0.25j, 1.5j], atol=1e-7)
+    assert np.isnan(th.as_complex(result)[:, 1]).all().item()
+    assert result.attrs["license"] == ds.attrs["license"]
+
+    with pytest.raises(ValueError, match="missing from FES2022b"):
+        th.fes2022b_constants_to_healpix(source, cells, ["O1"])
+    sphere = th.make_cell_ids(cells.values, level, "sphere")
+    with pytest.raises(ValueError, match="requires WGS84"):
+        th.fes2022b_constants_to_healpix(source, sphere)

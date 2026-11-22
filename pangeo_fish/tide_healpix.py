@@ -1014,3 +1014,83 @@ def constants_to_healpix(latlon, cell_ids, fill_distance_km=None, attrs=None):
     return harmonic_constants_dataset(
         result, list(latlon[CONSTITUENT_DIM].values), cell_ids, attrs=out_attrs
     )
+
+
+def fes2022b_constants_to_healpix(source, cell_ids, constituents=None):
+    """Interpolate FES2022b native LGP2 harmonic constants to WGS84 HEALPix cells.
+
+    Parameters
+    ----------
+    source : str or pathlib.Path
+        Local AVISO ``FES2022b_OceanTide_NSgrid.nc`` file.
+    cell_ids : xarray.DataArray
+        Target nested HEALPix cells with WGS84 grid attributes.
+    constituents : sequence of str, optional
+        Constituents to interpolate, in the requested order. The default uses
+        all constituents in the file.
+
+    Returns
+    -------
+    xarray.Dataset
+        Complex constants in metres, stored as real and imaginary parts.
+        Cells outside the native mesh have NaN constants.
+    """
+    if str(_grid_info(cell_ids)["ellipsoid"]).casefold() != "wgs84":
+        raise ValueError("FES2022b interpolation requires WGS84 HEALPix cells")
+    lon, lat = cell_centers(cell_ids)
+    if not lon.size:
+        raise ValueError("FES2022b interpolation requires at least one HEALPix cell")
+    pyfes = _require_pyfes()
+
+    with xr.open_dataset(source, decode_cf=False) as ds:
+        required = {"lon", "lat", "triangle", "lgp2"}
+        if missing := required.difference(ds.variables):
+            raise ValueError(f"FES2022b native mesh is missing {sorted(missing)}")
+        available = {
+            name.removesuffix("_amplitude").casefold(): name.removesuffix("_amplitude")
+            for name in ds.data_vars
+            if name.endswith("_amplitude")
+        }
+        wanted = list(available) if constituents is None else list(constituents)
+        if not wanted:
+            raise ValueError("select at least one FES2022b constituent")
+        if missing := [name for name in wanted if name.casefold() not in available]:
+            raise ValueError(f"constituents missing from FES2022b: {missing}")
+        names = [available[name.casefold()] for name in wanted]
+        for name in names:
+            if f"{name}_phase" not in ds:
+                raise ValueError(f"FES2022b native file is missing {name}_phase")
+            if ds[f"{name}_amplitude"].attrs.get("units") != "cm":
+                raise ValueError(f"FES2022b amplitude for {name} must be in cm")
+        attrs = {
+            key: ds.attrs[key]
+            for key in ("license", "credits", "doi")
+            if key in ds.attrs
+        }
+
+    # Use the shorter longitude interval for regional reads near the antimeridian.
+    shifted = lon % 360
+    bounds = shifted if np.ptp(shifted) < np.ptp(lon) else lon
+    west = (bounds.min() - 0.5 + 180) % 360 - 180
+    east = (bounds.max() + 0.5 + 180) % 360 - 180
+    bbox = None
+    if np.ptp(bounds) < 359:
+        bbox = (west, max(-90, lat.min() - 0.5), east, min(90, lat.max() + 0.5))
+
+    model = pyfes.config.LGP(
+        path=str(source),
+        type="lgp2",
+        codes="lgp2",
+        tidal_type="tide",
+        constituents=names,
+        bbox=bbox,
+    ).load()
+    waves, quality = model.interpolate(lon, lat)
+    by_name = {key.casefold(): value for key, value in waves.items()}
+    constants = np.stack([by_name[name.casefold()] for name in names]) * 0.01
+    constants[:, quality <= 0] = np.nan + 1j * np.nan
+    attrs.update(
+        source="FES2022b Ocean Tide (native mesh)",
+        resampling="PyFES LGP2 interpolation of complex harmonic constants",
+    )
+    return harmonic_constants_dataset(constants, names, cell_ids, attrs=attrs)

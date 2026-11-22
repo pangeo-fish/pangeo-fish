@@ -12,14 +12,39 @@ Choose ``tide_method`` in **Study settings** at the top of the
     tide_method = "legacy"  # Original method (default)
     # tide_method = "healpix"  # Local harmonic prediction on the HMM grid
 
-Both methods use the demo's TPXO9 model and the existing depth-based flags.
-The ``tide_model_source`` setting also accepts a local path to the same TMD3
-NetCDF file. Install the optional tide dependency in the notebook kernel's
-environment to use the HEALPix method.
+Both methods use the existing depth-based flags. TPXO9 is the default tide
+model. Section 7 downloads it from Ifremer, and ``tide_model_source`` can
+point to a local copy of the same TMD3 NetCDF file. Install the optional tide
+dependency in the notebook kernel's environment to use the HEALPix method.
 
 .. code-block:: console
 
    python -m pip install -e '.[notebooks,tide]'
+
+Using FES2022b
+--------------
+
+Obtain ``FES2022b_OceanTide_NSgrid.nc`` from AVISO+ and select these values in
+the Complete demo's Study settings.
+
+.. code-block:: python
+
+    tide_method = "healpix"
+    tide_model = "fes2022b"
+    tide_model_source = "/path/to/FES2022b_OceanTide_NSgrid.nc"
+    ellipsoid = "WGS84"
+
+PyFES applies the native six-node LGP2 interpolation to the complex
+constituents at the HMM cell centres. Cells outside the native
+mesh have missing constants. For example, the native mesh reaches the lower
+Scheldt estuary near Bath, while the release site at Temse is outside its
+coverage. The demo uses the ocean tide elevation constituents from the file.
+
+See the `AVISO FES product page
+<https://www.aviso.altimetry.fr/index.php?id=1279>`_ and
+the `AVISO data license
+<https://aviso.altimetry.fr/en/data/data-access/fileadmin/documents/data/License_Aviso.pdf>`_
+for access and attribution.
 
 How the likelihoods differ
 --------------------------
@@ -34,7 +59,7 @@ How the likelihoods differ
    * - Tide prediction
      - Builds a tide signal from the file's constituent amplitudes and phases.
        This time-dependent signal is shared across the model grid.
-     - Interpolates the local complex harmonic constants to the HMM cell
+     - Interpolates local TPXO9 or FES2022b complex harmonic constants to the HMM cell
        centres, then predicts a different tide at each cell. PyFES supplies the
        astronomical arguments and nodal corrections at the observation times.
    * - Depth reference
