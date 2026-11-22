@@ -9,5 +9,6 @@ Welcome to pangeo-fish's documentation!
     format
     copernicus-models
     notebook
+    tide
     api
     dry-cells
