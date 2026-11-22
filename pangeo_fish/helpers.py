@@ -915,7 +915,9 @@ def compute_diff(
     tag_log : xarray.Dataset
         The DST data. *Hint: given a tag model, it corresponds to ``tag["dst"].ds``*
     relative_depth_threshold : float
-        Relative (seabed's) depth threshold to deal with cases where the fish's depths are lower than the seabed's depth
+        No longer used: the seabed-depth check was removed from the temperature
+        difference. The value is only recorded in the attributes; a non-zero value
+        raises a ``FutureWarning``.
     chunk_time : int, default: 24
         Chunk size for the time dimension
     min_water_depth : float, "auto" or None, default: "auto"
@@ -960,6 +962,13 @@ def compute_diff(
         ),
         other_dim="obs",
     ).chunk({"time": chunk_time})
+    if relative_depth_threshold:
+        warnings.warn(
+            "relative_depth_threshold is no longer used by compute_diff and is"
+            " ignored; pass 0 to silence this warning.",
+            FutureWarning,
+            stacklevel=2,
+        )
     attrs = (
         tag_log.attrs
         | _get_package_versions()
