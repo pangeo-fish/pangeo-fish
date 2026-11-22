@@ -14,12 +14,12 @@ shows dry cells in practice. The NWS model has no wetting and drying: it runs wi
 bathymetry, so on tidal flats `H0 + XE` falls below zero at low tide while the
 temperature stays finite. Dry cells can therefore not be detected from `TEMP`.
 
-| Area (NWS hourly) | Day | Dry (cell, time) pairs | Max dry share of sea cells |
-| --- | --- | --- | --- |
-| Mont-Saint-Michel bay | 2025-03-31 (spring tide) | 179 | 24 / 356 |
-| Mont-Saint-Michel bay | 2025-04-06 (neap tide) | 4 | 1 / 356 |
-| Western Scheldt | 2025-03-31 | 351 | 38 / 163 |
-| Western Scheldt | 2025-04-06 | 427 | 37 / 163 |
+| Area (NWS hourly)     | Day                      | Dry (cell, time) pairs | Max dry share of sea cells |
+| --------------------- | ------------------------ | ---------------------- | -------------------------- |
+| Mont-Saint-Michel bay | 2025-03-31 (spring tide) | 179                    | 24 / 356                   |
+| Mont-Saint-Michel bay | 2025-04-06 (neap tide)   | 4                      | 1 / 356                    |
+| Western Scheldt       | 2025-03-31               | 351                    | 38 / 163                   |
+| Western Scheldt       | 2025-04-06               | 427                    | 37 / 163                   |
 
 IBI (hourly and daily) and GLORYS have a minimum static depth of 5 m and 7 m and
 show no dry cells.
