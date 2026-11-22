@@ -63,15 +63,15 @@ sea surface, so pangeo-fish converts the model levels to that reference
 model's vertical coordinate, and is chosen automatically from
 `copernicus_model_name`:
 
-| Model | Vertical coordinate | `dynamic_depth` |
-| --- | --- | --- |
-| IBI (reanalysis and hourly) | z* levels that stretch with the sea surface | `depth * (H0 + XE) / H0` |
-| North-West Shelf (hourly) | first level is the surface layer, deeper levels at fixed depths below mean sea level | 0 for the first level, `depth + XE` below |
-| Global (GLORYS12 and analysis/forecast) | fixed depths below mean sea level | `depth + XE` |
+| Model                                   | Vertical coordinate                                                                  | `dynamic_depth`                           |
+| --------------------------------------- | ------------------------------------------------------------------------------------ | ----------------------------------------- |
+| IBI (reanalysis and hourly)             | z\* levels that stretch with the sea surface                                         | `depth * (H0 + XE) / H0`                  |
+| North-West Shelf (hourly)               | first level is the surface layer, deeper levels at fixed depths below mean sea level | 0 for the first level, `depth + XE` below |
+| Global (GLORYS12 and analysis/forecast) | fixed depths below mean sea level                                                    | `depth + XE`                              |
 
 Levels that would still lie above the surface are treated as being at the
 surface. The chosen coordinate is stored in `model.attrs["vertical_coordinate"]`.
-Sources: IBI QUIDs (CMEMS-IBI-QUID-005-001 and 005-002) describe z* levels,
+Sources: IBI QUIDs (CMEMS-IBI-QUID-005-001 and 005-002) describe z\* levels,
 while the IBI PUM speaks of geopotential levels; NWS PUM 3.0 describes the
 surface layer and the interpolation to fixed depths. The global products'
 vertical coordinate has not been checked against their documentation.
