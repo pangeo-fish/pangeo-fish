@@ -43,7 +43,6 @@ from pangeo_fish.hmm.estimator import EagerEstimator
 from pangeo_fish.hmm.optimize import EagerBoundsSearch
 from pangeo_fish.hmm.optimize.scipy import group_sigma_indices
 from pangeo_fish.hmm.prediction import (
-    Foscat1DHealpix,
     Gaussian1DHealpix,
     GaussianHealpixAnalyse,
     UpDownGaussian1DHealpix,
@@ -1635,12 +1634,6 @@ def _get_predictor_factory(
                 device=device,
                 ellipsoid=ellipsoid,
             )
-        elif conv_method == "FoscatConv":
-            predictor = curry(
-                Foscat1DHealpix,
-                cell_ids=ds["cell_ids"].data,
-                grid_info=ds.dggs.grid_info,
-            )
         elif conv_method == "HealpixAnalyseConv":
             predictor = curry(
                 GaussianHealpixAnalyse,
@@ -1651,7 +1644,7 @@ def _get_predictor_factory(
 
         else:
             raise ValueError(
-                f'Unknown helper "{conv_method}". Expected "HealpixConv", "LargeHealpixConv", "FoscatConv" or "HealpixAnalyseConv".'
+                f'Unknown helper "{conv_method}". Expected "HealpixConv", "LargeHealpixConv" or "HealpixAnalyseConv".'
             )
     else:
         raise ValueError(f'Unknown dims "{dims}".')
@@ -2052,6 +2045,12 @@ def _build_estimator(emission, target_root, storage_options, ellipsoid=None):
     ) as f:
         params = json.load(f)
 
+    if "Foscat1DHealpix" in str(params["predictor_factory"].get("class")):
+        raise ValueError(
+            'The predictor "Foscat1DHealpix" (found in the parameters file) has been '
+            'removed together with the foscat dependency. Use "Gaussian1DHealpix" '
+            "instead (set conv_method/class_name accordingly and edit the parameters file)."
+        )
     # one sigma value: every time step uses the same predictor
     if len(params["sigma"]) == 1:
         emission = emission.assign(
@@ -2114,14 +2113,6 @@ def _build_estimator(emission, target_root, storage_options, ellipsoid=None):
             emission,
             truncate=truncate,
             conv_method="HealpixConv",
-            dims=["cells"],
-            ellipsoid=ellipsoid,
-        )
-    elif "Foscat1DHealpix" in cls_name:
-        predictor_factory = _get_predictor_factory(
-            emission,
-            truncate=truncate,
-            conv_method="FoscatConv",
             dims=["cells"],
             ellipsoid=ellipsoid,
         )
@@ -2978,7 +2969,7 @@ def create_parameters(
     single_behav=True,
     predictor_factory=None,
     predictors=None,
-    class_name="Foscat1DHealpix",
+    class_name="Gaussian1DHealpix",
     comment="Custom parameters",
     save_parameters=False,
     storage_options=None,
@@ -3019,13 +3010,17 @@ def create_parameters(
     dict
         Parameters dictionary.
     """
+    if class_name == "Foscat1DHealpix":
+        raise ValueError(
+            'class_name "Foscat1DHealpix" has been removed together with the foscat '
+            'dependency. Use "Gaussian1DHealpix" instead.'
+        )
     if class_name not in [
-        "Foscat1DHealpix",
         "UpDownGaussian1DHealpix",
         "Gaussian1DHealpix",
     ]:
         raise ValueError(
-            f'Unknown class_name "{class_name}". Expected "Gaussian1DHealpix", "Foscat1DHealpix" or "UpDownGaussian1DHealpix".'
+            f'Unknown class_name "{class_name}". Expected "Gaussian1DHealpix" or "UpDownGaussian1DHealpix".'
         )
     if predictor_factory is None:
         predictor_factory = {
@@ -3093,7 +3088,7 @@ def hand_test_parameter(
     sigma_tested: list = [0.004],
     sigma_indices: list[list[int]] = None,
     single_behav=True,
-    Conv_method: str = "Foscat1DHealpix",
+    Conv_method: str = "Gaussian1DHealpix",
     target_root: str = ".",
     saving_root: str = "/hand_sigma",
     default_chunk_dims=None,
@@ -3122,10 +3117,10 @@ def hand_test_parameter(
     single_behav : bool, default=True
         Only used when ``sigma_indices`` is None. If False, one list of time
         indices per continuous segment. If True, one list per predictor value.
-    Conv_method : str, default="Foscat1DHealpix"
+    Conv_method : str, default="Gaussian1DHealpix"
         Convolution class name used to build the predictor factory
         (see `create_parameters`). Expected values are
-        "Gaussian1DHealpix", "Foscat1DHealpix" or "UpDownGaussian1DHealpix".
+        "Gaussian1DHealpix" or "UpDownGaussian1DHealpix".
     target_root : str, default=""
         Root directory where the input `combined.zarr` is read from, and
         under which `saving_root` is created for the outputs.
