@@ -97,7 +97,9 @@ def open_model(dataset=IBI, **kwargs):
 def test_ibi_requests_and_preparation(client, fields):
     mock, _ = client
     actual = open_model(Username="test-user", Password="test-password")
-    expected = prepare_dataset(fields.rename(latitude="lat", longitude="lon"))
+    expected = helpers._set_dynamic_depth(
+        prepare_dataset(fields.rename(latitude="lat", longitude="lon")), "zstar"
+    )
     xr.testing.assert_identical(actual, expected)
     calls = [c.kwargs for c in mock.call_args_list]
     assert [(c["dataset_id"], c["variables"]) for c in calls] == [
@@ -158,7 +160,10 @@ def test_roundoff_only(client, fields, dataset, coordinate):
         {coordinate: ds[coordinate].astype("float32").astype("float64")}
     )
     xr.testing.assert_identical(
-        open_model(), prepare_dataset(fields.rename(latitude="lat", longitude="lon"))
+        open_model(),
+        helpers._set_dynamic_depth(
+            prepare_dataset(fields.rename(latitude="lat", longitude="lon")), "zstar"
+        ),
     )
 
 
@@ -238,9 +243,12 @@ def test_load_model_and_compute_diff(client, fields, dataset):
     assert model.sizes == {"time": 3, "depth": 2, "lat": 2, "lon": 2}
     assert model.chunks["time"] == (1, 1, 1)
     assert model.latitude.dims == model.longitude.dims == ("lat", "lon")
+    expected = helpers._set_dynamic_depth(
+        model.assign(dynamic_depth=model.depth + model.XE),
+        helpers._vertical_coordinate(dataset),
+    ).dynamic_depth
     xr.testing.assert_allclose(
-        model.dynamic_depth,
-        (model.depth + model.XE).transpose(*model.dynamic_depth.dims),
+        model.dynamic_depth, expected.transpose(*model.dynamic_depth.dims)
     )
     diff, _ = helpers.compute_diff(
         reference_model=model, tag_log=tag, relative_depth_threshold=0, chunk_time=1
@@ -271,7 +279,11 @@ def test_hourly_requests_use_hourly_bounds(client, fields, temperature, ssh, sta
     )
 
     xr.testing.assert_identical(
-        actual, prepare_dataset(hourly.rename(latitude="lat", longitude="lon"))
+        actual,
+        helpers._set_dynamic_depth(
+            prepare_dataset(hourly.rename(latitude="lat", longitude="lon")),
+            helpers._vertical_coordinate(temperature),
+        ),
     )
     calls = [c.kwargs for c in mock.call_args_list]
     assert [c["dataset_id"] for c in calls] == [temperature, ssh, static]
@@ -499,3 +511,57 @@ def test_six_hourly_rejects_non_overlapping_ssh(six_hourly_client):
     datasets[GLO_6H_SSH] = datasets[GLO_6H_SSH].isel(time=slice(0, 0))
     with pytest.raises(ValueError, match="no overlapping temperature and SSH times"):
         helpers._open_copernicus_model(GLO_6H, BBOX, PERIOD)
+
+
+def _vertical_model():
+    return xr.Dataset(
+        {
+            "XE": (("time", "lat"), [[-1.0, 0.5]]),
+            "H0": (("lat",), [10.0, np.nan]),
+        },
+        coords={"time": [0], "depth": [0.0, 3.0, 5.0], "lat": [0.0, 1.0]},
+    ).pipe(lambda ds: ds.assign(dynamic_depth=ds.depth + ds.XE))
+
+
+@pytest.mark.parametrize(
+    ("dataset_id", "expected"),
+    [
+        (IBI, "zstar"),
+        (IBI_HOURLY, "zstar"),
+        (NWS_HOURLY, "nws"),
+        (GLOBAL, "geopotential"),
+        ("cmems_mod_glo_phy-thetao_anfc_0.083deg_PT6H-i", "geopotential"),
+    ],
+)
+def test_vertical_coordinate(dataset_id, expected):
+    assert helpers._vertical_coordinate(dataset_id) == expected
+
+
+def test_set_dynamic_depth():
+    model = _vertical_model()
+    zstar = helpers._set_dynamic_depth(model, "zstar")
+    # depth * (H0 + XE) / H0 with H0 = 10, XE = -1: levels shrink by 10 %
+    np.testing.assert_allclose(
+        zstar.dynamic_depth.sel(lat=0.0).squeeze(), [0.0, 2.7, 4.5]
+    )
+    assert zstar.attrs["vertical_coordinate"] == "zstar"
+    nws = helpers._set_dynamic_depth(model, "nws")
+    np.testing.assert_allclose(
+        nws.dynamic_depth.sel(lat=0.0).squeeze(), [0.0, 2.0, 4.0]
+    )
+    assert nws.dynamic_depth.sel(lat=1.0).isnull().all()
+    xr.testing.assert_identical(
+        helpers._set_dynamic_depth(model, "geopotential"), model
+    )
+
+
+def test_set_dynamic_depth_zstar_without_water_column():
+    model = xr.Dataset(
+        {"XE": (("time", "lat"), [[-2.0, 0.0]]), "H0": (("lat",), [1.0, 0.0])},
+        coords={"time": [0], "depth": [0.0, 3.0], "lat": [0.0, 1.0]},
+    ).pipe(lambda ds: ds.assign(dynamic_depth=ds.depth + ds.XE))
+    dynamic = helpers._set_dynamic_depth(model, "zstar").dynamic_depth
+    # negative water column: every level at the surface; H0 = 0: undefined
+    np.testing.assert_array_equal(dynamic.sel(lat=0.0).squeeze(), [0.0, 0.0])
+    assert dynamic.sel(lat=1.0).isnull().all()
+    assert np.isfinite(dynamic.sel(lat=0.0)).all()

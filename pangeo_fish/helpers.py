@@ -521,6 +521,49 @@ _COPERNICUS_SPLIT_PRODUCTS = {
 }
 
 
+def _vertical_coordinate(dataset_id: str) -> str:
+    """Vertical coordinate of a Copernicus Marine physics product.
+
+    - ``"zstar"``: IBI (reanalysis and analysis/forecast). The levels stretch
+      with the sea surface (IBI QUIDs: z* levels; the IBI PUM says
+      "geopotential levels"), so a level never lies above the surface.
+    - ``"nws"``: North-West Shelf. The first level (``depth = 0``) is the
+      model's surface layer; the deeper levels are interpolated to fixed
+      depths below mean sea level (NWS PUM 3.0).
+    - ``"geopotential"``: all other products (fixed depths below mean sea level).
+    """
+    if "_ibi_" in dataset_id:
+        return "zstar"
+    if "_nws_" in dataset_id:
+        return "nws"
+    return "geopotential"
+
+
+def _set_dynamic_depth(model: xr.Dataset, vertical_coordinate: str) -> xr.Dataset:
+    """Depth of each model level below the instantaneous surface.
+
+    ``"geopotential"`` keeps ``depth + XE``. ``"zstar"`` uses
+    ``depth * (H0 + XE) / H0``. ``"nws"`` keeps ``depth + XE`` except for the
+    surface level (``depth == 0``), which stays at 0.
+    """
+    if vertical_coordinate == "geopotential":
+        return model
+    depth, XE, H0 = model["depth"], model["XE"], model["H0"]
+    if vertical_coordinate == "zstar":
+        # stretch factor of the water column; 0 for dry cells, NaN on land
+        stretch = ((H0 + XE) / H0.where(H0 > 0)).clip(min=0)
+        dynamic = depth * stretch
+    elif vertical_coordinate == "nws":
+        dynamic = xr.where(depth == 0, 0.0, depth + XE).where(H0.notnull())
+    else:
+        raise ValueError(f"unknown vertical coordinate: {vertical_coordinate!r}")
+    dims = model["dynamic_depth"].dims
+    attrs = model["dynamic_depth"].attrs | {"vertical_coordinate": vertical_coordinate}
+    return model.assign(
+        dynamic_depth=dynamic.transpose(*dims).assign_attrs(attrs)
+    ).assign_attrs(vertical_coordinate=vertical_coordinate)
+
+
 def _resolve_copernicus_datasets(dataset_id: str):
     """Return temperature, SSH, static IDs and the optional static part.
 
@@ -785,7 +828,9 @@ def _open_copernicus_model(
     datasets.append(_align_copernicus_coordinates(temperature, static, static_id))
     ds_all = xr.merge(datasets, compat="no_conflicts", join="exact")
     ds_all = ds_all.rename({"latitude": "lat", "longitude": "lon"})
-    return prepare_dataset(ds_all)
+    return _set_dynamic_depth(
+        prepare_dataset(ds_all), _vertical_coordinate(temperature_id)
+    )
 
 
 def _open_parquet_model(parquet_url: str, remote_options=None):
