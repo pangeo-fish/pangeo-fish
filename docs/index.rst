@@ -10,3 +10,4 @@ Welcome to pangeo-fish's documentation!
     copernicus-models
     notebook
     api
+    dry-cells

@@ -50,6 +50,13 @@ their start date moves forward over time.
 | [Global analysis/forecast](https://data.marine.copernicus.eu/product/GLOBAL_ANALYSISFORECAST_PHY_001_024/description)                   | `cmems_mod_glo_phy-thetao_anfc_0.083deg_P1D-m`  | 1/12° (~9 km), global                | daily mean (`P1D-m`)              | yes | 2022-06-01 → 2026-11-28           | `cmems_mod_glo_phy_anfc_0.083deg_P1D-m`                                    | averaged out (daily) |
 | [Global analysis/forecast](https://data.marine.copernicus.eu/product/GLOBAL_ANALYSISFORECAST_PHY_001_024/description)                   | `cmems_mod_glo_phy-thetao_anfc_0.083deg_PT6H-i` | 1/12° (~9 km), global                | 6-hourly instantaneous (`PT6H-i`) | yes | 2022-06-01 → 2026-11-29           | `cmems_mod_glo_phy_anfc_0.083deg_PT1H-m`, sampled at the temperature times | no                   |
 
+**Dry cells with the North-West Shelf hourly model.** On tidal flats the water
+column `H0 + XE` drops to zero or below at low tide (the model itself runs with a
+10 m minimum depth). `compute_diff` excludes these cells automatically
+(`min_water_depth="auto"`, the default) and warns how many there are. IBI and the
+global products have no dry cells, so nothing changes for them. See
+[Dry cells](dry-cells.md).
+
 ### Which model to use
 
 - **First run with the base demo:** IBI reanalysis. Long record, regional resolution.
