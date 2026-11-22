@@ -145,5 +145,26 @@ def test_foscat_parameters_file_gives_clear_error(tmp_path):
     }
     (tmp_path / "parameters.json").write_text(json.dumps(params))
 
-    with pytest.raises(ValueError, match="Gaussian1DHealpix"):
+    with pytest.raises(ValueError, match="FFTGaussian1DHealpix"):
         _build_estimator(xr.Dataset(), str(tmp_path), None)
+
+
+def test_old_updown_class_is_not_read_as_the_new_one(tmp_path):
+    """
+    "OldUpDownGaussian1DHealpix" contains the name of the new class: it must not be
+    built as "UpDownGaussian1DHealpix", and `create_parameters` must not write it.
+    """
+    import json
+
+    from pangeo_fish.helpers import _build_estimator, create_parameters
+
+    params = {
+        "sigma": [0.0004],
+        "predictor_factory": {"class": "OldUpDownGaussian1DHealpix", "kwargs": {}},
+    }
+    (tmp_path / "parameters.json").write_text(json.dumps(params))
+
+    with pytest.raises(ValueError, match="comparison only"):
+        _build_estimator(xr.Dataset(), str(tmp_path), None)
+    with pytest.raises(ValueError, match="comparison only"):
+        create_parameters([0.0004], class_name="OldUpDownGaussian1DHealpix")

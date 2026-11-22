@@ -1750,8 +1750,14 @@ def _get_predictor_factory(
             )
 
         else:
+            hint = (
+                " The foscat-based convolution has been removed together with the foscat dependency."
+                if "foscat" in str(conv_method).lower()
+                else ""
+            )
             raise ValueError(
                 f'Unknown helper "{conv_method}". Expected "HealpixConv", "LargeHealpixConv", "FFTConv", "HealpixAnalyseConv" or "HealpixAnalyseLargeConv".'
+                + hint
             )
     else:
         raise ValueError(f'Unknown dims "{dims}".')
@@ -1906,11 +1912,11 @@ def optimize_pdf(
          of ``cell_ids``), see :py:func:`earth_radius_from_ellipsoid`.
      dims : list of str, default: ["cells"]
          The list of the dimensions. Either ``["x", "y"]`` or ``["cells"]``
-    conv_method : str, default "FFTGaussian1DHealpix"
+    conv_method : str, default "FFTConv"
         Define the convolution used by the predictor. It can be:
          -"LargeHealpixConv"=>"UpDownGaussian1DHealpix": convolution method based on working on upper cell size (Up) before going back to lower (Down),
          -"HealpixConv"=>"Gaussian1DHealpix": Simple convolution, slow,\\
-         -"FFTConv"=>"FFTGaussian1DHealpix": Default, verry fast multiplies in fft space then come back to real space,
+         -"FFTConv"=>"FFTGaussian1DHealpix": Default, very fast, multiplies in fft space then comes back to real space,
          -"HealpixAnalyseConv"=>"GaussianHealpixAnalyse": sparse operator from healpix-analyse (WGS84 only),
          -"HealpixAnalyseLargeConv"=>"LargeGaussianHealpixAnalyse": large sigma, LargeConv.from_gaussian (WGS84 only),
 
@@ -2182,8 +2188,17 @@ def _build_estimator(emission, target_root, storage_options, ellipsoid=None):
     if "Foscat1DHealpix" in str(params["predictor_factory"].get("class")):
         raise ValueError(
             'The predictor "Foscat1DHealpix" (found in the parameters file) has been '
-            'removed together with the foscat dependency. Use "Gaussian1DHealpix" '
-            "instead (set conv_method/class_name accordingly and edit the parameters file)."
+            'removed together with the foscat dependency. Use "FFTGaussian1DHealpix" '
+            '(conv_method="FFTConv", the default) instead: set conv_method/class_name '
+            "accordingly and edit the parameters file. A sigma fitted with the removed "
+            "predictor may need to be fitted again."
+        )
+    if "OldUpDownGaussian1DHealpix" in str(params["predictor_factory"].get("class")):
+        raise ValueError(
+            'The predictor "OldUpDownGaussian1DHealpix" (found in the parameters file) '
+            "is kept as a class for comparison only and cannot be built from a "
+            'parameters file. Use "UpDownGaussian1DHealpix" (conv_method="LargeHealpixConv") '
+            'or "FFTGaussian1DHealpix" (conv_method="FFTConv") instead.'
         )
     # one sigma value: every time step uses the same predictor
     if len(params["sigma"]) == 1:
@@ -3165,7 +3180,6 @@ def create_parameters(
         "UpDownGaussian1DHealpix",
         "Gaussian1DHealpix",
         "FFTGaussian1DHealpix",
-        "OldUpDownGaussian1DHealpix",
         "GaussianHealpixAnalyse",
         "LargeGaussianHealpixAnalyse"
     single_behav : bool, default=True
@@ -3192,18 +3206,23 @@ def create_parameters(
     if class_name == "Foscat1DHealpix":
         raise ValueError(
             'class_name "Foscat1DHealpix" has been removed together with the foscat '
-            'dependency. Use "Gaussian1DHealpix" instead.'
+            'dependency. Use "FFTGaussian1DHealpix" (the default) instead.'
+        )
+    if class_name == "OldUpDownGaussian1DHealpix":
+        raise ValueError(
+            'class_name "OldUpDownGaussian1DHealpix" is kept as a class for comparison '
+            "only and cannot be built from a parameters file. Use "
+            '"UpDownGaussian1DHealpix" or "FFTGaussian1DHealpix" instead.'
         )
     if class_name not in [
         "UpDownGaussian1DHealpix",
         "Gaussian1DHealpix",
         "FFTGaussian1DHealpix",
-        "OldUpDownGaussian1DHealpix",
         "GaussianHealpixAnalyse",
         "LargeGaussianHealpixAnalyse",
     ]:
         raise ValueError(
-            f'Unknown class_name "{class_name}". Expected "Gaussian1DHealpix", "FFTGaussian1DHealpix", "UpDownGaussian1DHealpix", "OldUpDownGaussian1DHealpix", "GaussianHealpixAnalyse" or "LargeGaussianHealpixAnalyse".'
+            f'Unknown class_name "{class_name}". Expected "Gaussian1DHealpix", "FFTGaussian1DHealpix", "UpDownGaussian1DHealpix", "GaussianHealpixAnalyse" or "LargeGaussianHealpixAnalyse".'
         )
     if predictor_factory is None:
         predictor_factory = {
@@ -3276,7 +3295,7 @@ def hand_test_parameter(
     sigma_tested: list = [0.004],
     sigma_indices: list[list[int]] = None,
     single_behav=True,
-    Conv_method: str = "Gaussian1DHealpix",
+    Conv_method: str = "FFTGaussian1DHealpix",
     target_root: str = ".",
     saving_root: str = "/hand_sigma",
     default_chunk_dims=None,
@@ -3305,10 +3324,10 @@ def hand_test_parameter(
     single_behav : bool, default=True
         Only used when ``sigma_indices`` is None. If False, one list of time
         indices per continuous segment. If True, one list per predictor value.
-    Conv_method : str, default="Gaussian1DHealpix"
+    Conv_method : str, default="FFTGaussian1DHealpix"
         Convolution class name used to build the predictor factory
-        (see `create_parameters`). Expected values are
-        "Gaussian1DHealpix" or "UpDownGaussian1DHealpix".
+        (see `create_parameters` for the accepted names). The default is the
+        class behind ``conv_method="FFTConv"``, the default of `optimize_pdf`.
     target_root : str, default=""
         Root directory where the input `combined.zarr` is read from, and
         under which `saving_root` is created for the outputs.

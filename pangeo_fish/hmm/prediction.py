@@ -775,8 +775,9 @@ class LargeGaussianHealpixAnalyse(Predictor):
     ``gaussian_plan``: it chooses the number of Down/Up levels and the compact
     kernel so that the measured response has width ``sigma``.  The layer is
     not mass conserving (total roughly 0.92 to 1.05) and pads with zeros at
-    the edge of the domain.  Below about 2.2 cells there is no solution and a
-    ValueError is raised; use ``GaussianHealpixAnalyse`` for small sigma.
+    the edge of the domain.  Below a minimum width between 2 and 3 cells (it
+    depends on the patch) there is no solution and a ValueError is raised; use
+    ``GaussianHealpixAnalyse`` for small sigma.
     WGS84 only.
     """
 

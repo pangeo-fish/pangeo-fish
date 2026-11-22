@@ -66,7 +66,7 @@ Use `HealpixAnalyseConv` with `land_barrier=True`. The kernel is then measured t
 
 ### Domain larger than 10 degrees radius
 
-Use `HealpixAnalyseLargeConv`. It has no domain limit, but it has a minimum sigma of about 2.2 cells (about 14 km at level 10). Below that it raises an error and suggests `HealpixAnalyseConv`. In the checks it failed at 1 and 2 cells and ran from 3 cells on. It runs in 0.28 to 5.5 s.
+Use `HealpixAnalyseLargeConv`. It has no domain limit, but it has a minimum sigma between 2 and 3 cells (13 to 19 km at level 10; the healpix-analyse documentation gives about 2.2 cells, and the exact limit depends on the patch). Below that it raises an error and suggests `HealpixAnalyseConv`. In the checks it failed at 1 and 2 cells and ran from 3 cells on. It runs in 0.28 to 5.5 s.
 
 It deviates from the direct sum. At 8 cells (51 km) its cost is 36.20, against 32.82 for the direct sum, a difference of about 10 %. At 6 cells it is 35.72 against 35.21. The direct sum was not run for larger sigma, so the deviation there is not known.
 
