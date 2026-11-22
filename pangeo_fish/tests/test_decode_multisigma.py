@@ -2,13 +2,15 @@ from itertools import product
 
 import numpy as np
 import pandas as pd
+import pytest
 import xarray as xr
 import xdggs  # noqa: F401
 
 from pangeo_fish.hmm.decode import build_transitions, viterbi_healpix
 
 
-def test_multisigma_transitions_and_exact_viterbi():
+@pytest.mark.parametrize("dtype", [np.float64, np.float32])
+def test_multisigma_transitions_and_exact_viterbi(dtype):
     level = 2
     cells = np.arange(12 * 4**level, dtype=np.uint64)
     sigmas = [0.02, 0.15]
@@ -22,8 +24,8 @@ def test_multisigma_transitions_and_exact_viterbi():
     # Enumerate all feasible paths independently of the decoder's dynamic
     # programming, using the exact same transitions as the single-sigma model.
     rng = np.random.default_rng(3)
-    pdf = rng.uniform(0.1, 1, (3, len(cells)))
-    initial = np.zeros(len(cells))
+    pdf = rng.uniform(0.1, 1, (3, len(cells))).astype(dtype)
+    initial = np.zeros(len(cells), dtype=dtype)
     initial[5] = 1
     mask = np.ones(len(cells), dtype=bool)
     mask[6] = False

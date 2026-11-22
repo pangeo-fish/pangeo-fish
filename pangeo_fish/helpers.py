@@ -43,8 +43,10 @@ from pangeo_fish.hmm.estimator import EagerEstimator
 from pangeo_fish.hmm.optimize import EagerBoundsSearch
 from pangeo_fish.hmm.optimize.scipy import group_sigma_indices
 from pangeo_fish.hmm.prediction import (
+    FFTGaussian1DHealpix,
     Gaussian1DHealpix,
     GaussianHealpixAnalyse,
+    LargeGaussianHealpixAnalyse,
     UpDownGaussian1DHealpix,
 )
 from pangeo_fish.io import (
@@ -180,7 +182,9 @@ def _update_params_dict(factory, params: dict):
     """
 
     kwargs = {
-        k: str(v) for k, v in _inspect_curry_obj(factory).items() if k != "cell_ids"
+        k: str(v)
+        for k, v in _inspect_curry_obj(factory).items()
+        if k not in ("cell_ids", "blocked_cells")
     }
 
     return params | {"predictor_factory": {"class": str(factory), "kwargs": kwargs}}
@@ -1598,6 +1602,14 @@ def normalize_pdf(
     return normalized, figure
 
 
+def _blocked_cells(ds: xr.Dataset):
+    """Ids of the non-ocean cells (``mask`` is True over the ocean)."""
+    if "mask" not in ds:
+        raise ValueError('land_barrier=True needs a "mask" variable in the dataset.')
+    ocean = np.asarray(ds["mask"].values, dtype=bool)
+    return np.asarray(ds["cell_ids"].values)[~ocean]
+
+
 def _get_predictor_factory(
     ds: xr.Dataset,
     truncate: float | None,
@@ -1605,6 +1617,10 @@ def _get_predictor_factory(
     conv_method: str,
     device: str = "cpu",
     ellipsoid=None,
+    max_sigma: float | None = None,
+    normalization: str = "full_disc",
+    land_barrier: bool = False,
+    projection: str = "average",
 ):
     if dims == ["x", "y"]:
         raise ValueError("dims must be ['cells'], ['x','y'] is not used anymore")
@@ -1634,17 +1650,38 @@ def _get_predictor_factory(
                 device=device,
                 ellipsoid=ellipsoid,
             )
+        elif conv_method == "FFTConv":
+            predictor = curry(
+                FFTGaussian1DHealpix,
+                cell_ids=ds["cell_ids"].data,
+                grid_info=ds.dggs.grid_info,
+                device=device,
+                ellipsoid=ellipsoid,
+                max_sigma=max_sigma,
+                projection=projection,
+                **({} if truncate is None else {"truncate": truncate}),
+            )
         elif conv_method == "HealpixAnalyseConv":
             predictor = curry(
                 GaussianHealpixAnalyse,
                 cell_ids=ds["cell_ids"].data,
                 grid_info=ds.dggs.grid_info,
                 truncate=4.0 if truncate is None else truncate,
+                normalization=normalization,
+                land_barrier=bool(land_barrier),
+                blocked_cells=_blocked_cells(ds) if land_barrier else None,
+            )
+        elif conv_method == "HealpixAnalyseLargeConv":
+            predictor = curry(
+                LargeGaussianHealpixAnalyse,
+                cell_ids=ds["cell_ids"].data,
+                grid_info=ds.dggs.grid_info,
+                device=device,
             )
 
         else:
             raise ValueError(
-                f'Unknown helper "{conv_method}". Expected "HealpixConv", "LargeHealpixConv" or "HealpixAnalyseConv".'
+                f'Unknown helper "{conv_method}". Expected "HealpixConv", "LargeHealpixConv", "FFTConv", "HealpixAnalyseConv" or "HealpixAnalyseLargeConv".'
             )
     else:
         raise ValueError(f'Unknown dims "{dims}".')
@@ -1766,7 +1803,7 @@ def optimize_pdf(
     tolerance: float,
     earth_radius: pint.Quantity | None = None,
     dims: list[str] = ["cells"],
-    conv_method: str = "HealpixConv",
+    conv_method: str = "FFTConv",
     ellipsoid: str = None,
     final: bool = False,
     single_behav: bool = True,
@@ -1774,6 +1811,9 @@ def optimize_pdf(
     save_parameters=False,
     storage_options: dict = None,
     target_root=".",
+    normalization: str = "full_disc",
+    land_barrier: bool = False,
+    projection: str = "average",
     **kwargs,
 ) -> dict:
     """Optimize a temporal probability distribution.
@@ -1796,6 +1836,21 @@ def optimize_pdf(
          of ``cell_ids``), see :py:func:`earth_radius_from_ellipsoid`.
      dims : list of str, default: ["cells"]
          The list of the dimensions. Either ``["x", "y"]`` or ``["cells"]``
+    conv_method : str, default "FFTGaussian1DHealpix"
+        Define the convolution used by the predictor. It can be:
+         -"LargeHealpixConv"=>"UpDownGaussian1DHealpix": convolution method based on working on upper cell size (Up) before going back to lower (Down),
+         -"HealpixConv"=>"Gaussian1DHealpix": Simple convolution, slow,\\
+         -"FFTConv"=>"FFTGaussian1DHealpix": Default, verry fast multiplies in fft space then come back to real space,
+         -"HealpixAnalyseConv"=>"GaussianHealpixAnalyse": sparse operator from healpix-analyse (WGS84 only),
+         -"HealpixAnalyseLargeConv"=>"LargeGaussianHealpixAnalyse": large sigma, LargeConv.from_gaussian (WGS84 only),
+
+     normalization : {"full_disc", "source"}, default "full_disc"
+         Only for conv_method="HealpixAnalyseConv".
+     land_barrier : bool, default False
+         Only for conv_method="HealpixAnalyseConv": the non-ocean cells of ``mask``
+         are passed as blocked cells.
+     projection : {"average", "conservative"}, default "average"
+         Only for conv_method="FFTConv".
      final : bool, default: False
          If True, optimize sigma by matching the predicted final state to the
          observed final position (``score_final_pos``) instead of the standard
@@ -1851,16 +1906,6 @@ def optimize_pdf(
     )
     if final:
         max_sigma = 0.01
-    predictor_factory = _get_predictor_factory(
-        ds=ds,
-        truncate=truncate,
-        dims=dims,
-        conv_method=conv_method,
-        ellipsoid=ellipsoid,
-    )
-
-    estimator = EagerEstimator(sigma=None, predictor_factory=predictor_factory)
-    # ds.attrs["max_sigma"] = max_sigma  # limitation of the helper
     if "predictor_index" in ds:
         speed_bounds_dict = ds.attrs.get("sigma_bounds", None)
         if speed_bounds_dict is None:
@@ -1877,6 +1922,25 @@ def optimize_pdf(
             print(f"dictionnaire des sigma:{sigma_bounds_dict}")
     else:
         sigma_bounds_dict = None
+
+    # The largest sigma the optimiser can try bounds the convolution kernel.
+    largest_sigma = max(
+        [max_sigma] + [upper for _, upper in (sigma_bounds_dict or {}).values()]
+    )
+    predictor_factory = _get_predictor_factory(
+        ds=ds,
+        truncate=truncate,
+        dims=dims,
+        conv_method=conv_method,
+        ellipsoid=ellipsoid,
+        max_sigma=largest_sigma,
+        normalization=normalization,
+        land_barrier=land_barrier,
+        projection=projection,
+    )
+
+    estimator = EagerEstimator(sigma=None, predictor_factory=predictor_factory)
+    # ds.attrs["max_sigma"] = max_sigma  # limitation of the helper
 
     optimizer = EagerBoundsSearch(
         estimator,
@@ -2094,9 +2158,36 @@ def _build_estimator(emission, target_root, storage_options, ellipsoid=None):
     predictor_kwargs = params["predictor_factory"].get("kwargs", {})
     truncate_raw = predictor_kwargs.get("truncate")
     truncate = float(truncate_raw) if truncate_raw is not None else None
+    max_sigma_raw = predictor_kwargs.get("max_sigma")
+    max_sigma = float(max_sigma_raw) if max_sigma_raw not in (None, "None") else None
+
+    def _as_bool(value):
+        return str(value).strip().lower() in ("true", "1")
+
+    normalization = predictor_kwargs.get("normalization") or "full_disc"
+    land_barrier = _as_bool(predictor_kwargs.get("land_barrier", False))
+    projection = predictor_kwargs.get("projection") or "average"
 
     cls_name = params["predictor_factory"]["class"]  # type: str
-    if "Gaussian2DCartesian" in cls_name:
+    if "LargeGaussianHealpixAnalyse" in cls_name:
+        predictor_factory = _get_predictor_factory(
+            emission,
+            truncate=truncate,
+            conv_method="HealpixAnalyseLargeConv",
+            dims=["cells"],
+            ellipsoid=ellipsoid,
+        )
+    elif "GaussianHealpixAnalyse" in cls_name:
+        predictor_factory = _get_predictor_factory(
+            emission,
+            truncate=truncate,
+            conv_method="HealpixAnalyseConv",
+            dims=["cells"],
+            ellipsoid=ellipsoid,
+            normalization=normalization,
+            land_barrier=land_barrier,
+        )
+    elif "Gaussian2DCartesian" in cls_name:
         predictor_factory = _get_predictor_factory(
             emission, truncate=truncate, dims=["x", "y"], ellipsoid=ellipsoid
         )
@@ -2107,6 +2198,16 @@ def _build_estimator(emission, target_root, storage_options, ellipsoid=None):
             conv_method="LargeHealpixConv",
             dims=["cells"],
             ellipsoid=ellipsoid,
+        )
+    elif "FFTGaussian1DHealpix" in cls_name:
+        predictor_factory = _get_predictor_factory(
+            emission,
+            truncate=truncate,
+            conv_method="FFTConv",
+            dims=["cells"],
+            ellipsoid=ellipsoid,
+            max_sigma=max_sigma,
+            projection=projection,
         )
     elif "Gaussian1DHealpix" in cls_name:
         predictor_factory = _get_predictor_factory(
@@ -2276,7 +2377,6 @@ def decode_trajectories(
     estimator, emission, _ = _build_estimator(
         emission, target_root, storage_options, ellipsoid
     )
-    print(emission)
     needs_states = not set(track_modes) <= {"viterbi", "viterbi_healpix"}
     print(needs_states)
     if states is None and needs_states:
@@ -2969,7 +3069,7 @@ def create_parameters(
     single_behav=True,
     predictor_factory=None,
     predictors=None,
-    class_name="Gaussian1DHealpix",
+    class_name="FFTGaussian1DHealpix",
     comment="Custom parameters",
     save_parameters=False,
     storage_options=None,
@@ -2989,6 +3089,14 @@ def create_parameters(
     predictor_indices : array-like of int, optional
         One predictor index per time step, used to build ``sigma_indices``
         when it is not provided.
+    class_name : str, default "FFTGaussian1DHealpix"
+        Define the convolution used by the predictor. It can be:
+        "UpDownGaussian1DHealpix",
+        "Gaussian1DHealpix",
+        "FFTGaussian1DHealpix",
+        "OldUpDownGaussian1DHealpix",
+        "GaussianHealpixAnalyse",
+        "LargeGaussianHealpixAnalyse"
     single_behav : bool, default=True
         Only used when ``sigma_indices`` is None. If False, one list of time
         indices per continuous segment. If True, one list per predictor value.
@@ -3018,9 +3126,13 @@ def create_parameters(
     if class_name not in [
         "UpDownGaussian1DHealpix",
         "Gaussian1DHealpix",
+        "FFTGaussian1DHealpix",
+        "OldUpDownGaussian1DHealpix",
+        "GaussianHealpixAnalyse",
+        "LargeGaussianHealpixAnalyse",
     ]:
         raise ValueError(
-            f'Unknown class_name "{class_name}". Expected "Gaussian1DHealpix" or "UpDownGaussian1DHealpix".'
+            f'Unknown class_name "{class_name}". Expected "Gaussian1DHealpix", "FFTGaussian1DHealpix", "UpDownGaussian1DHealpix", "OldUpDownGaussian1DHealpix", "GaussianHealpixAnalyse" or "LargeGaussianHealpixAnalyse".'
         )
     if predictor_factory is None:
         predictor_factory = {
