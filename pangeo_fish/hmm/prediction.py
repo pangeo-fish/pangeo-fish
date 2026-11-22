@@ -105,6 +105,63 @@ class Gaussian1DHealpix(Predictor):
 
 import warnings
 
+_AUTHALIC_RADIUS_M = 6371007.1809
+
+
+@dataclass
+class GaussianHealpixAnalyse(Predictor):
+    """Gaussian movement kernel from ``healpix_analyse``, built once per sigma.
+
+    The weights are computed once (``gaussian_filter_operator``) and applied at
+    every time step with ``apply_filter_operator``.  ``sigma`` is in radians as
+    for ``Gaussian1DHealpix`` and is converted to metres on the authalic sphere.
+    ``normalization="full_disc"`` reproduces the zero padding of
+    ``Gaussian1DHealpix`` (mass that leaves the domain is lost).
+    """
+
+    cell_ids: _ArrayLike
+    grid_info: DGGSInfo
+
+    sigma: float  # in radians
+    truncate: float = 4.0
+    normalization: str = "full_disc"
+    width_rule: str = "matched"
+
+    def __post_init__(self):
+        from healpix_analyse import gaussian_filter_operator
+
+        ellipsoid = getattr(self.grid_info, "ellipsoid", None)
+        name = getattr(ellipsoid, "name", ellipsoid)
+        if name is not None and str(name).upper() != "WGS84":
+            raise NotImplementedError(
+                "GaussianHealpixAnalyse supports the WGS84 ellipsoid only; "
+                f"got {name!r}."
+            )
+
+        self.operator = gaussian_filter_operator(
+            np.asarray(self.cell_ids),
+            self.grid_info.level,
+            sigma_m=self.sigma * _AUTHALIC_RADIUS_M,
+            truncate=self.truncate,
+            normalization=self.normalization,
+            width_rule=self.width_rule,
+        )
+
+    def predict(self, X, *, mask=None):
+        from healpix_analyse import apply_filter_operator
+
+        if hasattr(X, "compute"):
+            X = X.compute()
+        X = np.asarray(X)
+        filtered = apply_filter_operator(X, *self.operator)
+        if np.issubdtype(X.dtype, np.floating):
+            filtered = filtered.astype(X.dtype, copy=False)
+
+        if mask is None:
+            return filtered
+
+        return np.where(mask, filtered, 0)
+
 
 @dataclass
 class Foscat1DHealpix(Predictor):

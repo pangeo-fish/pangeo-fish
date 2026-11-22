@@ -45,6 +45,7 @@ from pangeo_fish.hmm.optimize.scipy import group_sigma_indices
 from pangeo_fish.hmm.prediction import (
     Foscat1DHealpix,
     Gaussian1DHealpix,
+    GaussianHealpixAnalyse,
     UpDownGaussian1DHealpix,
 )
 from pangeo_fish.io import (
@@ -1640,10 +1641,17 @@ def _get_predictor_factory(
                 cell_ids=ds["cell_ids"].data,
                 grid_info=ds.dggs.grid_info,
             )
+        elif conv_method == "HealpixAnalyseConv":
+            predictor = curry(
+                GaussianHealpixAnalyse,
+                cell_ids=ds["cell_ids"].data,
+                grid_info=ds.dggs.grid_info,
+                truncate=4.0 if truncate is None else truncate,
+            )
 
         else:
             raise ValueError(
-                f'Unknown helper "{conv_method}". Expected "HealpixConv", "LargeHealpixConv" or "FoscatConv".'
+                f'Unknown helper "{conv_method}". Expected "HealpixConv", "LargeHealpixConv", "FoscatConv" or "HealpixAnalyseConv".'
             )
     else:
         raise ValueError(f'Unknown dims "{dims}".')
