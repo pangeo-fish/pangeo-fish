@@ -35,10 +35,11 @@ def test_dask_and_missing_variable():
 def test_mask_and_extra_dimensions():
     ds = emission([[0.5, 0.5], [1.0, 0.0], [0.2, 0.8]])
     ds["mask"] = ("cells", [False, True])
-    with pytest.raises(ValueError, match="2025-03-31T01:00"):
+    with pytest.raises(ValueError, match="inside the mask at 1 time step"):
         _check_emission_mass(ds)
     ds = ds.drop_vars("mask")
     stacked = xr.concat([ds, ds], dim="member").transpose("member", "time", "cells")
     _check_emission_mass(stacked)
-    stacked["pdf"][0, 1] = 0.0
-    _check_emission_mass(stacked)  # the other member still has mass
+    stacked["pdf"][:, 1] = 0.0
+    with pytest.raises(ValueError, match="2025-03-31T01:00"):
+        _check_emission_mass(stacked)

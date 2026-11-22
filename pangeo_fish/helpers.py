@@ -1902,15 +1902,16 @@ def _check_emission_mass(ds: xr.Dataset, variable: str = "pdf") -> None:
     A time step whose ``pdf`` is NaN or 0 everywhere (inside ``mask``, when the
     dataset has one) makes the HMM fail later without a clear error: the states
     become NaN and sigma runs to its bound. Passing this check is necessary, not
-    sufficient: the movement model can still leave no reachable cell.
+    sufficient: the movement model can still leave no reachable cell. Every
+    dimension other than ``time`` is summed over.
     """
     if variable not in ds or "time" not in ds[variable].dims:
         return
     pdf = ds[variable]
     if "mask" in ds:
-        pdf = pdf.where(ds["mask"].astype(bool))
+        pdf = pdf.where(ds["mask"].astype(bool), 0)
     spatial = [dim for dim in pdf.dims if dim != "time"]
-    mass = pdf.fillna(0).sum(spatial)
+    mass = pdf.sum(spatial, skipna=True)  # NaN counts as 0
     empty = ~(mass > 0)
     if "time" in empty.dims:
         n_empty = int(empty.sum())
@@ -1922,10 +1923,10 @@ def _check_emission_mass(ds: xr.Dataset, variable: str = "pdf") -> None:
     shown = ", ".join(str(t)[:16] for t in times[:5])
     more = ", ..." if len(times) > 5 else ""
     raise ValueError(
-        f"The emission probability ({variable!r}) is NaN or 0 everywhere at"
+        f"The emission probability ({variable!r}) is NaN or 0 everywhere"
+        f"{' inside the mask' if 'mask' in ds else ''} at"
         f" {n_empty} time step(s) ({shown}{more}). The HMM cannot run through"
-        " them."
-        " Check for gaps in the tag data, a mask that removes every cell, or"
+        " them. Check for gaps in the tag data, a mask that removes every cell, or"
         " detections outside the model domain."
     )
 
