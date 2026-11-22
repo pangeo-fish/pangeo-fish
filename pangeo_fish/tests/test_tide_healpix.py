@@ -468,6 +468,65 @@ def test_writer_roundtrip_with_merge(tmp_path, synthetic_astronomy):
     assert (behav_mask.isel(cells=0).values == [0, 1, 0]).all()
 
 
+@pytest.mark.parametrize(
+    ("level", "ellipsoid", "mismatch"),
+    [(2, "WGS84", None), (3, "WGS84", "level"), (2, "sphere", "ellipsoid")],
+)
+def test_merge_tide_matches_cell_ids_and_grid(tmp_path, level, ellipsoid, mismatch):
+    from pangeo_fish.tide import merge_tide_with_total
+
+    times = pd.date_range("2024-01-01", periods=2)
+    likelihood = xr.Dataset(
+        {
+            "pdf": (("time", "cells"), [[0.1, 0.9], [0.8, 0.2]]),
+            "ocean_mask": ("cells", [True, True]),
+            "tide_found": ("time", [1, 1]),
+        },
+        coords={"time": times, "cell_ids": th.make_cell_ids([1, 2], 2, "WGS84")},
+    )
+    th.write_tide_pdf_healpix(likelihood, tmp_path, behav_found=[0, 1])
+    total = xr.Dataset(
+        {"pdf": (("time", "cells"), [[0.3, 0.7], [0.4, 0.6]])},
+        coords={"time": times, "cell_ids": th.make_cell_ids([2, 1], level, ellipsoid)},
+    )
+    total.to_zarr(tmp_path / "total_pdf.zarr", zarr_format=2, consolidated=True)
+
+    if mismatch:
+        with pytest.raises(ValueError, match=f"grid mismatch for {mismatch}"):
+            merge_tide_with_total(tmp_path)
+        return
+
+    merged, _, _ = merge_tide_with_total(tmp_path)
+    np.testing.assert_array_equal(merged.cell_ids, total.cell_ids)
+    np.testing.assert_array_equal(merged.pdf, total.pdf)
+    np.testing.assert_array_equal(merged.pdf_tide, likelihood.pdf[:, ::-1])
+
+
+@pytest.mark.parametrize("use_xarray", [False, True])
+def test_writer_aligns_behaviour_dates(tmp_path, use_xarray):
+    times = pd.date_range("2024-01-01", periods=3)
+    likelihood = xr.Dataset(
+        {
+            "pdf": (("time", "cells"), [[1.0], [1.0], [1.0]]),
+            "ocean_mask": ("cells", [True]),
+            "tide_found": ("time", [1, 0, 1]),
+        },
+        coords={"time": times, "cell_ids": th.make_cell_ids([1], 2, "WGS84")},
+    )
+    flags = pd.Series([0, 0, 1], index=times[::-1])
+    wrong_dates = pd.Series(flags.values, index=flags.index + pd.Timedelta(days=1))
+    if use_xarray:
+        flags = xr.DataArray(flags, dims="time", coords={"time": flags.index})
+        wrong_dates = xr.DataArray(
+            wrong_dates, dims="time", coords={"time": wrong_dates.index}
+        )
+    with pytest.raises(ValueError, match="behav_found.*each likelihood time"):
+        th.write_tide_pdf_healpix(likelihood, tmp_path, behav_found=wrong_dates)
+    store = th.write_tide_pdf_healpix(likelihood, tmp_path, behav_found=flags)
+    with xr.open_zarr(store) as written:
+        np.testing.assert_array_equal(written.behav_found.values, [1, 0, 0])
+
+
 # --------------------------------------------------------------------------
 # model-based detection, harmonic analysis, misfit, storage
 # --------------------------------------------------------------------------
@@ -602,6 +661,66 @@ def test_no_valid_sample_gives_uniform(synthetic_astronomy):
     np.testing.assert_allclose(lik["pdf"].values, 1.0 / cells.size)
     with pytest.raises(ValueError, match="no samples"):
         th.still_tag_tide_likelihood(record.iloc[:0], const, sigma=0.3)
+
+
+@pytest.mark.parametrize("missing", ["real", "imag", "ocean_mask", "water_column"])
+def test_likelihood_rejects_no_eligible_cells(missing):
+    cells = th.make_cell_ids([1, 2], 2, "WGS84")
+    constants = th.harmonic_constants_dataset([[1j, 2j]], ["M2"], cells)
+    depth = pd.Series([10.0, 10.0], index=pd.date_range("2024-01-01", periods=2))
+    kwargs = {}
+    if missing in ("real", "imag"):
+        constants[f"tide_{missing}"][:] = np.nan
+    elif missing == "ocean_mask":
+        kwargs["ocean_mask"] = [False, False]
+    else:
+        kwargs["water_column"] = [np.nan, np.nan]
+    with pytest.raises(ValueError, match="no eligible cells"):
+        th.still_tag_tide_likelihood(depth, constants, sigma=0.3, **kwargs)
+
+
+def test_likelihood_matches_averaged_prediction(synthetic_astronomy):
+    cell_ids = th.make_cell_ids([1, 2], 2, "WGS84")
+    times = pd.date_range("2024-01-01", periods=3 * 24 * 6, freq="10min")
+    omega = np.radians(OMEGA_DEG_PER_HOUR["M2"])
+    offsets = (np.arange(24) - 11.5) / 6
+    attenuation = np.cos(omega * offsets).mean()
+    constants = th.harmonic_constants_dataset(
+        [[1 + 0j, attenuation + 0j]], ["M2"], cell_ids
+    )
+    tide = th.predict_tide(constants, times).isel(cells=0).to_series()
+    valid = pd.Series(True, index=times)
+    valid.iloc[:48] = False  # empty bins
+    valid.iloc[67::29] = False  # irregular sampling within bins
+    depth = 10.0 + tide
+    depth.iloc[55::51] = np.nan
+
+    lik = th.still_tag_tide_likelihood(
+        depth, constants, sigma=0.1, valid=valid, freq="4h", time_step=None
+    )
+    assert lik.pdf.argmax("cells").item() == 0
+    np.testing.assert_allclose(lik.rms.isel(cells=0), 0, atol=1e-12)
+
+
+def test_harmonic_analysis_matches_averaged_basis(synthetic_astronomy, monkeypatch):
+    constituents = ["M2"]
+    monkeypatch.setattr(
+        th,
+        "_frequencies_rad_per_hour",
+        lambda _: [np.radians(OMEGA_DEG_PER_HOUR["M2"])],
+    )
+    constants = th.harmonic_constants_dataset(
+        [[0.8 + 0.6j]], constituents, th.make_cell_ids([1], 2, "WGS84")
+    )
+    times = pd.date_range("2024-01-01", periods=3 * 24 * 6, freq="10min")
+    depth = 10 + th.predict_tide(constants, times).isel(cells=0).to_series()
+    depth.iloc[:48] = np.nan
+    depth.iloc[55::29] = np.nan
+
+    fit = th.harmonic_analysis(depth, constituents, freq="4h")
+    np.testing.assert_allclose(fit.tide_real, [0.8], atol=1e-12)
+    np.testing.assert_allclose(fit.tide_imag, [0.6], atol=1e-12)
+    assert fit.attrs["residual_rms"] < 1e-12
 
 
 def test_per_cell_inputs_aligned_on_cell_ids(synthetic_astronomy):

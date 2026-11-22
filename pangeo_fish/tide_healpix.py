@@ -320,10 +320,17 @@ def predict_tide(constants, times=None, modulations=None):
         modulations = modulations.sel(
             {CONSTITUENT_DIM: [available[c.lower()] for c in wanted]}
         ).assign_coords({CONSTITUENT_DIM: constants[CONSTITUENT_DIM].values})
-    fcos = modulations["f"] * np.cos(modulations["vu"])
-    fsin = modulations["f"] * np.sin(modulations["vu"])
-    eta = xr.dot(fcos, constants["tide_real"], dim=CONSTITUENT_DIM) + xr.dot(
-        fsin, constants["tide_imag"], dim=CONSTITUENT_DIM
+    return _tide_from_basis(constants, _tidal_basis(modulations))
+
+
+def _tidal_basis(modulations):
+    f, vu = modulations["f"], modulations["vu"]
+    return xr.Dataset({"fcos": f * np.cos(vu), "fsin": f * np.sin(vu)})
+
+
+def _tide_from_basis(constants, basis):
+    eta = xr.dot(basis["fcos"], constants["tide_real"], dim=CONSTITUENT_DIM) + xr.dot(
+        basis["fsin"], constants["tide_imag"], dim=CONSTITUENT_DIM
     )
     eta = eta.transpose("time", CELL_DIM).rename("tide_elevation")
     eta.attrs = {"units": "m", "long_name": "tide elevation"}
@@ -357,7 +364,8 @@ def _bin_average(series, freq):
     pandas labels a resampled mean with the start of its interval; predicting the
     tide at that label would shift it by half an interval (15 degrees of M2 for
     hourly means). The mean sample time is exact for any sampling (e.g. 10 min
-    samples at :00..:50 average at :25). ``freq=None`` keeps the samples as they are.
+    samples at :00..:50 average at :25). Tide predictions are averaged separately
+    at those sample times. ``freq=None`` keeps the samples as they are.
     """
     series = series.dropna()
     if freq is None or series.empty:
@@ -369,6 +377,17 @@ def _bin_average(series, freq):
     mean_seconds = seconds.resample(freq).mean().values[keep]
     index = pd.DatetimeIndex(t0 + pd.to_timedelta(mean_seconds, unit="s"))
     return pd.Series(values.values[keep], index=index)
+
+
+def _bin_nodal_basis(series, binned, freq, constituents):
+    """Average the harmonic basis at exactly the timestamps used for each depth mean."""
+    basis = _tidal_basis(nodal_modulations(series.index.values, constituents))
+    if freq is not None:
+        # Use the original timestamps for bin membership, even if pyfes rounded them.
+        basis = basis.assign_coords(time=series.index)
+        counts = series.resample(freq).count()
+        basis = basis.resample(time=freq).mean().sel(time=counts.index[counts > 0])
+    return basis.assign_coords(time=binned.index)
 
 
 def _per_cell(values, constants, name, dtype):
@@ -449,8 +468,9 @@ def still_tag_tide_likelihood(
     valid : pandas.Series of bool, optional
         True where the tag is still on the seabed. Other samples are ignored.
     freq : str or None, default "1h"
-        Averaging period of the depth record; each mean is attributed to the mean
-        time of its samples. None: use the samples as they are.
+        Averaging period of the depth record and of the predicted tide at the same
+        sample times. Each mean is attributed to the mean time of its samples.
+        None: use the samples as they are.
     time_step : str or None, default "1D"
         Window of the likelihood (the HMM time step). None: one window for the whole
         record.
@@ -482,6 +502,12 @@ def still_tag_tide_likelihood(
         ``tide_found`` (time, 1 when the window is used as evidence, else 0), with
         ``cell_ids`` and its grid attributes. ``time`` is the start of each window.
         Windows without valid samples (e.g. ``valid`` all False) get a uniform pdf.
+
+    Raises
+    ------
+    ValueError
+        If the depth record is empty or no cell has finite constants and passes
+        the supplied masks.
     """
     series = _as_series(depth).dropna()
     if series.empty:
@@ -495,12 +521,18 @@ def still_tag_tide_likelihood(
     hourly = _bin_average(series, freq)
 
     n_cells = constants.sizes[CELL_DIM]
-    allowed = np.isfinite(constants["tide_real"]).all(CONSTITUENT_DIM).values
+    allowed = (
+        (np.isfinite(constants["tide_real"]) & np.isfinite(constants["tide_imag"]))
+        .all(CONSTITUENT_DIM)
+        .values
+    )
     if ocean_mask is not None:
         allowed &= _per_cell(ocean_mask, constants, "ocean_mask", bool)
     if water_column is not None:
         wc = _per_cell(water_column, constants, "water_column", float)
         allowed &= np.isfinite(wc)
+    if not allowed.any():
+        raise ValueError("no eligible cells with finite tide constants")
 
     if time_step is None:
         starts = pd.DatetimeIndex([record_start.floor("D")])
@@ -521,16 +553,19 @@ def still_tag_tide_likelihood(
     n_win = len(starts)
     loglik = np.full((n_win, n_cells), np.nan)
     rms = np.full((n_win, n_cells), np.nan)
-    n_samples = np.zeros(n_win, dtype=int)
+    n_samples = np.bincount(labels[labels >= 0], minlength=n_win)
     no_tide_rms = np.full(n_win, np.nan)
     shape_rms = np.full((n_win, n_cells), np.nan)
-    for w in range(n_win):
-        sel = hourly[labels == w]
-        n_samples[w] = len(sel)
-        if len(sel) < max(min_samples, 1):
-            continue
+    eligible_windows = np.flatnonzero(n_samples >= max(min_samples, 1))
+    if eligible_windows.size:
+        basis = _bin_nodal_basis(
+            series, hourly, freq, constants[CONSTITUENT_DIM].values
+        )
+    for w in eligible_windows:
+        in_window = labels == w
+        sel = hourly[in_window]
         no_tide_rms[w] = float(np.sqrt(((sel - sel.mean()) ** 2).mean()))
-        eta = predict_tide(constants, sel.index.values).values  # (time, cells)
+        eta = _tide_from_basis(constants, basis.isel(time=in_window)).values
         r = sel.values[:, None] - eta
         demeaned = r - r.mean(axis=0, keepdims=True)
         shape_rms[w] = np.sqrt((demeaned**2).mean(axis=0))
@@ -557,7 +592,7 @@ def still_tag_tide_likelihood(
         )
 
     pdf = np.zeros((n_win, n_cells))
-    uniform = allowed / max(allowed.sum(), 1)
+    uniform = allowed / allowed.sum()
     for w in range(n_win):
         ll = np.where(allowed, loglik[w], np.nan)
         if not used[w] or not np.isfinite(ll).any():
@@ -616,7 +651,7 @@ def harmonic_analysis(depth, constituents=("M2", "S2", "K1", "O1"), freq="1h"):
         Constituents to fit. Pairs that the record cannot separate (Rayleigh
         criterion: frequency difference times record length < one cycle) raise.
     freq : str or None, default "1h"
-        Averaging period applied before the fit (means at the mean sample time).
+        Averaging period applied to both depth and the harmonic basis before the fit.
 
     Returns
     -------
@@ -625,7 +660,8 @@ def harmonic_analysis(depth, constituents=("M2", "S2", "K1", "O1"), freq="1h"):
         (degrees, Greenwich lag), with attributes ``mean_depth``, ``residual_rms``
         and ``n_samples``.
     """
-    series = _bin_average(_as_series(depth), freq)
+    raw = _as_series(depth).dropna()
+    series = _bin_average(raw, freq)
     constituents = list(constituents)
     omega = _frequencies_rad_per_hour(constituents)
     hours = float(np.ptp(_seconds_since(series.index, series.index[0]))) / 3600.0
@@ -636,9 +672,10 @@ def harmonic_analysis(depth, constituents=("M2", "S2", "K1", "O1"), freq="1h"):
                     f"{constituents[i]} and {constituents[j]} cannot be separated"
                     f" with {hours / 24:.1f} days of data (Rayleigh criterion)"
                 )
-    mod = nodal_modulations(series.index.values, constituents)
-    f, vu = mod["f"].values, mod["vu"].values
-    design = np.column_stack([np.ones(len(series)), f * np.cos(vu), f * np.sin(vu)])
+    basis = _bin_nodal_basis(raw, series, freq, constituents)
+    design = np.column_stack(
+        [np.ones(len(series)), basis["fcos"].values, basis["fsin"].values]
+    )
     coef, *_ = np.linalg.lstsq(design, series.values, rcond=None)
     n = len(constituents)
     c = coef[1 : 1 + n] + 1j * coef[1 + n :]
@@ -735,10 +772,11 @@ def write_tide_pdf_healpix(likelihood, target_root, behav_found, step=200):
         Output of :func:`still_tag_tide_likelihood` with a daily ``time_step``.
     target_root : str or Path
         Folder receiving ``tide_pdf_healpix.zarr``.
-    behav_found : array-like
+    behav_found : array-like, pandas.Series or xarray.DataArray
         Daily behaviour flag on the time steps of ``likelihood`` (read downstream as
         the behaviour mask of the multi-sigma fit, e.g. ``behav_found > 0``). It is
         not derived from the tide likelihood, so it must be given explicitly.
+        Time-labelled flags are aligned to the likelihood dates.
 
     Notes
     -----
@@ -750,6 +788,23 @@ def write_tide_pdf_healpix(likelihood, target_root, behav_found, step=200):
     from pangeo_fish.storage import _with_dggs_attrs, write_time_blocks
 
     ds = likelihood[["pdf", "ocean_mask", "tide_found"]].copy()
+    if isinstance(behav_found, xr.DataArray) and "time" in behav_found.coords:
+        if behav_found.dims != ("time",):
+            raise ValueError("behav_found must have only the time dimension")
+        behav_found = behav_found.to_series()
+    if isinstance(behav_found, pd.Series) and isinstance(
+        behav_found.index, pd.DatetimeIndex
+    ):
+        flags_by_time = _as_series(behav_found)
+        times = ds.time.to_index()
+        if (
+            not flags_by_time.index.is_unique
+            or not times.isin(flags_by_time.index).all()
+        ):
+            raise ValueError(
+                "behav_found must have a unique flag for each likelihood time"
+            )
+        behav_found = flags_by_time.reindex(times)
     flags = np.asarray(getattr(behav_found, "values", behav_found), dtype=float)
     if flags.shape != (ds.sizes["time"],):
         raise ValueError(

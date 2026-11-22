@@ -652,16 +652,27 @@ def merge_tide_with_total(target_root, storage_options=None):
     open_kw = dict(engine="zarr", chunks={}, storage_options=storage_options)
     total = xr.open_dataset(f"{target_root}/total_pdf.zarr", **open_kw).load()
     daily = xr.open_dataset(f"{target_root}/tide_pdf_healpix.zarr", **open_kw)
-    daily = daily.groupby("time").mean()
+    for name in ("grid_name", "level", "indexing_scheme", "ellipsoid"):
+        tide_value = daily.cell_ids.attrs.get(name)
+        total_value = total.cell_ids.attrs.get(name)
+        if (
+            tide_value is not None
+            and total_value is not None
+            and str(tide_value).casefold() != str(total_value).casefold()
+        ):
+            raise ValueError(
+                f"HEALPix grid mismatch for {name}: {tide_value} vs {total_value}"
+            )
 
-    # Common cells and days
-    common_pix = daily.cell_ids.to_index().intersection(total.cell_ids.to_index())
+    # Keep the HMM cell order and match the tide values by ID.
+    daily = daily.groupby("time").mean()
+    total_ids = total.cell_ids.to_index()
+    common_pix = total_ids.intersection(daily.cell_ids.to_index())
     common_time = daily.time.to_index().intersection(total.time.to_index())
 
     def restrict(ds):
-        return ds.where(ds.cell_ids.isin(common_pix).compute(), drop=True).sel(
-            time=common_time
-        )
+        selected = ds.isel(cells=ds.cell_ids.to_index().get_indexer(common_pix))
+        return selected.sel(time=common_time)
 
     merged = (
         restrict(daily)
@@ -670,8 +681,8 @@ def merge_tide_with_total(target_root, storage_options=None):
     )
     merged.attrs = total.attrs.copy()
 
-    tide_mask = merged["tide_found"]
-    behav_mask = merged["behav_found"]
+    tide_mask = merged["tide_found"].broadcast_like(merged["pdf_tide"])
+    behav_mask = merged["behav_found"].broadcast_like(merged["pdf_tide"])
     merged = merged.drop_vars(["tide_found", "ocean_mask", "behav_found"])
 
     # Chunking for zarr and source tracking
