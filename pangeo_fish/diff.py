@@ -88,7 +88,9 @@ _diff_z_signatures = [
 def _diff_z(model_temp, model_depth, tag_temp, tag_depth, result):
     diff_temp = np.full_like(tag_depth, fill_value=np.nan)
     mask = ~np.isnan(model_depth) & ~np.isnan(model_temp)
-    model_depth_ = np.absolute(model_depth[mask])
+    # levels above the instantaneous surface (dynamic_depth < 0, low tide) are
+    # treated as being at the surface instead of being mirrored below it
+    model_depth_ = np.maximum(model_depth[mask], 0.0)
     if model_depth_.size == 0:
         result[0] = np.nan
         return
@@ -101,7 +103,7 @@ def _diff_z(model_temp, model_depth, tag_temp, tag_depth, result):
 
             idx = np.argmin(diff_depth)
 
-            diff_temp[index] = tag_temp[index] - np.absolute(model_temp_[idx])
+            diff_temp[index] = tag_temp[index] - model_temp_[idx]
 
     result[0] = np.mean(diff_temp[~np.isnan(diff_temp)])
 
@@ -112,7 +114,13 @@ def diff_z_numba(model_temp, model_depth, tag_temp, tag_depth):
         return _diff_z(model_temp, model_depth, tag_temp, tag_depth)
 
 
-def diff_z(model, tag, depth_threshold=0.8):
+def diff_z(model, tag, depth_threshold=None):
+    """Temperature difference between the tag and the nearest model level.
+
+    ``depth_threshold`` is accepted for backward compatibility and ignored.
+    Model levels above the instantaneous surface (``dynamic_depth < 0``) are
+    treated as being at the surface.
+    """
     diff = xr.apply_ufunc(
         diff_z_numba,
         model["TEMP"],

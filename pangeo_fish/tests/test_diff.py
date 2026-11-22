@@ -71,3 +71,26 @@ def test_diff_z():
     assert "diff" in result
     np.testing.assert_allclose(result["diff"].values, expected, rtol=1e-5)
     assert result["diff"].attrs["units"] == "degC"
+
+
+def test_diff_z_levels_above_surface_are_not_mirrored():
+    """At low tide the top level can be above the surface (dynamic_depth < 0).
+
+    It must count as the surface, not be mirrored below it: a tag at 1 m must be
+    compared with the level at 1.2 m, not with the level at -1.0 m mirrored to 1.0 m.
+    """
+    model_depth = np.array([-1.0, 1.2, 4.0], dtype=np.float64)
+    model_temp = np.array([20.0, 12.0, 10.0], dtype=np.float64)
+    tag_depth = np.array([1.0], dtype=np.float64)
+    tag_temp = np.array([12.5], dtype=np.float64)
+    result = diff_z_numba(model_temp, model_depth, tag_temp, tag_depth)
+    np.testing.assert_allclose(result, 0.5)
+
+
+def test_diff_z_keeps_the_sign_of_negative_model_temperatures():
+    model_depth = np.array([0.5, 10.0], dtype=np.float64)
+    model_temp = np.array([-1.5, -1.0], dtype=np.float64)
+    tag_depth = np.array([0.5], dtype=np.float64)
+    tag_temp = np.array([-1.0], dtype=np.float64)
+    result = diff_z_numba(model_temp, model_depth, tag_temp, tag_depth)
+    np.testing.assert_allclose(result, 0.5)
