@@ -376,7 +376,6 @@ class OldUpDownGaussian1DHealpix(Predictor):
         }
 
 
-import healpix_geo.nested as hpg_n
 from healpix_analyse import LargeConv
 
 
