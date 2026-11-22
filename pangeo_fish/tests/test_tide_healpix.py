@@ -291,6 +291,13 @@ def test_open_roundtrip(tmp_path):
     )
     assert np.isnan(out["tide_real"].values[:, 2]).all()
     assert out["cell_ids"].attrs["ellipsoid"] == "WGS84"
+    with pytest.raises(ValueError, match="missing 1 requested HEALPix cell IDs"):
+        th.open_harmonic_constants(tmp_path / "c.zarr", wanted, require_all_cells=True)
+    wrong_level = th.make_cell_ids(cells.values, LEVEL + 1, "WGS84")
+    with pytest.raises(ValueError, match="grid mismatch"):
+        th.open_harmonic_constants(
+            tmp_path / "c.zarr", wrong_level, require_all_cells=True
+        )
     with pytest.raises(ValueError, match="mismatch"):
         th.open_harmonic_constants(tmp_path / "c.zarr", ellipsoid="sphere")
 

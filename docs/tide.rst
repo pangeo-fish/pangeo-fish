@@ -46,6 +46,41 @@ the `AVISO data license
 <https://aviso.altimetry.fr/en/data/data-access/fileadmin/documents/data/License_Aviso.pdf>`_
 for access and attribution.
 
+Reading precomputed FES2022b constants
+-------------------------------------
+
+A precomputed store contains the real and imaginary parts of the harmonic
+constants in metres at nested WGS84 HEALPix cell centres. It must cover every
+candidate cell at the run's HEALPix level. Cells outside FES2022b's native mesh
+remain in the store with missing values.
+
+Start the kernel with AWS credentials configured for the bucket. For a named
+profile, set ``AWS_PROFILE`` to its name in the environment before starting
+Jupyter or Papermill. Replace the example URI and endpoint with your own values
+and set the HEALPix level to match your store.
+
+.. code-block:: python
+
+    tide_method = "healpix"
+    tide_model = "fes2022b"
+    ellipsoid = "WGS84"
+    refinement_level = 10
+    tide_model_source = None
+    tide_constants_store = "s3://<bucket>/<prefix>/ocean-tide-constants.zarr"
+    tide_s3_endpoint = "https://s3.example.org"
+
+The option also accepts a local Zarr path. Use ``tide_constituents`` to select
+a list of waves on either FES2022b path, or leave it as ``None`` for all waves.
+The level, ellipsoid, indexing scheme and candidate cell IDs must match.
+To return to the local native NetCDF, clear ``tide_constants_store`` and set
+``tide_model_source`` as above.
+
+To prepare a store for a different study grid, pass the candidate cell IDs
+with their DGGS attributes to ``fes2022b_constants_to_healpix`` and write the
+result with ``write_harmonic_constants``. Set ``chunk_constituents=1`` for
+independent reads by constituent. Include the AVISO citation, licence,
+product version and interpolation method in the store metadata.
+
 How the likelihoods differ
 --------------------------
 
@@ -59,8 +94,8 @@ How the likelihoods differ
    * - Tide prediction
      - Builds a tide signal from the file's constituent amplitudes and phases.
        This time-dependent signal is shared across the model grid.
-     - Interpolates local TPXO9 or FES2022b complex harmonic constants to the HMM cell
-       centres, then predicts a different tide at each cell. PyFES supplies the
+     - Obtains complex harmonics at the HMM cell centres by interpolation
+       or by reading precomputed FES2022b constants. PyFES supplies the
        astronomical arguments and nodal corrections at the observation times.
    * - Depth reference
      - Compares observed depth to the model water-column depth adjusted by the

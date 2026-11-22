@@ -164,6 +164,8 @@ def open_harmonic_constants(
     constituents=None,
     storage_options=None,
     ellipsoid=None,
+    *,
+    require_all_cells=False,
 ):
     """Open harmonic constants stored on HEALPix (Zarr) and select cells/constituents.
 
@@ -180,14 +182,27 @@ def open_harmonic_constants(
         Passed to ``xarray.open_dataset``.
     ellipsoid : str, optional
         Expected ellipsoid; raises if the store was built on another one.
+    require_all_cells : bool, optional
+        Raise if any requested cell ID is absent. Stored NaN values are preserved.
     """
     ds = xr.open_dataset(
         store, engine="zarr", chunks={}, storage_options=storage_options
     )
-    return select_constants(ds, cell_ids, constituents, ellipsoid)
+    try:
+        selected = select_constants(
+            ds, cell_ids, constituents, ellipsoid, require_all_cells=require_all_cells
+        )
+    except Exception:
+        ds.close()
+        raise
+    if selected is not ds:
+        selected.set_close(ds.close)
+    return selected
 
 
-def select_constants(ds, cell_ids=None, constituents=None, ellipsoid=None):
+def select_constants(
+    ds, cell_ids=None, constituents=None, ellipsoid=None, *, require_all_cells=False
+):
     """Validate a constants dataset and select cells and constituents."""
     for name in ("tide_real", "tide_imag"):
         if name not in ds:
@@ -206,7 +221,13 @@ def select_constants(ds, cell_ids=None, constituents=None, ellipsoid=None):
             _check_same_grid(info, _grid_info(cell_ids))
         wanted = np.asarray(getattr(cell_ids, "values", cell_ids), dtype="uint64")
         pos = pd.Index(np.asarray(ds["cell_ids"].values)).get_indexer(wanted)
-        found = xr.DataArray(pos >= 0, dims=CELL_DIM)
+        missing = pos < 0
+        if require_all_cells and missing.any():
+            raise ValueError(
+                f"Harmonic constants are missing {missing.sum()} requested HEALPix "
+                f"cell IDs (first: {wanted[missing][0]})"
+            )
+        found = xr.DataArray(~missing, dims=CELL_DIM)
         ds = ds.isel({CELL_DIM: np.where(pos >= 0, pos, 0)})
         ds = ds.assign(
             {name: ds[name].where(found) for name in ("tide_real", "tide_imag")}
@@ -727,8 +748,10 @@ def constants_misfit(observed, constants):
     return xr.DataArray(dist, dims=other, coords=coords, name="constants_misfit")
 
 
-def write_harmonic_constants(constants, store, chunk_cells=2**16, dtype="float32"):
-    """Write harmonic constants to Zarr: all constituents in one chunk, cells chunked.
+def write_harmonic_constants(
+    constants, store, chunk_cells=2**16, dtype="float32", *, chunk_constituents=-1
+):
+    """Write harmonic constants to Zarr with configurable cell and constituent chunks.
 
     Parameters
     ----------
@@ -739,6 +762,8 @@ def write_harmonic_constants(constants, store, chunk_cells=2**16, dtype="float32
         Cells per chunk (contiguous nested ranges when the cells are sorted).
     dtype : str
         Storage type of ``tide_real`` and ``tide_imag`` (float32: < 1e-7 m error per metre).
+    chunk_constituents : int, optional
+        Constituents per chunk. The default (-1) groups all constituents together.
     """
     from pangeo_fish.storage import _with_dggs_attrs
 
@@ -749,7 +774,9 @@ def write_harmonic_constants(constants, store, chunk_cells=2**16, dtype="float32
         {name: ds[name].astype(dtype) for name in ("tide_real", "tide_imag")}
     )
     ds = ds.assign_coords({CONSTITUENT_DIM: _names(ds[CONSTITUENT_DIM].values)})
-    ds = _with_dggs_attrs(ds).chunk({CONSTITUENT_DIM: -1, CELL_DIM: chunk_cells})
+    ds = _with_dggs_attrs(ds).chunk(
+        {CONSTITUENT_DIM: chunk_constituents, CELL_DIM: chunk_cells}
+    )
     for var in ds.variables.values():
         for key in (
             "chunks",
@@ -1064,7 +1091,14 @@ def fes2022b_constants_to_healpix(source, cell_ids, constituents=None):
                 raise ValueError(f"FES2022b amplitude for {name} must be in cm")
         attrs = {
             key: ds.attrs[key]
-            for key in ("license", "credits", "doi")
+            for key in (
+                "license",
+                "credits",
+                "doi",
+                "product_version",
+                "date_created",
+                "references",
+            )
             if key in ds.attrs
         }
 
@@ -1091,6 +1125,12 @@ def fes2022b_constants_to_healpix(source, cell_ids, constituents=None):
     constants[:, quality <= 0] = np.nan + 1j * np.nan
     attrs.update(
         source="FES2022b Ocean Tide (native mesh)",
+        tide_model="fes2022b",
+        source_product="FES2022b_OceanTide_NSgrid.nc",
+        source_url="https://www.aviso.altimetry.fr/en/data/products/auxiliary-products/global-tide-fes.html",
+        distributor="AVISO+",
+        creators="LEGOS, NOVELTIS, CLS",
+        licensor="CNES",
         resampling="PyFES LGP2 interpolation of complex harmonic constants",
     )
     return harmonic_constants_dataset(constants, names, cell_ids, attrs=attrs)
