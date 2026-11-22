@@ -1896,6 +1896,41 @@ def _get_speed(
     return max_speed.pint.to("km / h")
 
 
+def _check_emission_mass(ds: xr.Dataset, variable: str = "pdf") -> None:
+    """Raise if a time step of the emission has no probability mass.
+
+    A time step whose ``pdf`` has no positive mass (NaN, 0 or negative everywhere
+    inside ``mask``, when the dataset has one) makes the HMM fail later without a clear error: the states
+    become NaN and sigma runs to its bound. Passing this check is necessary, not
+    sufficient: the movement model can still leave no reachable cell. Every
+    dimension other than ``time`` is summed over.
+    """
+    if variable not in ds or "time" not in ds[variable].dims:
+        return
+    pdf = ds[variable]
+    if "mask" in ds:
+        pdf = pdf.where(ds["mask"].astype(bool), 0)
+    spatial = [dim for dim in pdf.dims if dim != "time"]
+    mass = pdf.sum(spatial, skipna=True)  # NaN counts as 0
+    empty = ~(mass > 0)
+    if "time" in empty.dims:
+        n_empty = int(empty.sum())
+    else:
+        n_empty = int(bool(empty))
+    if n_empty == 0:
+        return
+    times = np.asarray(ds["time"].values)[np.asarray(empty.values, dtype=bool)]
+    shown = ", ".join(str(t)[:16] for t in times[:5])
+    more = ", ..." if len(times) > 5 else ""
+    raise ValueError(
+        f"The emission probability ({variable!r}) has no positive mass"
+        f"{' inside the mask' if 'mask' in ds else ''} (NaN, 0 or negative) at"
+        f" {n_empty} time step(s) ({shown}{more}). The HMM cannot run through"
+        " them. Check for gaps in the tag data, a mask that removes every cell, or"
+        " detections outside the model domain."
+    )
+
+
 def optimize_pdf(
     *,
     ds: xr.Dataset,
@@ -1972,6 +2007,7 @@ def optimize_pdf(
         )
 
     ds = ds.compute()
+    _check_emission_mass(ds)
 
     if "cells" in ds.dims:
         ds = to_healpix(ds)
@@ -2118,7 +2154,9 @@ def _load_emission(ds, target_root, storage_options, chunks):
     else:
         emission = ds
 
-    return emission.compute()
+    emission = emission.compute()
+    _check_emission_mass(emission)
+    return emission
 
 
 def _compute_predictor_indices(indices: list[list[int]]):
