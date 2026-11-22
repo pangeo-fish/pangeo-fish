@@ -159,12 +159,16 @@ def test_cache_with_dimension_coordinates_only(tmp_path, emissions):
     xr.testing.assert_identical(result.x, ds.x)
 
 
-def test_cached_healpix_convolution(tmp_path):
+@pytest.mark.parametrize("name", ["UpDownGaussian1DHealpix", "Foscat1DHealpix"])
+def test_cached_healpix_convolution(tmp_path, name):
     from pangeo_fish.hmm.estimator import EagerEstimator
-    from pangeo_fish.tests.test_estimator import predictor_factory, sample_dataset
+    from pangeo_fish.tests.test_estimator import (
+        make_predictor_factory,
+        sample_dataset,
+    )
 
     ds = sample_dataset.__wrapped__()
-    factory = predictor_factory.__wrapped__(ds)
+    factory = make_predictor_factory(name, ds)
     eager = EagerEstimator(factory, sigma=[0.001]).predict_proba(ds)
     cached = CachedEstimator(factory, sigma=0.001, cache=tmp_path / "healpix")
     actual = cached.predict_proba(ds).compute()

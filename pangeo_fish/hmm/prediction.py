@@ -116,7 +116,14 @@ class Foscat1DHealpix(Predictor):
     max_kernel_size: int | None = 33
 
     def __post_init__(self):
-        import foscat.SphericalStencil as sc
+        try:
+            import foscat.SphericalStencil as sc
+        except ImportError as error:
+            raise ImportError(
+                "Foscat1DHealpix needs the optional foscat package:"
+                " pip install 'pangeo-fish[foscat]'. UpDownGaussian1DHealpix"
+                " (conv_method='LargeHealpixConv') does not need it."
+            ) from error
 
         nside = 2**self.grid_info.level
 

@@ -1940,7 +1940,7 @@ def optimize_pdf(
     tolerance: float,
     earth_radius: pint.Quantity | None = None,
     dims: list[str] = ["cells"],
-    conv_method: str = "HealpixConv",
+    conv_method: str = "LargeHealpixConv",
     ellipsoid: str = None,
     final: bool = False,
     single_behav: bool = True,
@@ -1970,6 +1970,11 @@ def optimize_pdf(
          of ``cell_ids``), see :py:func:`earth_radius_from_ellipsoid`.
      dims : list of str, default: ["cells"]
          The list of the dimensions. Either ``["x", "y"]`` or ``["cells"]``
+     conv_method : str, default: "LargeHealpixConv"
+         Convolution used for the movement model: ``"LargeHealpixConv"``
+         (fast multi-resolution, :py:class:`UpDownGaussian1DHealpix`),
+         ``"HealpixConv"`` (slower reference, needs ``truncate``) or
+         ``"FoscatConv"`` (needs the optional ``foscat`` package).
      final : bool, default: False
          If True, optimize sigma by matching the predicted final state to the
          observed final position (``score_final_pos``) instead of the standard
@@ -3148,7 +3153,7 @@ def create_parameters(
     single_behav=True,
     predictor_factory=None,
     predictors=None,
-    class_name="Foscat1DHealpix",
+    class_name="UpDownGaussian1DHealpix",
     comment="Custom parameters",
     save_parameters=False,
     storage_options=None,
@@ -3175,6 +3180,10 @@ def create_parameters(
         Predictor factory description.
     predictors : optional
         Predictor values.
+    class_name : str, default="UpDownGaussian1DHealpix"
+        Predictor class used when ``predictor_factory`` is None:
+        "UpDownGaussian1DHealpix", "Gaussian1DHealpix" or "Foscat1DHealpix"
+        (the last one needs the optional ``foscat`` package).
     comment : str
         Comment stored in the json file.
     save_parameters : bool, default=False
@@ -3263,7 +3272,7 @@ def hand_test_parameter(
     sigma_tested: list = [0.004],
     sigma_indices: list[list[int]] = None,
     single_behav=True,
-    Conv_method: str = "Foscat1DHealpix",
+    Conv_method: str = "UpDownGaussian1DHealpix",
     target_root: str = ".",
     saving_root: str = "/hand_sigma",
     default_chunk_dims=None,
@@ -3292,7 +3301,7 @@ def hand_test_parameter(
     single_behav : bool, default=True
         Only used when ``sigma_indices`` is None. If False, one list of time
         indices per continuous segment. If True, one list per predictor value.
-    Conv_method : str, default="Foscat1DHealpix"
+    Conv_method : str, default="UpDownGaussian1DHealpix"
         Convolution class name used to build the predictor factory
         (see `create_parameters`). Expected values are
         "Gaussian1DHealpix", "Foscat1DHealpix" or "UpDownGaussian1DHealpix".

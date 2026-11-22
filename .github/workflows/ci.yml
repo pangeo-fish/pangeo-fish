@@ -78,7 +78,7 @@ jobs:
 
       - name: Install pangeo-fish
         run: |
-          python -m pip install -e . ${{ matrix.constraints }}
+          python -m pip install -e '.[foscat]' ${{ matrix.constraints }}
           python -m pip check
 
       - name: Import pangeo-fish

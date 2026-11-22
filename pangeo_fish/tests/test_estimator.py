@@ -7,7 +7,7 @@ from tlz.functoolz import curry
 
 from pangeo_fish.hmm.estimator import EagerEstimator
 from pangeo_fish.hmm.optimize import EagerBoundsSearch
-from pangeo_fish.hmm.prediction import Foscat1DHealpix
+from pangeo_fish.hmm.prediction import Foscat1DHealpix, UpDownGaussian1DHealpix
 
 
 @pytest.fixture
@@ -50,25 +50,31 @@ def sample_dataset():
     ).dggs.assign_latlon_coords()
 
 
-@pytest.fixture
-def predictor_factory(sample_dataset):
-    """
-    Return a configured Gaussian1DHealpix predictor factory using sample dataset parameters.
-    """
-    # curry(
-    #     Gaussian1DHealpix,
-    #     cell_ids=sample_dataset["cell_ids"].data,
-    #     grid_info=sample_dataset.dggs.grid_info,
-    #     truncate=4.0,
-    #     weights_threshold=1e-8,
-    #     pad_kwargs={"mode": "constant", "constant_value": 0},
-    #     optimize_convolution=True,
-    # )
+PREDICTORS = ["UpDownGaussian1DHealpix", "Foscat1DHealpix"]
+
+
+def make_predictor_factory(name, ds):
+    """Predictor factory for ``ds``; skips Foscat1DHealpix without foscat."""
+    if name == "Foscat1DHealpix":
+        pytest.importorskip("foscat")
+        return curry(
+            Foscat1DHealpix,
+            cell_ids=ds["cell_ids"].data,
+            grid_info=ds.dggs.grid_info,
+        )
     return curry(
-        Foscat1DHealpix,
-        cell_ids=sample_dataset["cell_ids"].data,
-        grid_info=sample_dataset.dggs.grid_info,
+        UpDownGaussian1DHealpix,
+        cell_ids=ds["cell_ids"].data,
+        grid_info=ds.dggs.grid_info,
+        device="cpu",
+        ellipsoid="sphere",
     )
+
+
+@pytest.fixture(params=PREDICTORS)
+def predictor_factory(request, sample_dataset):
+    """The default UpDownGaussian1DHealpix, and Foscat1DHealpix if installed."""
+    return make_predictor_factory(request.param, sample_dataset)
 
 
 @pytest.mark.parametrize("sigma", [[0.0004], [0.0002]])
