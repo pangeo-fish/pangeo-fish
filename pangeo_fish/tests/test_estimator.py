@@ -139,3 +139,16 @@ def test_fit_sigma(sample_dataset, predictor_factory, tolerance):
         assert not np.isnan(arr).any(), "Optimized sigma is nan"
     else:
         raise ValueError("Optimized result is not in the expected format ")
+
+
+def test_updown_predictor_without_ellipsoid(sample_dataset):
+    """A grid without an ellipsoid is treated as a sphere (the default path)."""
+    from pangeo_fish.helpers import _get_predictor_factory
+
+    factory = _get_predictor_factory(
+        sample_dataset, None, ["cells"], "LargeHealpixConv"
+    )
+    predictor = factory(sigma=0.001)
+    assert predictor.ellipsoid == "sphere"
+    state = sample_dataset["initial"].values
+    np.testing.assert_allclose(predictor.predict(state).sum(), 1.0, rtol=1e-3)

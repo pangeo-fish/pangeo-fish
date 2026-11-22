@@ -244,7 +244,10 @@ class UpDownGaussian1DHealpix(Predictor):
         if self.kernel_sz is None:
             self.kernel_sz = 2 * radius + 1
         if self.ellipsoid is None:
-            self.ellipsoid = self.cell_ids.attrs.get("ellipsoid")
+            # a plain array has no attrs; None means a sphere, as in
+            # pangeo_fish.helpers.earth_radius_from_ellipsoid
+            attrs = getattr(self.cell_ids, "attrs", {})
+            self.ellipsoid = attrs.get("ellipsoid") or "sphere"
         # --- 1. Build the multi-resolution operator ---
         self.layer = LargeConv(
             level=self.grid_info.level,
