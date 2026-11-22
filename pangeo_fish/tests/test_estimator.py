@@ -7,7 +7,7 @@ from tlz.functoolz import curry
 
 from pangeo_fish.hmm.estimator import EagerEstimator
 from pangeo_fish.hmm.optimize import EagerBoundsSearch
-from pangeo_fish.hmm.prediction import Foscat1DHealpix
+from pangeo_fish.hmm.prediction import Gaussian1DHealpix
 
 
 @pytest.fixture
@@ -55,19 +55,14 @@ def predictor_factory(sample_dataset):
     """
     Return a configured Gaussian1DHealpix predictor factory using sample dataset parameters.
     """
-    # curry(
-    #     Gaussian1DHealpix,
-    #     cell_ids=sample_dataset["cell_ids"].data,
-    #     grid_info=sample_dataset.dggs.grid_info,
-    #     truncate=4.0,
-    #     weights_threshold=1e-8,
-    #     pad_kwargs={"mode": "constant", "constant_value": 0},
-    #     optimize_convolution=True,
-    # )
     return curry(
-        Foscat1DHealpix,
+        Gaussian1DHealpix,
         cell_ids=sample_dataset["cell_ids"].data,
         grid_info=sample_dataset.dggs.grid_info,
+        truncate=4.0,
+        weights_threshold=1e-8,
+        pad_kwargs={"mode": "constant", "constant_value": 0},
+        optimize_convolution=True,
     )
 
 
@@ -133,3 +128,43 @@ def test_fit_sigma(sample_dataset, predictor_factory, tolerance):
         assert not np.isnan(arr).any(), "Optimized sigma is nan"
     else:
         raise ValueError("Optimized result is not in the expected format ")
+
+
+def test_foscat_parameters_file_gives_clear_error(tmp_path):
+    """
+    A parameters file written with the removed Foscat1DHealpix predictor must fail
+    with a message naming the replacement.
+    """
+    import json
+
+    from pangeo_fish.helpers import _build_estimator
+
+    params = {
+        "sigma": [0.0004],
+        "predictor_factory": {"class": "Foscat1DHealpix", "kwargs": {}},
+    }
+    (tmp_path / "parameters.json").write_text(json.dumps(params))
+
+    with pytest.raises(ValueError, match="FFTGaussian1DHealpix"):
+        _build_estimator(xr.Dataset(), str(tmp_path), None)
+
+
+def test_old_updown_class_is_not_read_as_the_new_one(tmp_path):
+    """
+    "OldUpDownGaussian1DHealpix" contains the name of the new class: it must not be
+    built as "UpDownGaussian1DHealpix", and `create_parameters` must not write it.
+    """
+    import json
+
+    from pangeo_fish.helpers import _build_estimator, create_parameters
+
+    params = {
+        "sigma": [0.0004],
+        "predictor_factory": {"class": "OldUpDownGaussian1DHealpix", "kwargs": {}},
+    }
+    (tmp_path / "parameters.json").write_text(json.dumps(params))
+
+    with pytest.raises(ValueError, match="comparison only"):
+        _build_estimator(xr.Dataset(), str(tmp_path), None)
+    with pytest.raises(ValueError, match="comparison only"):
+        create_parameters([0.0004], class_name="OldUpDownGaussian1DHealpix")

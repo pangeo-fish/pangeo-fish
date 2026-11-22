@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -105,114 +106,87 @@ class Gaussian1DHealpix(Predictor):
 
 import warnings
 
+_AUTHALIC_RADIUS_M = 6371007.1809
+
 
 @dataclass
-class Foscat1DHealpix(Predictor):
+class GaussianHealpixAnalyse(Predictor):
+    """Gaussian movement kernel from ``healpix_analyse``, built once per sigma.
+
+    The weights are computed once (``gaussian_filter_operator``) and applied at
+    every time step with ``apply_filter_operator``.  ``sigma`` is in radians as
+    for ``Gaussian1DHealpix`` and is converted to metres on the authalic sphere.
+    ``normalization="full_disc"`` (default) reproduces the zero padding of
+    ``Gaussian1DHealpix`` (mass that leaves the domain is lost);
+    ``"source"`` conserves the total mass of the input.
+
+    With ``land_barrier=True`` the non-ocean cells (``blocked_cells``, a
+    list of cell ids) are passed to the operator: the kernel is then measured
+    through water and no mass crosses land.
+    """
+
     cell_ids: _ArrayLike
     grid_info: DGGSInfo
 
-    sigma: float  # en radians
-    kernel_size: int | None = None
-    max_kernel_size: int | None = 33
+    sigma: float  # in radians
+    truncate: float = 4.0
+    normalization: str = "full_disc"
+    width_rule: str = "matched"
+    land_barrier: bool = False
+    blocked_cells: Any = None
 
     def __post_init__(self):
-        import foscat.SphericalStencil as sc
+        from healpix_analyse import gaussian_filter_operator
 
-        nside = 2**self.grid_info.level
-
-        # # sigma_opt: convert sigma (radians) to pixels
-        sigma_opt = (
-            self.sigma / np.sqrt(np.pi)
-        ) * nside  # sometimes add a 3* next to pi
-
-        radius = int(
-            np.ceil(3 * sigma_opt)
-        )  # truncation at 3 sigma, independent of the factor removed above
-        kernel_size = 2 * radius + 1
-
-        if self.max_kernel_size is not None and kernel_size > self.max_kernel_size:
-            warnings.warn(
-                f"kernel_size truncated from {kernel_size} to {self.max_kernel_size} "
-                f"(sigma_opt={sigma_opt:.2f}): the actual Gaussian kernel will be truncated, "
-                f"so the effective sigma will be smaller than requested for this sigma.",
-                RuntimeWarning,
+        if self.normalization not in ("full_disc", "source"):
+            raise ValueError(
+                f'Unknown normalization "{self.normalization}". '
+                'Expected "full_disc" or "source".'
             )
-            kernel_size = self.max_kernel_size
-            kernel_size -= 1 - kernel_size % 2
+        if self.land_barrier and self.blocked_cells is None:
+            raise ValueError(
+                "land_barrier=True needs blocked_cells (the ids of the non-ocean cells)."
+            )
 
-        self.kernel_size = kernel_size
-        # self.kernel_size = 33#
+        ellipsoid = getattr(self.grid_info, "ellipsoid", None)
+        name = getattr(ellipsoid, "name", ellipsoid)
+        if name is not None and str(name).upper() != "WGS84":
+            raise NotImplementedError(
+                "GaussianHealpixAnalyse supports the WGS84 ellipsoid only; "
+                f"got {name!r}."
+            )
 
-        self.stencil = sc.SphericalStencil(
-            nside, int(self.kernel_size), cell_ids=self.cell_ids
+        self.operator = gaussian_filter_operator(
+            np.asarray(self.cell_ids),
+            self.grid_info.level,
+            sigma_m=self.sigma * _AUTHALIC_RADIUS_M,
+            truncate=self.truncate,
+            normalization=self.normalization,
+            width_rule=self.width_rule,
+            blocked_cells=(
+                np.asarray(self.blocked_cells) if self.land_barrier else None
+            ),
         )
 
-        xx, yy = np.meshgrid(
-            np.arange(self.kernel_size) - self.kernel_size // 2,
-            np.arange(self.kernel_size) - self.kernel_size // 2,
-        )
-        W = np.exp(-(xx**2 + yy**2) / (sigma_opt**2))
-        W = W / W.sum()
+    def predict(self, X, *, mask=None):
+        from healpix_analyse import apply_filter_operator
 
-        self.W_tensor = self.stencil.to_tensor(W).reshape(1, 1, self.kernel_size**2)
+        if hasattr(X, "compute"):
+            X = X.compute()
+        X = np.asarray(X)
+        filtered = apply_filter_operator(X, *self.operator)
+        if np.issubdtype(X.dtype, np.floating):
+            filtered = filtered.astype(X.dtype, copy=False)
 
-    def _ensure_bcp(self, arr: np.ndarray):
-        """
-        Ensure (B, C, P).
-        """
-        n_cells = self.cell_ids.shape[0]
-        a = np.array(arr)
-        if a.ndim == 1:
-            return a.reshape(1, 1, -1), ("1d", a.shape)
-        if a.ndim == 2:
-            # cas (B, P)
-            if a.shape[1] == n_cells:
-                return a.reshape(a.shape[0], 1, a.shape[1]), ("2d_bp", a.shape)
-            # cas (P, something) improbable : si first dim correspond à n_cells -> (1,1,P)
-            if a.shape[0] == n_cells:
-                return a.reshape(1, 1, a.shape[0]), ("2d_p?", a.shape)
-            # fallback
-            return a.reshape(1, 1, -1), ("2d_fallback", a.shape)
-        if a.ndim == 3:
-            return a, ("3d", a.shape)
-        raise ValueError(f"Unsupported input ndim={a.ndim} for convolution")
+        if mask is None:
+            return filtered
 
-    def _restore_shape(self, out: np.ndarray, original_info):
-        """
-        `out` (of shape (B,C,P)) to 1D
-        """
-        kind, orig_shape = original_info
-        B, C, P = out.shape
-        if kind == "1d":
-            # renvoyer (P,)
-            return out.reshape(
-                P,
-            )
-        if kind == "2d_bp":
-            # origine (B, P)
-            return out.reshape(orig_shape[0], orig_shape[1])
-        if kind == "2d_fallback":
-            return out.reshape(1, P)
-        # 3d : conserver
-        return out
-
-    def predict(self, X, mask=None):
-
-        bcp, original_info = self._ensure_bcp(X)
-        im_t = self.stencil.to_tensor(bcp)
-
-        out_t = self.stencil.Convol_torch(im_t, self.W_tensor)
-        out_np = self.stencil.to_numpy(out_t)
-
-        filtered = self._restore_shape(out_np, original_info)
-        if mask is not None:
-            filtered = np.where(mask, filtered, 0)
-        return filtered
+        return np.where(mask, filtered, 0)
 
 
 @dataclass
 @dataclass
-class UpDownGaussian1DHealpix(Predictor):
+class OldUpDownGaussian1DHealpix(Predictor):
     cell_ids: _ArrayLike
     grid_info: DGGSInfo
 
@@ -364,3 +338,498 @@ class UpDownGaussian1DHealpix(Predictor):
         if mask is not None:
             filtered = np.where(mask, filtered, 0)
         return filtered
+
+    def check_impulse_response(self, centre_index=None):
+        """Diagnostic: apply the filter to a Dirac and measure the effective sigma.
+
+        Returns a dict with the measured sigma (radians), the ratio to the
+        requested sigma, and the total mass of the response.
+        """
+        import healpix_geo.nested as hpg_n
+
+        n = len(self.cell_ids)
+        c = n // 2 if centre_index is None else int(centre_index)
+
+        x = np.zeros(n, dtype=np.float32)
+        x[c] = 1.0
+        resp = np.asarray(self.predict(x)).ravel()
+
+        lon, lat = hpg_n.healpix_to_lonlat(
+            np.asarray(self.cell_ids),
+            self.grid_info.level,
+            ellipsoid=self.layer.ellipsoid,
+        )
+
+        # drop float32 noise so it does not count as weight at large distances
+        resp_clean = np.clip(resp, 0.0, None)
+        resp_clean[resp_clean < 1e-6 * resp_clean.max()] = 0.0
+
+        s_measured = self._effective_sigma(resp_clean, lon, lat, c)
+        return {
+            "sigma_requested": self.sigma,
+            "sigma_measured": s_measured,
+            "ratio": s_measured / self.sigma,
+            "mass": float(resp.sum()),
+            "sigma_downup": self.sigma_downup_rad,
+            "n_levels": self.layer.n_levels,
+            "cap_used": self.max_compact_kernel_sz_used,
+        }
+
+
+from healpix_analyse import LargeConv
+
+
+@dataclass
+class UpDownGaussian1DHealpix(Predictor):
+    """Gaussian filter on a HEALPix patch, built on a multi-resolution LargeConv.
+
+    The target blur ``sigma`` is split in quadrature between the intrinsic blur
+    of the Down/Up operators and a compact Gaussian kernel applied at the
+    coarse resolution.
+    """
+
+    cell_ids: _ArrayLike
+    grid_info: DGGSInfo
+
+    sigma: float  # target standard deviation, in radians
+    kernel_sz: int | None = None  # nominal kernel size (fine resolution)
+    max_compact_kernel_sz: int = 7  # starting cap on the compact kernel size
+    max_compact_kernel_sz_cap: int = 15  # upper bound for the cap search
+    ellipsoid: str | None = None
+    device: str = "cpu"
+    dtype: torch.dtype = torch.float32
+
+    # Single place for the radians -> pixels conversion.
+    # To be validated against the step actually used by HealPixConv.
+    @staticmethod
+    def _rad_to_px(x_rad, nside):
+        return x_rad * nside / np.sqrt(np.pi / 3)
+
+    def _build_layer(self, max_k):
+
+        return LargeConv(
+            level=self.grid_info.level,
+            in_channels=1,
+            out_channels=1,
+            kernel_sz=self.kernel_sz,
+            max_compact_kernel_sz=max_k,
+            cell_ids=self.cell_ids,
+            ellipsoid=self.ellipsoid,
+            weight_norm="l1",
+            up_norm="col_l1",
+            device=self.device,
+            dtype=self.dtype,
+        )
+
+    def _measure_downup(self, layer):
+        """Measure the blur (radians) introduced by Down/Up alone."""
+        import healpix_geo.nested as hpg_n
+
+        k, n = layer.compact_kernel_sz, len(self.cell_ids)
+        c = n // 2  # index of the (assumed) central pixel
+
+        # Identity compact kernel: only Down/Up acts on the impulse
+        ident = np.zeros((1, 1, k * k), np.float32)
+        ident[0, 0, k * k // 2] = 1.0
+        layer.set_compact_kernel(
+            ident, bias=np.zeros(1, np.float32), requires_grad=False
+        )
+
+        impulse = np.zeros(n, np.float32)
+        impulse[c] = 1.0
+        resp = layer(impulse)
+        resp = resp if isinstance(resp, np.ndarray) else resp.detach().cpu().numpy()
+
+        lon, lat = hpg_n.healpix_to_lonlat(
+            self.cell_ids, self.grid_info.level, ellipsoid=layer.ellipsoid
+        )
+        return self._effective_sigma(resp.ravel(), lon, lat, c)  # radians
+
+    @staticmethod
+    def _effective_sigma(resp, lon, lat, c):
+        """Effective per-axis sigma (radians) of a response around pixel ``c``.
+
+        lon, lat are in degrees. Uses the true angular distance (haversine-like)
+        so that no latitude correction is needed.
+        """
+        lo, la = np.radians(lon), np.radians(lat)
+        cosd = np.sin(la[c]) * np.sin(la) + np.cos(la[c]) * np.cos(la) * np.cos(
+            lo - lo[c]
+        )
+        d2 = np.arccos(np.clip(cosd, -1, 1)) ** 2  # squared angular distance
+        w = np.abs(resp)
+        w = w / w.sum()
+        return np.sqrt(np.sum(w * d2) / 2.0)  # per-axis sigma
+
+    def __post_init__(self):
+        nside = 2**self.grid_info.level
+
+        if self.ellipsoid is None:
+            self.ellipsoid = self.cell_ids.attrs.get("ellipsoid")
+
+        # Nominal fine-resolution kernel size: radius = 3 * sigma (in pixels)
+        if self.kernel_sz is None:
+            sigma_px = self._rad_to_px(self.sigma, nside)
+            self.kernel_sz = 2 * int(np.ceil(3 * sigma_px)) + 1
+
+        # Increasing caps: keep the first one whose Down/Up blur is below sigma.
+        # A larger cap means fewer levels, hence less parasitic blur.
+        caps = sorted(
+            {
+                self.max_compact_kernel_sz,
+                *range(
+                    self.max_compact_kernel_sz,
+                    self.max_compact_kernel_sz_cap + 1,
+                    2,
+                ),
+            }
+        )
+        for cap in caps:
+            layer = self._build_layer(cap)
+            s_du = self._measure_downup(layer)
+            if s_du < self.sigma:
+                break
+        else:
+            warnings.warn(
+                f"Requested sigma ({self.sigma:.2e} rad) is lower than or equal to "
+                f"the minimal Down/Up blur ({s_du:.2e} rad), even with "
+                f"max_compact_kernel_sz={caps[-1]}. This is a genuine limit of "
+                f"the geometry: the compact kernel will be nearly pointwise and "
+                f"the effective blur is dominated by Down/Up.",
+                RuntimeWarning,
+            )
+        self.layer = layer
+
+        # --- Compact Gaussian kernel (residual blur, in quadrature) ---
+        residual = np.sqrt(max(self.sigma**2 - s_du**2, 0.0))
+        sigma_c = max(
+            self._rad_to_px(residual, layer.coarse_nside), 1e-6
+        )  # avoid division by zero
+        k = layer.compact_kernel_sz
+        if 3 * sigma_c > k // 2:
+            warnings.warn(
+                "Compact kernel too small: the Gaussian is truncated.",
+                RuntimeWarning,
+            )
+
+        x = np.arange(k) - k // 2
+        xx, yy = np.meshgrid(x, x)
+        W = np.exp(-(xx**2 + yy**2) / (2 * sigma_c**2))
+        W = (W / W.sum()).reshape(1, 1, k * k).astype(np.float32)
+        layer.set_compact_kernel(W, bias=np.zeros(1, np.float32), requires_grad=False)
+
+        # Kept for diagnostics / debugging
+        self.sigma_downup_rad = s_du
+        self.sigma_compact_px = sigma_c
+        self.max_compact_kernel_sz_used = cap
+
+    def _ensure_bcp(self, arr):
+        n_cells = self.cell_ids.shape[0]
+        a = np.array(arr)
+        if a.ndim == 1:
+            return a.reshape(1, 1, -1), ("1d", a.shape)
+        if a.ndim == 2:
+            if a.shape[1] == n_cells:
+                return a.reshape(a.shape[0], 1, a.shape[1]), ("2d_bp", a.shape)
+            if a.shape[0] == n_cells:
+                return a.reshape(1, 1, a.shape[0]), ("2d_p?", a.shape)
+            return a.reshape(1, 1, -1), ("2d_fallback", a.shape)
+        if a.ndim == 3:
+            return a, ("3d", a.shape)
+        raise ValueError(f"Unsupported input ndim={a.ndim} for convolution")
+
+    def _restore_shape(self, out, original_info):
+        kind, orig_shape = original_info
+        B, C, P = out.shape
+        if kind == "1d":
+            return out.reshape(P)
+        if kind == "2d_bp":
+            return out.reshape(orig_shape[0], orig_shape[1])
+        if kind == "2d_fallback":
+            return out.reshape(1, P)
+        return out
+
+    def predict(self, X, mask=None):
+        bcp, original_info = self._ensure_bcp(X)
+        out = self.layer(bcp)
+        out_np = out if isinstance(out, np.ndarray) else out.detach().cpu().numpy()
+
+        filtered = self._restore_shape(out_np, original_info)
+        if mask is not None:
+            filtered = np.where(mask, filtered, 0)
+        return filtered
+
+    def check_impulse_response(self, centre_index=None):
+        """Diagnostic: apply the filter to a Dirac and measure the effective sigma.
+
+        Returns a dict with the measured sigma (radians), the ratio to the
+        requested sigma, and the total mass of the response.
+        """
+        import healpix_geo.nested as hpg_n
+
+        n = len(self.cell_ids)
+        c = n // 2 if centre_index is None else int(centre_index)
+
+        x = np.zeros(n, dtype=np.float32)
+        x[c] = 1.0
+        resp = np.asarray(self.predict(x)).ravel()
+
+        lon, lat = hpg_n.healpix_to_lonlat(
+            np.asarray(self.cell_ids),
+            self.grid_info.level,
+            ellipsoid=self.layer.ellipsoid,
+        )
+
+        # drop float32 noise so it does not count as weight at large distances
+        resp_clean = np.clip(resp, 0.0, None)
+        resp_clean[resp_clean < 1e-6 * resp_clean.max()] = 0.0
+
+        s_measured = self._effective_sigma(resp_clean, lon, lat, c)
+        return {
+            "sigma_requested": self.sigma,
+            "sigma_measured": s_measured,
+            "ratio": s_measured / self.sigma,
+            "mass": float(resp.sum()),
+            "sigma_downup": self.sigma_downup_rad,
+            "n_levels": self.layer.n_levels,
+            "cap_used": self.max_compact_kernel_sz_used,
+        }
+
+
+# Fallback for FFTGaussian1DHealpix when `max_sigma` is unknown: the limit of the
+# former fixed cap (129 pixels, 3 sigma) at level 10, about 136 km per step.
+_DEFAULT_MAX_SIGMA_RAD = 64 / 3 * np.sqrt(np.pi / 3) / 2**10
+
+
+@dataclass
+class FFTGaussian1DHealpix(Predictor):
+    """Gaussian filter on a HEALPix patch, using a tangent-plane FFT convolution."""
+
+    cell_ids: _ArrayLike
+    grid_info: DGGSInfo
+
+    sigma: float  # standard deviation, in radians
+    truncate: float = 5.0  # kernel radius, in multiples of sigma
+    kernel_size: int | None = None
+    # Largest sigma the fish can reach in one step (radians), from the maximum
+    # speed; optimize_pdf passes it. With max_kernel_size=None, the kernel cap is
+    # truncate * max_sigma expressed in pixels of the current level, so no sigma
+    # within the optimiser's bounds is ever capped.
+    max_sigma: float | None = None
+    # An int sets the cap directly instead.
+    max_kernel_size: int | None = None
+    pixel_size_rad: float | None = None  # projected pixel size; None = nominal
+    ellipsoid: str | None = None
+    max_patch_radius_deg: float = 10.0
+    device: str = "cpu"
+    dtype: torch.dtype = torch.float64
+    # "conservative" (default: a normalised kernel keeps the sum over the
+    # cells) or "average"; passed to HealPixFFTConv.
+    projection: str = "conservative"
+
+    def __post_init__(self):
+        from healpix_analyse import HealPixFFTConv
+
+        if self.projection not in ("average", "conservative"):
+            raise ValueError(
+                f'Unknown projection "{self.projection}". '
+                'Expected "average" or "conservative".'
+            )
+
+        level = self.grid_info.level
+        nside = 2**level
+        np_dtype = np.float64 if self.dtype == torch.float64 else np.float32
+        if self.ellipsoid is None:
+            attrs = getattr(self.cell_ids, "attrs", {})
+            self.ellipsoid = attrs.get("ellipsoid", "sphere")
+
+        # Projected pixel size, passed explicitly to LocalFFT so that the
+        # radians -> pixels conversion is exact in the projected plane.
+        if self.pixel_size_rad is None:
+            self.pixel_size_rad = np.sqrt(np.pi / 3) / nside  # nominal pixel side
+
+        # sigma in projected pixels (no sqrt(pi) factor: pixel size is explicit)
+        sigma_px = self.sigma / self.pixel_size_rad
+        if sigma_px < 0.5:
+            warnings.warn(
+                f"sigma ({self.sigma:.2e} rad) is below half a pixel "
+                f"({0.5 * self.pixel_size_rad:.2e} rad): the filter is nearly a Dirac.",
+                RuntimeWarning,
+            )
+
+        # Truncation at `truncate` sigma. 3 sigma drops ~1% of the 2-D Gaussian,
+        # so the cost jumps each time the radius gains a pixel; 5 sigma makes
+        # those jumps negligible.
+        if self.kernel_size is not None:
+            kernel_size = int(self.kernel_size)
+            kernel_size += 1 - kernel_size % 2  # keep it odd
+        else:
+            radius = int(np.ceil(self.truncate * sigma_px))
+            kernel_size = 2 * radius + 1
+        if self.max_kernel_size is None:
+            max_sigma = self.max_sigma or _DEFAULT_MAX_SIGMA_RAD
+            max_radius = int(np.ceil(self.truncate * max_sigma / self.pixel_size_rad))
+            self.max_kernel_size = 2 * max_radius + 1
+        if kernel_size > self.max_kernel_size:
+            warnings.warn(
+                f"kernel_size truncated from {kernel_size} to {self.max_kernel_size} "
+                f"(sigma_px={sigma_px:.2f}): the effective sigma will be smaller "
+                f"than requested.",
+                RuntimeWarning,
+            )
+            kernel_size = self.max_kernel_size
+            kernel_size -= 1 - kernel_size % 2  # keep it odd
+        self.kernel_size = kernel_size
+
+        try:
+            self.layer = HealPixFFTConv(
+                level,
+                1,
+                1,
+                self.kernel_size,
+                cell_ids=self.cell_ids,
+                ellipsoid=self.ellipsoid,
+                max_patch_radius_deg=self.max_patch_radius_deg,
+                pixel_size_rad=self.pixel_size_rad,
+                device=self.device,
+                dtype=self.dtype,
+                projection=self.projection,
+            )
+        except ValueError as err:
+            match = re.search(r"patch radius is ([0-9.eE+-]+) degrees", str(err))
+            if match is None:
+                raise
+            raise ValueError(
+                f"FFTConv cannot handle this domain: its radius is "
+                f"{float(match.group(1)):.1f} degrees, above the limit of "
+                f"{self.max_patch_radius_deg:g} degrees (one tangent plane). "
+                "Either use a smaller bounding box, or use conv_method="
+                '"HealpixAnalyseLargeConv", which has no such limit but deviates '
+                "from the direct sum by up to about 10 % on the demo tag."
+            ) from err
+
+        # Gaussian kernel: exp(-r^2 / (2 sigma^2)), normalised to sum 1
+        x = np.arange(self.kernel_size) - self.kernel_size // 2
+        xx, yy = np.meshgrid(x, x)
+        W = np.exp(-(xx**2 + yy**2) / (2 * max(sigma_px, 1e-6) ** 2))
+        W = (W / W.sum()).astype(np_dtype).reshape(1, 1, self.kernel_size**2)
+
+        self.layer.set_kernel(W, bias=np.zeros(1, np_dtype), requires_grad=False)
+        self.sigma_px = sigma_px  # kept for diagnostics
+
+    def _ensure_bcp(self, arr):
+        n_cells = self.cell_ids.shape[0]
+        a = np.array(arr)
+        if a.ndim == 1:
+            return a.reshape(1, 1, -1), ("1d", a.shape)
+        if a.ndim == 2:
+            if a.shape[1] == n_cells:
+                return a.reshape(a.shape[0], 1, a.shape[1]), ("2d_bp", a.shape)
+            if a.shape[0] == n_cells:
+                return a.reshape(1, 1, a.shape[0]), ("2d_p?", a.shape)
+            return a.reshape(1, 1, -1), ("2d_fallback", a.shape)
+        if a.ndim == 3:
+            return a, ("3d", a.shape)
+        raise ValueError(f"Unsupported input ndim={a.ndim} for convolution")
+
+    def _restore_shape(self, out, original_info):
+        kind, orig_shape = original_info
+        B, C, P = out.shape
+        if kind == "1d":
+            return out.reshape(P)
+        if kind == "2d_bp":
+            return out.reshape(orig_shape[0], orig_shape[1])
+        if kind == "2d_fallback":
+            return out.reshape(1, P)
+        return out
+
+    # def predict(self, X, mask=None):
+    #     bcp, original_info = self._ensure_bcp(X)
+    #     with torch.no_grad():
+    #         out = self.layer(bcp.astype(np.float32))
+    #     out_np = out if isinstance(out, np.ndarray) else out.detach().cpu().numpy()
+
+    #     filtered = self._restore_shape(out_np, original_info)
+    #     if mask is not None:
+    #         filtered = np.where(mask, filtered, 0)
+    #     return filtered
+    def predict(self, X, mask=None):
+        bcp, original_info = self._ensure_bcp(X)
+        with torch.no_grad():
+            out = self.layer(bcp)  # pas de cast float32
+        out_np = out if isinstance(out, np.ndarray) else out.detach().cpu().numpy()
+        filtered = self._restore_shape(out_np, original_info)
+
+        filtered = np.maximum(filtered, 0.0)  # bruit négatif de la FFT
+        filtered[filtered < 1e-12 * filtered.max()] = 0.0  # bruit relatif, à ajuster
+        if mask is not None:
+            filtered = np.where(mask, filtered, 0)
+        return filtered
+
+
+@dataclass
+class LargeGaussianHealpixAnalyse(Predictor):
+    """Large-sigma Gaussian built with ``LargeConv.from_gaussian`` (healpix-analyse).
+
+    The width ``sigma`` (radians, one-axis RMS) is calibrated by
+    ``gaussian_plan``: it chooses the number of Down/Up levels and the compact
+    kernel so that the measured response has width ``sigma``.  The layer is
+    not mass conserving (total roughly 0.92 to 1.05) and pads with zeros at
+    the edge of the domain.  Below a minimum width between 2 and 3 cells (it
+    depends on the patch) there is no solution and a ValueError is raised; use
+    ``GaussianHealpixAnalyse`` for small sigma.
+    WGS84 only.
+    """
+
+    cell_ids: _ArrayLike
+    grid_info: DGGSInfo
+
+    sigma: float  # in radians
+    max_levels: int | None = None
+    patch_depth: int = 8
+    device: str = "cpu"
+    dtype: torch.dtype = torch.float32
+
+    def __post_init__(self):
+        from healpix_analyse import LargeConv
+
+        ellipsoid = getattr(self.grid_info, "ellipsoid", None)
+        name = getattr(ellipsoid, "name", ellipsoid)
+        if name is not None and str(name).upper() != "WGS84":
+            raise NotImplementedError(
+                "LargeGaussianHealpixAnalyse supports the WGS84 ellipsoid only; "
+                f"got {name!r}."
+            )
+        level = self.grid_info.level
+        try:
+            self.layer = LargeConv.from_gaussian(
+                level,
+                self.sigma,
+                cell_ids=np.asarray(self.cell_ids),
+                max_levels=self.max_levels,
+                patch_depth=self.patch_depth,
+                ellipsoid="WGS84",
+                device=self.device,
+                dtype=self.dtype,
+            )
+        except ValueError as err:
+            sigma_cells = self.sigma * 2**level / np.sqrt(np.pi / 3)
+            raise ValueError(
+                f"HealpixAnalyseLargeConv cannot build sigma={self.sigma:.3g} rad "
+                f"(about {sigma_cells:.2f} cells at level {level}): {err} "
+                'Use conv_method="HealpixAnalyseConv" for small sigma.'
+            ) from err
+
+    def predict(self, X, *, mask=None):
+        if hasattr(X, "compute"):
+            X = X.compute()
+        X = np.asarray(X)
+        with torch.no_grad():
+            out = self.layer(X.reshape(1, 1, -1))
+        out = out if isinstance(out, np.ndarray) else out.detach().cpu().numpy()
+        filtered = out.reshape(X.shape)
+        if np.issubdtype(X.dtype, np.floating):
+            filtered = filtered.astype(X.dtype, copy=False)
+        if mask is None:
+            return filtered
+        return np.where(mask, filtered, 0)
