@@ -9,8 +9,8 @@ Choose ``tide_method`` in **Study settings** at the top of the
 
 .. code-block:: python
 
-   tide_method = "legacy"   # Original method (default)
-   # tide_method = "healpix"  # Local harmonic prediction on the HMM grid
+    tide_method = "legacy"  # Original method (default)
+    # tide_method = "healpix"  # Local harmonic prediction on the HMM grid
 
 Both methods use the demo's TPXO9 model and the existing depth-based flags.
 The ``tide_model_source`` setting also accepts a local path to the same TMD3
