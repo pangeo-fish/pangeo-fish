@@ -475,21 +475,29 @@ def test_writer_roundtrip_with_merge(tmp_path, synthetic_astronomy):
 def test_merge_tide_matches_cell_ids_and_grid(tmp_path, level, ellipsoid, mismatch):
     from pangeo_fish.tide import merge_tide_with_total
 
-    times = pd.date_range("2024-01-01", periods=2)
+    times = pd.date_range("2024-01-01", periods=8)
     likelihood = xr.Dataset(
         {
-            "pdf": (("time", "cells"), [[0.1, 0.9], [0.8, 0.2]]),
+            "pdf": (("time", "cells"), np.tile([[0.1, 0.9], [0.8, 0.2]], (4, 1))),
             "ocean_mask": ("cells", [True, True]),
-            "tide_found": ("time", [1, 1]),
+            "tide_found": ("time", np.ones(len(times))),
         },
         coords={"time": times, "cell_ids": th.make_cell_ids([1, 2], 2, "WGS84")},
     )
-    th.write_tide_pdf_healpix(likelihood, tmp_path, behav_found=[0, 1])
+    th.write_tide_pdf_healpix(likelihood, tmp_path, behav_found=[0, 1] * 4)
     total = xr.Dataset(
-        {"pdf": (("time", "cells"), [[0.3, 0.7], [0.4, 0.6]])},
+        {
+            "pdf": (("time", "cells"), np.tile([[0.3, 0.7], [0.4, 0.6]], (4, 1))),
+            "pdf_bathy": (("time", "cells"), np.tile([[0.6, 0.4]], (8, 1))),
+        },
         coords={"time": times, "cell_ids": th.make_cell_ids([2, 1], level, ellipsoid)},
     )
-    total.to_zarr(tmp_path / "total_pdf.zarr", zarr_format=2, consolidated=True)
+    total.to_zarr(
+        tmp_path / "total_pdf.zarr",
+        zarr_format=2,
+        consolidated=True,
+        encoding={"pdf_bathy": {"chunks": (2, 2)}},
+    )
 
     if mismatch:
         with pytest.raises(ValueError, match=f"grid mismatch for {mismatch}"):
@@ -500,6 +508,9 @@ def test_merge_tide_matches_cell_ids_and_grid(tmp_path, level, ellipsoid, mismat
     np.testing.assert_array_equal(merged.cell_ids, total.cell_ids)
     np.testing.assert_array_equal(merged.pdf, total.pdf)
     np.testing.assert_array_equal(merged.pdf_tide, likelihood.pdf[:, ::-1])
+    merged.to_zarr(tmp_path / "merged.zarr", zarr_format=2, consolidated=True)
+    with xr.open_zarr(tmp_path / "merged.zarr") as written:
+        xr.testing.assert_identical(written.pdf_bathy, total.pdf_bathy)
 
 
 @pytest.mark.parametrize("use_xarray", [False, True])

@@ -685,7 +685,9 @@ def merge_tide_with_total(target_root, storage_options=None):
     behav_mask = merged["behav_found"].broadcast_like(merged["pdf_tide"])
     merged = merged.drop_vars(["tide_found", "ocean_mask", "behav_found"])
 
-    # Chunking for zarr and source tracking
+    # Rechunk for Zarr writes and discard the source stores' chunk encodings.
     merged = merged.chunk({"time": 3, "cells": -1})
+    for var in merged.variables.values():
+        var.encoding.pop("chunks", None)
     merged.attrs["sources"] = list(set(total.attrs.get("sources", [])) | {"pdf_tide"})
     return merged, tide_mask, behav_mask
