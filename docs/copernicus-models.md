@@ -70,7 +70,9 @@ model's vertical coordinate, and is chosen automatically from
 | Global (GLORYS12 and analysis/forecast) | fixed depths below mean sea level                                                    | `depth + XE`                              |
 
 Levels that would still lie above the surface are treated as being at the
-surface. The chosen coordinate is stored in `model.attrs["vertical_coordinate"]`.
+surface. This applies when the model is loaded with `copernicus_model_name`;
+models opened from an intake catalogue or a parquet file (`uri`) keep
+`depth + XE`. The chosen coordinate is stored in `model.attrs["vertical_coordinate"]`.
 Sources: IBI QUIDs (CMEMS-IBI-QUID-005-001 and 005-002) describe z\* levels,
 while the IBI PUM speaks of geopotential levels; NWS PUM 3.0 describes the
 surface layer and the interpolation to fixed depths. The global products'

@@ -550,7 +550,9 @@ def _set_dynamic_depth(model: xr.Dataset, vertical_coordinate: str) -> xr.Datase
         return model
     depth, XE, H0 = model["depth"], model["XE"], model["H0"]
     if vertical_coordinate == "zstar":
-        dynamic = depth * (H0 + XE) / H0
+        # stretch factor of the water column; 0 for dry cells, NaN on land
+        stretch = ((H0 + XE) / H0.where(H0 > 0)).clip(min=0)
+        dynamic = depth * stretch
     elif vertical_coordinate == "nws":
         dynamic = xr.where(depth == 0, 0.0, depth + XE).where(H0.notnull())
     else:

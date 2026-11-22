@@ -553,3 +553,15 @@ def test_set_dynamic_depth():
     xr.testing.assert_identical(
         helpers._set_dynamic_depth(model, "geopotential"), model
     )
+
+
+def test_set_dynamic_depth_zstar_without_water_column():
+    model = xr.Dataset(
+        {"XE": (("time", "lat"), [[-2.0, 0.0]]), "H0": (("lat",), [1.0, 0.0])},
+        coords={"time": [0], "depth": [0.0, 3.0], "lat": [0.0, 1.0]},
+    ).pipe(lambda ds: ds.assign(dynamic_depth=ds.depth + ds.XE))
+    dynamic = helpers._set_dynamic_depth(model, "zstar").dynamic_depth
+    # negative water column: every level at the surface; H0 = 0: undefined
+    np.testing.assert_array_equal(dynamic.sel(lat=0.0).squeeze(), [0.0, 0.0])
+    assert dynamic.sel(lat=1.0).isnull().all()
+    assert np.isfinite(dynamic.sel(lat=0.0)).all()
