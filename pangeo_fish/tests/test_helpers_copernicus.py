@@ -209,6 +209,7 @@ def test_tag_time_fallback(client, fields):
 
 @pytest.mark.parametrize("dataset", [IBI, GLOBAL])
 def test_load_model_and_compute_diff(client, fields, dataset):
+    mock, _ = client
     tag = xr.Dataset(
         {
             "temperature": ("time", [13.0, 13.0, 13.0]),
@@ -223,8 +224,9 @@ def test_load_model_and_compute_diff(client, fields, dataset):
         bbox=BBOX,
         chunk_time=1,
         remote_options={},
-        copernicus_model_name=dataset,
+        **({"copernicus_model_name": dataset} if dataset == IBI else {}),
     )
+    assert mock.call_args_list[0].kwargs["dataset_id"] == dataset
     assert set(model.data_vars) == {
         "TEMP",
         "XE",
@@ -410,13 +412,19 @@ def six_hourly_fields(fields):
     return hourly.isel(time=slice(None, None, 6)), hourly
 
 
-def test_six_hourly_temperature_samples_hourly_ssh(client, fields):
+@pytest.fixture
+def six_hourly_client(client, fields):
     mock, datasets = client
     six_hourly, hourly = six_hourly_fields(fields)
     datasets[GLO_6H] = six_hourly[["thetao"]]
     # as in the real product, ``zos`` carries a single surface depth level
     datasets[GLO_6H_SSH] = hourly[["zos"]].expand_dims(depth=[0.494025])
     datasets[GLO_STATIC] = fields[["deptho", "mask"]]
+    return mock, datasets, six_hourly
+
+
+def test_six_hourly_temperature_samples_hourly_ssh(six_hourly_client):
+    mock, _, six_hourly = six_hourly_client
 
     actual = helpers._open_copernicus_model(GLO_6H, BBOX, PERIOD)
 
@@ -438,13 +446,56 @@ def test_six_hourly_temperature_samples_hourly_ssh(client, fields):
     )
 
 
-def test_six_hourly_rejects_ssh_without_matching_times(client, fields):
-    _, datasets = client
-    six_hourly, hourly = six_hourly_fields(fields)
+def test_load_model_six_hourly_includes_the_entire_last_day(six_hourly_client):
+    _, _, six_hourly = six_hourly_client
+
+    model = helpers.load_model(
+        uri=None,
+        tag_log=None,
+        time_slice=PERIOD,
+        bbox=BBOX,
+        copernicus_model_name=GLO_6H,
+    )
+
+    xr.testing.assert_identical(model.time, six_hourly.time)
+
+
+def test_six_hourly_warns_and_clips_when_ssh_ends_early(six_hourly_client):
+    _, datasets, six_hourly = six_hourly_client
+    ssh = datasets[GLO_6H_SSH]
+    datasets[GLO_6H_SSH] = ssh.sel(time=slice(None, "2021-06-03T11:00"))
+
+    with pytest.warns(
+        UserWarning,
+        match="only overlap from 2021-06-01T00:00:00 to 2021-06-03T06:00:00",
+    ):
+        model = helpers._open_copernicus_model(GLO_6H, BBOX, PERIOD)
+
+    expected = six_hourly.sel(time=slice(None, "2021-06-03T06:00"))
+    xr.testing.assert_identical(model.time, expected.time)
+    np.testing.assert_allclose(model.XE.values, expected.zos.values)
+
+
+def test_six_hourly_rejects_ssh_without_matching_times(six_hourly_client):
+    _, datasets, _ = six_hourly_client
+    ssh = datasets[GLO_6H_SSH]
     # hourly means stamped at half past the hour never match 6-hourly times
-    shifted = hourly.assign_coords(time=hourly.time + np.timedelta64(30, "m"))
-    datasets[GLO_6H] = six_hourly[["thetao"]]
-    datasets[GLO_6H_SSH] = shifted[["zos"]]
-    datasets[GLO_STATIC] = fields[["deptho", "mask"]]
+    datasets[GLO_6H_SSH] = ssh.assign_coords(time=ssh.time + np.timedelta64(30, "m"))
     with pytest.raises(ValueError, match="do not include all temperature times"):
+        helpers._open_copernicus_model(GLO_6H, BBOX, PERIOD)
+
+
+def test_six_hourly_rejects_an_interior_ssh_gap(six_hourly_client):
+    _, datasets, _ = six_hourly_client
+    datasets[GLO_6H_SSH] = datasets[GLO_6H_SSH].drop_sel(
+        time=np.datetime64("2021-06-02T12:00")
+    )
+    with pytest.raises(ValueError, match="do not include all temperature times"):
+        helpers._open_copernicus_model(GLO_6H, BBOX, PERIOD)
+
+
+def test_six_hourly_rejects_non_overlapping_ssh(six_hourly_client):
+    _, datasets, _ = six_hourly_client
+    datasets[GLO_6H_SSH] = datasets[GLO_6H_SSH].isel(time=slice(0, 0))
+    with pytest.raises(ValueError, match="no overlapping temperature and SSH times"):
         helpers._open_copernicus_model(GLO_6H, BBOX, PERIOD)
