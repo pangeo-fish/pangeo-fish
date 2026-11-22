@@ -78,7 +78,8 @@ present on the repository's default branch; when merging only into `release`,
 the workflow must also be added to the default branch to activate that schedule.
 Scheduled runs check out `release`.
 
-On the local Mac, running the full suite reproduced a native `foscat`/PyTorch
-crash on both unchanged `release` and the migrated source after earlier tests;
+On the local Mac, running the full suite reproduced a native PyTorch crash
+(in `foscat`, since removed, and in `healpix_analyse`) on both unchanged
+`release` and the migrated source after earlier tests;
 the estimator tests pass when run separately. Linux container CI is the target
 environment verification; the Mac crash remains a separate limitation.

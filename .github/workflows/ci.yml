@@ -96,8 +96,9 @@ jobs:
       - name: Run tests
         run: |
           if [ '${{ runner.os }}' = macOS ]; then
-            # The unchanged release also crashed in native foscat/PyTorch after
-            # earlier test modules on macOS. Isolate native library state while
+            # Native PyTorch-based convolution code (foscat before it was
+            # removed, healpix_analyse) has crashed after earlier test modules
+            # on macOS. Isolate native library state while
             # retaining every test and accumulating coverage across processes.
             python -m coverage erase
             for test_file in pangeo_fish/tests/test_*.py; do

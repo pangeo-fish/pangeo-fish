@@ -1937,7 +1937,7 @@ def optimize_pdf(
     *,
     ds: xr.Dataset,
     adjustment_factor: float,
-    truncate: float | None,
+    truncate: float | None = None,
     maximum_speed: pint.Quantity,
     tolerance: float,
     earth_radius: pint.Quantity | None = None,
@@ -1960,8 +1960,9 @@ def optimize_pdf(
          Dataset of emission probabilities
      adjustment_factor : float
          Factor value for the maximum fish's displacement
-     truncate : float
-         Truncating factor for convolution process
+     truncate : float, optional
+         Truncating factor of the Gaussian kernel. Only used (and required) by
+         ``conv_method="HealpixConv"``.
      maximum_speed : pint.Quantity
          Maximum fish's velocity
      tolerance : float
