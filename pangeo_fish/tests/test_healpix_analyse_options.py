@@ -207,7 +207,11 @@ def test_helper_builds_options_and_json_round_trip(emission, tmp_path):
 @pytest.mark.filterwarnings("ignore:A .predictor_index. entry:RuntimeWarning")
 def test_json_round_trip_fft_projection_and_large(emission, tmp_path):
     for method, cls_name, kw in [
-        ("FFTConv", "FFTGaussian1DHealpix", {"projection": "conservative", "max_sigma": 0.1}),
+        (
+            "FFTConv",
+            "FFTGaussian1DHealpix",
+            {"projection": "conservative", "max_sigma": 0.1},
+        ),
         ("HealpixAnalyseLargeConv", "LargeGaussianHealpixAnalyse", {}),
     ]:
         factory = _get_predictor_factory(

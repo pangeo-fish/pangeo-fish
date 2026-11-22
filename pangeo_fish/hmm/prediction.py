@@ -704,7 +704,7 @@ class FFTGaussian1DHealpix(Predictor):
                 f"FFTConv cannot handle this domain: its radius is "
                 f"{float(match.group(1)):.1f} degrees, above the limit of "
                 f"{self.max_patch_radius_deg:g} degrees (one tangent plane). "
-                'Either use a smaller bounding box, or use conv_method='
+                "Either use a smaller bounding box, or use conv_method="
                 '"HealpixAnalyseLargeConv", which has no such limit but deviates '
                 "from the direct sum by up to about 10 % on the demo tag."
             ) from err

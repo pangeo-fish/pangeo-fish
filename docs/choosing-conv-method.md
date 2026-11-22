@@ -11,23 +11,23 @@ Think of sigma as the distance a fish moves in one time step, in km. The methods
 One cell is `sqrt(pi/3) / 2**level` radians wide (the convention used in the checks). With the Earth radius of 6371 km this gives:
 
 | HEALPix level | Cell size (km) |
-|---|---|
-| 8 | 25.5 |
-| 9 | 12.7 |
-| 10 | 6.37 |
-| 11 | 3.18 |
-| 12 | 1.59 |
+| ------------- | -------------- |
+| 8             | 25.5           |
+| 9             | 12.7           |
+| 10            | 6.37           |
+| 11            | 3.18           |
+| 12            | 1.59           |
 
 So at level 10, sigma = 4 cells is about 25 km per step.
 
 ## Quick choice
 
-| Your case | Use |
-|---|---|
-| Most runs (default) | `FFTConv`, `projection="conservative"` |
-| Fish that move little per step | `HealpixAnalyseConv` |
-| Islands, headlands, narrow channels | `HealpixAnalyseConv`, `land_barrier=True` |
-| Domain larger than 10 degrees radius | `HealpixAnalyseLargeConv` |
+| Your case                            | Use                                       |
+| ------------------------------------ | ----------------------------------------- |
+| Most runs (default)                  | `FFTConv`, `projection="conservative"`    |
+| Fish that move little per step       | `HealpixAnalyseConv`                      |
+| Islands, headlands, narrow channels  | `HealpixAnalyseConv`, `land_barrier=True` |
+| Domain larger than 10 degrees radius | `HealpixAnalyseLargeConv`                 |
 
 ## 1. Supported by measurements
 
@@ -47,14 +47,14 @@ Limit: the domain must fit in a radius of 10 degrees (one tangent plane). A larg
 
 `HealpixAnalyseConv` computes the direct sum. It is exact, but its cost grows fast with sigma. Measured (default `normalization`, no barrier):
 
-| Sigma (cells) | km (level 10) | Time (s) | Memory |
-|---|---|---|---|
-| 1 | 6.4 | 3.29 | not measured |
-| 2 | 13 | 10.97 | not measured |
-| 3 | 19 | 20.87 | not measured |
-| 4 | 25 | 34.71 | not measured |
-| 6 | 38 | 82.2 | 13.2 GB |
-| 8 | 51 | 141.8 | 18.9 GB |
+| Sigma (cells) | km (level 10) | Time (s) | Memory       |
+| ------------- | ------------- | -------- | ------------ |
+| 1             | 6.4           | 3.29     | not measured |
+| 2             | 13            | 10.97    | not measured |
+| 3             | 19            | 20.87    | not measured |
+| 4             | 25            | 34.71    | not measured |
+| 6             | 38            | 82.2     | 13.2 GB      |
+| 8             | 51            | 141.8    | 18.9 GB      |
 
 The times for 1 to 4 cells were taken while other jobs were running, so read them as rough values.
 
@@ -76,12 +76,12 @@ The optimiser looks for the sigma with the lowest cost. This works only if the c
 
 `FFTConv` (conservative) and the direct sum change smoothly and stay together:
 
-| Sigma (cells) | 1 | 2 | 3 | 4 | 6 | 8 | 12 | 16 | 24 | 32 |
-|---|---|---|---|---|---|---|---|---|---|---|
-| `FFTConv` | 26.89 | 28.55 | 30.19 | 31.90 | 35.25 | 32.56 | 28.06 | 24.96 | 22.77 | 22.99 |
+| Sigma (cells)                     | 1     | 2     | 3     | 4     | 6     | 8     | 12      | 16      | 24      | 32      |
+| --------------------------------- | ----- | ----- | ----- | ----- | ----- | ----- | ------- | ------- | ------- | ------- |
+| `FFTConv`                         | 26.89 | 28.55 | 30.19 | 31.90 | 35.25 | 32.56 | 28.06   | 24.96   | 22.77   | 22.99   |
 | `HealpixAnalyseConv` (direct sum) | 26.87 | 28.33 | 30.03 | 31.78 | 35.21 | 32.82 | not run | not run | not run | not run |
-| `HealpixAnalyseLargeConv` | error | error | 32.12 | 33.05 | 35.72 | 36.20 | 29.94 | 25.21 | 21.52 | 20.50 |
-| `LargeHealpixConv` | 74.57 | 36.34 | 32.09 | 33.01 | 35.92 | 35.04 | 29.00 | 24.53 | 21.11 | 21.17 |
+| `HealpixAnalyseLargeConv`         | error | error | 32.12 | 33.05 | 35.72 | 36.20 | 29.94   | 25.21   | 21.52   | 20.50   |
+| `LargeHealpixConv`                | 74.57 | 36.34 | 32.09 | 33.01 | 35.92 | 35.04 | 29.00   | 24.53   | 21.11   | 21.17   |
 
 Prefer `FFTConv` when the optimiser must find sigma.
 

@@ -55,14 +55,18 @@ def test_predict_applies_the_mask(cells):
     x = np.random.default_rng(0).random(cells.size)
     mask = np.arange(cells.size) % 2 == 0
     filtered = predictor.predict(x)
-    np.testing.assert_array_equal(predictor.predict(x, mask=mask), np.where(mask, filtered, 0))
+    np.testing.assert_array_equal(
+        predictor.predict(x, mask=mask), np.where(mask, filtered, 0)
+    )
 
 
 def test_predict_accepts_dask_arrays(cells):
     da = pytest.importorskip("dask.array")
     predictor = _predictor(cells, 1.0)
     x = np.random.default_rng(1).random(cells.size)
-    np.testing.assert_allclose(predictor.predict(da.from_array(x)), predictor.predict(x))
+    np.testing.assert_allclose(
+        predictor.predict(da.from_array(x)), predictor.predict(x)
+    )
 
 
 def test_non_wgs84_ellipsoid_is_rejected(cells):
