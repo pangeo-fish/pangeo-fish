@@ -2215,6 +2215,15 @@ def _build_estimator(emission, target_root, storage_options, ellipsoid=None):
     """
     predictor_index = "predictor_index"
 
+    with fsspec.open(
+        f"{target_root}/parameters.json", mode="r", **(storage_options or {})
+    ) as f:
+        params = json.load(f)
+    # before any conversion, so that an old run fails with this message
+    factory_class = (params.get("predictor_factory") or {}).get("class") or ""
+    if "Foscat1DHealpix" in str(factory_class):
+        raise ValueError(_FOSCAT_REMOVED)
+
     if "cells" in emission.dims:
         emission = to_healpix(emission)
         if ellipsoid is None:
@@ -2222,13 +2231,6 @@ def _build_estimator(emission, target_root, storage_options, ellipsoid=None):
             ellipsoid = getattr(info, "ellipsoid", None) or emission[
                 "cell_ids"
             ].attrs.get("ellipsoid")
-
-    with fsspec.open(
-        f"{target_root}/parameters.json", mode="r", **(storage_options or {})
-    ) as f:
-        params = json.load(f)
-    if "Foscat1DHealpix" in params.get("predictor_factory", {}).get("class", ""):
-        raise ValueError(_FOSCAT_REMOVED)
 
     # one sigma value: every time step uses the same predictor
     if len(params["sigma"]) == 1:

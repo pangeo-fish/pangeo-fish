@@ -1,3 +1,4 @@
+import warnings
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -101,9 +102,6 @@ class Gaussian1DHealpix(Predictor):
             return filtered
 
         return np.where(mask, filtered, 0)
-
-
-import warnings
 
 
 @dataclass

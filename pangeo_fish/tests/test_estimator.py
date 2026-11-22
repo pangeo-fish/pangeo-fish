@@ -163,4 +163,4 @@ def test_foscat_is_removed(tmp_path, sample_dataset, where):
                 "predictor_factory": {"class": "Foscat1DHealpix", "kwargs": {}},
             }
             (tmp_path / "parameters.json").write_text(json.dumps(params))
-            helpers._build_estimator(xr.Dataset(), str(tmp_path), None)
+            helpers._build_estimator(sample_dataset, str(tmp_path), None)
