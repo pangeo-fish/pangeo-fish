@@ -149,11 +149,11 @@ def tag_with_phases(*, rest_days, final):
     return xr.concat([active, tail], dim="time")
 
 
-def tag_kept_indoors(*, rest_days, temperature):
+def tag_kept_indoors(*, rest_days, temperature, reading=1.8):
     """Active fish, ``rest_days`` days on the seabed, then 5 days indoors.
 
-    Indoors, the pressure is back at the pre-release reading (1.8 m) and the
-    temperature is constant (``None``: a pressure-only tag).
+    Indoors, the pressure reads ``reading`` (the pre-release reading is 1.8 m)
+    and the temperature is constant (``None``: a pressure-only tag).
     """
     rng = np.random.default_rng(1)
     ds = tag_with_phases(rest_days=rest_days, final="water")
@@ -167,7 +167,7 @@ def tag_kept_indoors(*, rest_days, temperature):
     n = len(time)
     indoors = xr.Dataset(
         {
-            "pressure": ("time", quantize(1.8 + rng.normal(0, 0.02, n))),
+            "pressure": ("time", quantize(reading + rng.normal(0, 0.02, n))),
             "temperature": ("time", np.full(n, temperature or np.nan)),
         },
         coords={"time": time.to_numpy()},
@@ -176,6 +176,59 @@ def tag_kept_indoors(*, rest_days, temperature):
     if temperature is None:
         ds = ds.drop_vars("temperature")
     return ds
+
+
+def tag_with_tail(*phases):
+    """Active fish until STRANDED, then ``phases``: (days, pressure, temperature).
+
+    ``pressure`` is a constant level, or "swim" for an active fish;
+    ``temperature`` is a constant, or "diurnal" for a tag in the air.
+    """
+    rng = np.random.default_rng(3)
+    ds = synthetic_tag(end="none")
+    ds = ds.sel(time=ds["time"] < np.datetime64(STRANDED))
+    begin = STRANDED
+    parts = [ds]
+    for days, pressure, temperature in phases:
+        time = pd.date_range(begin, begin + pd.Timedelta(days, "D"), freq="1min")
+        time = time[time < begin + pd.Timedelta(days, "D")]
+        n = len(time)
+        hours = ((time - begin) / pd.Timedelta(1, "h")).to_numpy()
+        if pressure == "swim":
+            p = 10 + 4 * np.sin(2 * np.pi * hours / 0.7) + rng.normal(0, 1.5, n)
+        else:
+            p = pressure + rng.normal(0, 0.02, n)
+        if temperature == "diurnal":
+            t = 19.5 + 4.5 * np.sin(2 * np.pi * (hours - 6) / 24)
+        else:
+            t = temperature + rng.normal(0, 0.05, n)
+        parts.append(
+            xr.Dataset(
+                {"pressure": ("time", quantize(p)), "temperature": ("time", t)},
+                coords={"time": time.to_numpy()},
+            )
+        )
+        begin = begin + pd.Timedelta(days, "D")
+    return xr.concat(parts, dim="time")
+
+
+def tag_handled_before_the_release():
+    """40 min of handling at switch-on, 14 h in the air, then the usual record."""
+    rng = np.random.default_rng(4)
+    ds = synthetic_tag(end="none")
+    time = pd.date_range("2023-05-02 17:20", "2023-05-03 07:59", freq="1min")
+    n = len(time)
+    pressure = 1.8 + rng.normal(0, 0.02, n)
+    handling = time < pd.Timestamp("2023-05-02 18:00")
+    pressure[handling] = 1.8 + 2 * rng.random(handling.sum())
+    early = xr.Dataset(
+        {
+            "pressure": ("time", quantize(pressure)),
+            "temperature": ("time", 12 + rng.normal(0, 0.3, n)),
+        },
+        coords={"time": time.to_numpy()},
+    )
+    return xr.concat([early, ds], dim="time")
 
 
 class TestDetectEndOfTrack:
@@ -289,6 +342,7 @@ class TestDetectEndOfTrack:
         assert abs(actual["end"] - exit_time) <= pd.Timedelta(1, "h")
         assert actual["likely_cause"] == "pressure_at_air_level"
         assert actual["parameters"]["air_level"] == pytest.approx(1.8, abs=0.1)
+        assert "in-air reading" in actual["warning"]
         if rest_days:
             first, _ = actual["inactive_period"]
             assert abs(first - STRANDED) <= pd.Timedelta(1, "h")
@@ -303,6 +357,62 @@ class TestDetectEndOfTrack:
         actual = track_bounds.detect_end_of_track(ds, air_level=1.8)
         assert abs(actual["end"] - STRANDED) <= pd.Timedelta(1, "h")
         assert actual["likely_cause"] == "pressure_at_air_level"
+
+    def test_air_level_tolerance(self):
+        ds = tag_kept_indoors(rest_days=0, temperature=4.0, reading=2.4)
+
+        assert track_bounds.detect_end_of_track(ds, start=RELEASE)["end"] is None
+
+        actual = track_bounds.detect_end_of_track(
+            ds, start=RELEASE, air_level_tolerance=1.0
+        )
+        assert abs(actual["end"] - STRANDED) <= pd.Timedelta(1, "h")
+
+    @pytest.mark.parametrize(
+        "start",
+        [
+            pytest.param(None, id="first-record"),
+            pytest.param(pd.Timestamp("2023-05-02"), id="before-first-record"),
+        ],
+    )
+    def test_pre_release_air_period_is_not_an_end(self, start):
+        ds = tag_handled_before_the_release()
+        if start is None:
+            start = ds["time"].values[0]
+        actual = track_bounds.detect_end_of_track(ds, start=start)
+
+        assert actual["end"] is None
+
+    def test_floating_then_stranded_ends_at_the_stranding(self):
+        # shed tag floating at the surface for 2 days, then on a beach
+        ds = tag_with_tail((2, 1.8, 16.0), (3, 1.8, "diurnal"))
+        actual = track_bounds.detect_end_of_track(ds, start=RELEASE)
+
+        stranding = STRANDED + pd.Timedelta(2, "D")
+        assert abs(actual["end"] - stranding) <= pd.Timedelta(1, "h")
+        assert actual["likely_cause"] == "out_of_water"
+        floating = actual["evidence"]["pressure_at_air_level_from"]
+        assert abs(floating - STRANDED) <= pd.Timedelta(1, "h")
+        assert "may have left the water then" in actual["warning"]
+
+    def test_shallow_rest_then_activity_is_not_an_end(self):
+        # 14 h at 0.3 m deeper than the in-air reading, then swimming again
+        ds = tag_with_tail((14 / 24, 2.1, 16.0), (2, "swim", 16.0))
+        actual = track_bounds.detect_end_of_track(ds, start=RELEASE)
+
+        assert actual["end"] is None
+        assert abs(actual["inactive_period"][0] - STRANDED) <= pd.Timedelta(1, "h")
+
+    def test_shallow_until_the_last_record_is_flagged(self):
+        # dead fish at 0.4 m without tide until the last record: it looks like a
+        # tag in the air, so the end comes with a warning
+        ds = tag_with_tail((3, 2.2, 16.0))
+        actual = track_bounds.detect_end_of_track(ds, start=RELEASE)
+
+        assert actual["likely_cause"] == "pressure_at_air_level"
+        assert "floating at the surface or lying in very shallow water" in (
+            actual["warning"]
+        )
 
     def test_rest_then_activity_is_not_an_end(self):
         ds = synthetic_tag(end="none")

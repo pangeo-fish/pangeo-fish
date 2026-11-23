@@ -144,6 +144,30 @@ class TestDescribeTag:
         assert description["ranges"]["track"]["temperature"]["min"] > 10
         assert "fish_death_minus_suggested_end_days" in description["comparison"]
 
+    def test_end_uses_the_pre_release_level(self, monkeypatch):
+        import pangeo_fish.describe as describe_module
+
+        received = {}
+        detect_end = describe_module.detect_end_of_track
+
+        def spy(records, **kwargs):
+            received.update(kwargs)
+            return detect_end(records, **kwargs)
+
+        monkeypatch.setattr(describe_module, "detect_end_of_track", spy)
+        description = describe_tag(synthetic_tag(end="fridge"), tide=False)
+
+        level = description["suggested_start"]["pre_release_level"]
+        assert received["air_level"] == level == pytest.approx(1.8, abs=0.1)
+
+    def test_end_kwargs_override_the_air_level(self):
+        description = describe_tag(
+            synthetic_tag(end="fridge"), tide=False, end_kwargs={"air_level": 10.0}
+        )
+
+        assert description["suggested_end"]["parameters"]["air_level"] == 10.0
+        assert description["suggested_end"]["end"] is None
+
     def test_pressure_offset_uses_the_pre_release_period(self):
         tag = synthetic_tag()
         description = describe_tag(tag, tide=False)
