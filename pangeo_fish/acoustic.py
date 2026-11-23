@@ -59,7 +59,9 @@ def count_detections(detections, by):
     if "bounds" in getattr(by, "dims", []):
         # cf_xarray lists the same bounds variable under every key of its
         # coordinate (e.g. "time" and, with ``standard_name="time"``, "T").
-        bounds_vars = sorted({name for names in by.cf.bounds.values() for name in names})
+        bounds_vars = sorted(
+            {name for names in by.cf.bounds.values() for name in names}
+        )
         if len(bounds_vars) != 1:
             raise ValueError("cannot find a valid bounds variable")
 
