@@ -3,19 +3,19 @@
 For every HEALPix cell, :py:func:`compute_healpix_histogram_region_bin_size`
 summarises the GEBCO water depths that fall in the cell (land points excluded,
 each depth spread by its uncertainty) as the probability that the seabed is at
-least ``d`` metres deep, for depths ``d`` on a regular grid (``depth_bins``).
+least ``d`` metres deep, for depths ``d`` at the bin edges (``depth_bins``).
 For every time step, :py:func:`batch_compute_pdf_bathy` takes the deepest depth
 of the fish below the model sea surface, ``max(P) - XE``, and reads that
 probability at this depth (linear between grid depths).
 """
 
+import math
 import warnings
 
 import healpix_geo.nested as hpg_n
 import numpy as np
 import xarray as xr
 from numba import njit, prange
-from scipy.special import ndtr
 from tqdm import tqdm
 
 #: Number of depth bins kept above the sea surface.
@@ -26,6 +26,25 @@ _HISTOGRAM_VERSION = 2
 _DEFAULT_STDEV_M = 1.0
 #: A pressure above this value (dbar) is deeper than any ocean: likely in Pa.
 _MAX_PRESSURE_DBAR = 12000.0
+
+
+@njit
+def _accumulate_depth_histogram(hist, rows, depths, stdev, edges):
+    """Add each water point's normal probability mass to the depth bins."""
+    for cell, depth, sigma in zip(rows, depths, stdev):
+        # Beyond eight standard deviations the remaining tail mass is below
+        # 1e-15. Limit the work per point to its own uncertainty and the grid.
+        first = np.searchsorted(edges, depth - 8 * sigma, side="right") - 1
+        last = np.searchsorted(edges, depth + 8 * sigma, side="right") - 1
+        first = max(0, first)
+        last = max(0, last)
+        remaining = 1.0
+        for k in range(first, last):
+            z = (edges[k + 1] - depth) / (math.sqrt(2.0) * sigma)
+            survival = 0.5 * math.erfc(z)
+            hist[cell, k] += remaining - survival
+            remaining = survival
+        hist[cell, last] += remaining
 
 
 def compute_healpix_histogram_region_bin_size(
@@ -51,8 +70,8 @@ def compute_healpix_histogram_region_bin_size(
     nb_depth_bins : int or None
         Number of depth bins of ``depth_bin_size`` metres below the surface.
     max_depth_m : float or None
-        Used when ``nb_depth_bins`` is None: ``ceil(max_depth_m / depth_bin_size)``
-        bins. Seabeds deeper than this are counted as "deeper than max_depth_m".
+        Used when ``nb_depth_bins`` is None. The last bin edge is exactly
+        ``max_depth_m`` and holds the probability of all deeper seabeds.
     chunk_size : int
         Number of latitude rows read at once.
     depth_offset : float
@@ -60,13 +79,14 @@ def compute_healpix_histogram_region_bin_size(
         at least ``depth_offset`` above the GEBCO seabed. A negative value lets
         it go that much below (e.g. for a biased bathymetry).
     depth_bin_size : float
-        Bin width in metres.
+        Bin width in metres. The final interval can be shorter when using
+        ``max_depth_m``.
     ellipsoid : str or dict
         Ellipsoid of the HEALPix grid (the one of ``diff-regridded.zarr``).
     default_stdev_m : float, default 1
-        Vertical uncertainty (m) of the GEBCO depths where ``ds`` has no
-        ``stdev``. A larger value tolerates more errors, e.g. the tide that the
-        daily mean sea surface height ``XE`` leaves out.
+        Vertical uncertainty (m) of the GEBCO depths where ``stdev`` is missing
+        or non-finite. A larger value tolerates more errors, e.g. the tide that
+        the daily mean sea surface height ``XE`` leaves out.
 
     Returns
     -------
@@ -74,26 +94,27 @@ def compute_healpix_histogram_region_bin_size(
         ``bathy_pixel_hist`` on (cells, depth_bins): the probability that the
         seabed, minus ``depth_offset``, is at least ``depth_bins`` metres deep (1 at
         the shallowest depth, decreasing with depth). ``depth_bins`` go from ten
-        bins above the surface to ``nb_depth_bins * depth_bin_size``. Cells
-        whose GEBCO points are all land are not included.
+        bins above the surface to ``max_depth_m`` or
+        ``nb_depth_bins * depth_bin_size``. Cells whose GEBCO points are all
+        land are not included.
     """
+    bin_size = float(depth_bin_size)
+    if not np.isfinite(bin_size) or bin_size <= 0:
+        raise ValueError("depth_bin_size must be finite and > 0")
     if nb_depth_bins is None:
         if max_depth_m is None:
             raise ValueError("Either nb_depth_bins or max_depth_m must be provided.")
-        nb_depth_bins = int(np.ceil(float(max_depth_m) / float(depth_bin_size)))
+        depth_limit = float(max_depth_m)
+        if not np.isfinite(depth_limit) or depth_limit <= 0:
+            raise ValueError("max_depth_m must be finite and > 0")
+        nb_depth_bins = int(np.ceil(depth_limit / bin_size))
+        edges = np.arange(-_ABOVE_BINS, nb_depth_bins) * bin_size
+        edges = np.append(edges[edges < depth_limit], depth_limit)
     else:
         nb_depth_bins = int(nb_depth_bins)
-    if nb_depth_bins <= 0:
-        raise ValueError("nb_depth_bins must be > 0")
-    bin_size = float(depth_bin_size)
-    if not bin_size > 0:
-        raise ValueError("depth_bin_size must be > 0")
-
-    # Bin j holds depths in [edge_j, edge_j+1); the last bin also holds every
-    # deeper seabed. edge_j = (j - _ABOVE_BINS) * bin_size.
-    n_edges = nb_depth_bins + _ABOVE_BINS + 1
-    edges = (np.arange(n_edges) - _ABOVE_BINS) * bin_size
-    n_bins = n_edges  # the last bin is the overflow bin
+        if nb_depth_bins <= 0:
+            raise ValueError("nb_depth_bins must be > 0")
+        edges = np.arange(-_ABOVE_BINS, nb_depth_bins + 1) * bin_size
 
     lats = ds.latitude.values
     lons = ds.longitude.values
@@ -117,7 +138,7 @@ def compute_healpix_histogram_region_bin_size(
         used_cells.update(np.unique(hidx))
 
     used_cells = np.array(sorted(used_cells), dtype=np.int64)
-    hist = np.zeros((used_cells.size, n_bins), dtype=np.float64)
+    hist = np.zeros((used_cells.size, edges.size), dtype=np.float64)
 
     # --- PASS 2: histogram of the water depths, each spread as N(depth, stdev) ---
     for i in tqdm(range(0, nlat, chunk_size), desc="Pass 2 – compute histogram"):
@@ -128,7 +149,7 @@ def compute_healpix_histogram_region_bin_size(
             continue
         if "stdev" in ds:
             stdev = ds.stdev[i:j, :].load().values.flatten()[valid]
-            stdev = np.nan_to_num(stdev, nan=default_stdev_m)
+            stdev = np.where(np.isfinite(stdev), stdev, default_stdev_m)
         else:
             stdev = np.full(int(valid.sum()), float(default_stdev_m))
         stdev = np.maximum(stdev, 1e-3)
@@ -140,29 +161,11 @@ def compute_healpix_histogram_region_bin_size(
 
         # depth the fish can reach: the seabed minus the clearance depth_offset
         reachable = -elev[valid] - depth_offset
-        center = np.floor((reachable - edges[0]) / bin_size).astype(np.int64)
-        # mass of N(reachable, stdev) in each bin, from the normal CDF at the bin
-        # edges; the tails beyond +-4 stdev (or the whole grid) go to the
-        # outermost bins of the window
-        radius = int(min(np.ceil(4 * stdev.max() / bin_size), n_bins))
-        for offset in range(-radius, radius + 1):
-            low = edges[0] + (center + offset) * bin_size
-            cdf_low = ndtr((low - reachable) / stdev) if offset > -radius else 0.0
-            cdf_high = (
-                ndtr((low + bin_size - reachable) / stdev) if offset < radius else 1.0
-            )
-            np.add.at(
-                hist,
-                (row, np.clip(center + offset, 0, n_bins - 1)),
-                cdf_high - cdf_low,
-            )
+        _accumulate_depth_histogram(hist, row, reachable, stdev, edges)
 
-    total = hist.sum(axis=1, keepdims=True)
-    hist = np.divide(hist, total, out=np.full_like(hist, np.nan), where=total > 0)
-    # P(seabed >= edge_k) = 1 - P(seabed in a bin below edge_k)
-    exceedance = 1.0 - np.concatenate(
-        [np.zeros((hist.shape[0], 1)), np.cumsum(hist, axis=1)[:, :-1]], axis=1
-    )
+    # Add the deeper bins directly to preserve small but nonzero probabilities.
+    exceedance = np.cumsum(hist[:, ::-1], axis=1)[:, ::-1]
+    exceedance /= exceedance[:, :1]
     exceedance = np.clip(exceedance, 0.0, 1.0)
 
     var_cell_ids = xr.DataArray(
@@ -219,9 +222,7 @@ def compute_pdf_bathy_numba_like_numpy(hist, pressure, XE, depth_bins):
     is not modified.
     """
     T, C, n_obs = pressure.shape
-    K = hist.shape[1]
-    first = depth_bins[0]
-    step = depth_bins[1] - depth_bins[0]
+    last = depth_bins.size - 1
     out = np.empty((T, C), dtype=np.float64)
 
     for t in prange(T):
@@ -239,15 +240,15 @@ def compute_pdf_bathy_numba_like_numpy(hist, pressure, XE, depth_bins):
                 out[t, c] = 1.0
                 continue
 
-            position = (deepest - XE[t, c] - first) / step
-            if position <= 0.0:
+            depth = deepest - XE[t, c]
+            if depth <= depth_bins[0]:
                 value = hist[c, 0]
-            elif position >= K - 1:
+            elif depth >= depth_bins[last]:
                 # deeper than the last depth: the seabed share beyond it
-                value = hist[c, K - 1]
+                value = hist[c, last]
             else:
-                k = int(np.floor(position))
-                frac = position - k
+                k = np.searchsorted(depth_bins, depth, side="right") - 1
+                frac = (depth - depth_bins[k]) / (depth_bins[k + 1] - depth_bins[k])
                 value = hist[c, k] * (1.0 - frac) + hist[c, k + 1] * frac
             # never exactly impossible (keeps one bad depth from emptying a map)
             out[t, c] = max(value, 1e-14)
@@ -257,10 +258,12 @@ def compute_pdf_bathy_numba_like_numpy(hist, pressure, XE, depth_bins):
 
 def _check_depth_bins(depth_bins):
     depth_bins = np.asarray(depth_bins, dtype=np.float64)
-    if depth_bins.size < 2 or not np.allclose(
-        np.diff(depth_bins), depth_bins[1] - depth_bins[0]
+    if (
+        depth_bins.size < 2
+        or not np.isfinite(depth_bins).all()
+        or not (np.diff(depth_bins) > 0).all()
     ):
-        raise ValueError("depth_bins must be regularly spaced")
+        raise ValueError("depth_bins must be finite and strictly increasing")
     return depth_bins
 
 
@@ -290,9 +293,7 @@ def compute_pdf_bathy_batch_numba(ds_chunk, reshaped_tag, copernicus_chunk):
 
     # only the deepest record of each time step matters: reduce before
     # broadcasting to the cells (a year of 90 s records would not fit otherwise)
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", RuntimeWarning)  # all-NaN time steps
-        deepest = np.nanmax(pressure, axis=-1)
+    deepest = np.nanmax(pressure, axis=-1, initial=-np.inf)
     if deepest.ndim == 1:
         deepest = np.broadcast_to(deepest[:, None], XE.shape)
     elif deepest.shape != XE.shape:

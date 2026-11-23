@@ -1,5 +1,8 @@
 """The bathymetry pdf is written as a regular HEALPix store."""
 
+import json
+from pathlib import Path
+
 import healpix_geo.nested as hgn
 import numpy as np
 import pandas as pd
@@ -195,6 +198,19 @@ def test_beyond_the_last_depth():
     assert _likelihood(deep, 350.0) > 0.99
 
 
+def test_max_depth_is_the_exact_cutoff_for_a_partial_bin():
+    from scipy.stats import norm
+
+    hist = compute_healpix_histogram_region_bin_size(
+        _flat_seabed(1004.0), nside=2**8, max_depth_m=1000, depth_bin_size=16
+    )
+    np.testing.assert_array_equal(hist.depth_bins.values[-2:], [992, 1000])
+    expected = norm.sf(1000, loc=1004, scale=1)
+    assert _likelihood(hist, 1000) == pytest.approx(expected, abs=1e-12)
+    assert _likelihood(hist, 1004) == pytest.approx(expected, abs=1e-12)
+    assert _likelihood(hist, 996) == pytest.approx((1 + expected) / 2, abs=1e-12)
+
+
 def test_histogram_is_not_modified():
     from pangeo_fish.bathy import compute_pdf_bathy_numba_like_numpy
 
@@ -327,6 +343,15 @@ def test_time_step_without_record_carries_no_information(tmp_path):
     assert pdf.pdf_bathy.isel(cells=0).isnull().all()
 
 
+def test_empty_observation_axis_carries_no_information(tmp_path):
+    hist, reference, tag = _pdf_inputs(tmp_path)
+    reference["XE"][:, 0] = np.nan
+    write_healpix_zarr(reference, tmp_path / "diff-regridded.zarr")
+    pdf = batch_compute_pdf_bathy(hist, tag.isel(obs=slice(0, 0)), str(tmp_path))
+    np.testing.assert_array_equal(pdf.pdf_bathy.isel(cells=slice(1, None)), 1.0)
+    assert pdf.pdf_bathy.isel(cells=0).isnull().all()
+
+
 def test_old_histograms_are_refused(tmp_path):
     hist, reference, tag = _pdf_inputs(tmp_path)
     write_healpix_zarr(reference, str(tmp_path / "diff-regridded.zarr"))
@@ -366,18 +391,19 @@ def test_land_cells_without_gebco_are_not_reported(tmp_path):
     assert pdf.pdf_bathy.isel(cells=0).isnull().all()
 
 
-def test_wide_stdev_is_not_cut():
+@pytest.mark.parametrize(
+    "seabed, stdev, cutoff, depths",
+    [(300.0, 100.0, 800.0, [249, 351, 450]), (550.0, 350.0, 200.0, [50, 150, 200])],
+)
+def test_wide_stdev_is_not_cut(seabed, stdev, cutoff, depths):
     from scipy.stats import norm
 
     hist = compute_healpix_histogram_region_bin_size(
-        _flat_seabed(300.0, stdev=100.0),
-        nside=2**8,
-        max_depth_m=800,
-        depth_bin_size=1,
+        _flat_seabed(seabed, stdev=stdev), nside=2**8, max_depth_m=cutoff
     )
-    for depth in [249.0, 351.0, 450.0]:
+    for depth in depths:
         assert _likelihood(hist, depth) == pytest.approx(
-            norm.sf(depth, loc=300.0, scale=100.0), abs=0.01
+            norm.sf(depth, loc=seabed, scale=stdev), abs=1e-12
         )
 
 
@@ -398,10 +424,13 @@ def test_default_stdev_is_a_parameter():
 
 
 def test_histogram_without_cells_is_refused(tmp_path):
-    hist, reference, tag = _pdf_inputs(tmp_path)
+    _, reference, tag = _pdf_inputs(tmp_path)
     write_healpix_zarr(reference, str(tmp_path / "diff-regridded.zarr"))
+    hist = compute_healpix_histogram_region_bin_size(
+        _flat_seabed(-1.0), nside=2**LEVEL, max_depth_m=200, ellipsoid="WGS84"
+    )
     with pytest.raises(ValueError, match="no GEBCO water point"):
-        batch_compute_pdf_bathy(hist.isel(cells=slice(0, 0)), tag, str(tmp_path))
+        batch_compute_pdf_bathy(hist, tag, str(tmp_path))
 
 
 def test_pressure_on_other_cells_is_refused():
@@ -421,3 +450,54 @@ def test_pressure_on_other_cells_is_refused():
     )
     with pytest.raises(ValueError, match="cells of this batch"):
         compute_pdf_bathy_batch_numba(chunk, tag, model)
+
+
+@pytest.mark.parametrize("after_tide", [False, True])
+def test_complete_demo_replaces_saved_bathymetry_likelihood(tmp_path, after_tide):
+    notebook = (
+        Path(__file__).resolve().parents[2]
+        / "notebooks"
+        / "pangeo-fish-complete-demo.ipynb"
+    )
+    cells = json.loads(notebook.read_text(encoding="utf-8"))["cells"]
+    source = next(
+        "".join(cell["source"])
+        for cell in cells
+        if "merged_pdf.to_zarr" in "".join(cell["source"])
+        and '"bathymetry"' in "".join(cell["source"])
+    )
+    old = xr.Dataset(
+        {
+            "pdf": (("time", "cells"), [[0.3, 0.4, 0.3], [0.2, 0.4, 0.4]]),
+            "pdf_bathy": (("time", "cells"), np.full((2, 3), 1 / 3)),
+        },
+        coords={
+            "cell_ids": ("cells", [10, 11, 12]),
+            "time": pd.date_range("2024-01-01", periods=2),
+        },
+        attrs={"sources": ["temperature", "bathymetry"]},
+    )
+    new_bathy = old[["pdf_bathy"]].assign(
+        pdf_bathy=(("time", "cells"), [[0.5, 0.3, 0.2], [0.8, 0.15, 0.05]])
+    )
+    if after_tide:
+        old = old.isel(time=[1], cells=[2, 0])
+        old["pdf_tide"] = (("time", "cells"), [[0.1, 0.9]])
+        old.attrs["sources"].append("pdf_tide")
+        expected = old.assign(pdf_bathy=(("time", "cells"), [[0.05, 0.8]]))
+    else:
+        expected = old.assign(pdf_bathy=new_bathy.pdf_bathy)
+    store = tmp_path / "total_pdf.zarr"
+    write_healpix_zarr(old, store)
+    with xr.open_zarr(store) as current:
+        exec(
+            source,
+            {
+                "current_total": current,
+                "bathy_pdf": new_bathy.set_xindex("cell_ids"),
+                "target_root": str(tmp_path),
+                "storage_options": None,
+            },
+        )
+    with xr.open_zarr(store) as saved:
+        xr.testing.assert_identical(saved.load(), expected)
