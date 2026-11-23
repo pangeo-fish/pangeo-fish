@@ -65,7 +65,15 @@ The conda environment above already contains the CPU-only build (`pytorch-cpu` f
 If you want to run on a GPU, install the CUDA build instead:
 `pip install torch` (the default build on Linux; see the [PyTorch selector](https://pytorch.org/get-started/locally/) for the build that matches your CUDA version), or, with conda, replace `pytorch-cpu` by `pytorch-gpu` in `docs/environment.yaml`.
 
-Note that the helper functions (`optimize_pdf`, `compute_states`) and the demo notebooks currently run on the CPU even when a GPU is available: only the predictor classes of `pangeo_fish.hmm.prediction` (`UpDownGaussian1DHealpix`, `FFTGaussian1DHealpix`) accept `device="cuda"`.
+From a GPU allocation, check that PyTorch can see a CUDA device:
+
+```bash
+python -c "import torch; print(torch.version.cuda, torch.cuda.is_available(), torch.cuda.device_count())"
+```
+
+The second value should be `True`. In the workflow, pass `device="cuda"` to both `optimize_pdf` and `compute_states` and select a CUDA-capable convolution method in `optimize_pdf`. The default method, `FFTConv`, supports CUDA. See [Choosing a convolution method](choosing-conv-method.md#running-on-a-gpu-device) for the full list. The demo notebooks use the CPU by default, and `decode_trajectories` runs on the CPU.
+
+Total runtime includes predictor setup, CPU work and transfers between host and GPU memory. Compare CPU and GPU times for your dataset if runtime is a concern.
 
 ## For HPC use
 

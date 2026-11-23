@@ -108,7 +108,7 @@ Fish that enter rivers narrower than one cell need a mixed-level operator (`mult
 
 ## Running on a GPU (`device`)
 
-`optimize_pdf`, `compute_states` and `decode_trajectories` take a `device` argument. The default is `device="cpu"`. Pass `device="cuda"` to run the convolution on a GPU. This needs the CUDA build of PyTorch (see [Installation](installation.md)).
+`optimize_pdf` and `compute_states` accept `device="cpu"` (the default), `device="cuda"`, or an indexed device such as `device="cuda:0"`. You can also pass a corresponding `torch.device` object. A CUDA device runs the convolution on a GPU and requires the CUDA build of PyTorch. See [Installation](installation.md#pytorch-cpu-or-gpu).
 
 | `conv_method`             | Runs on a GPU               |
 | ------------------------- | --------------------------- |
@@ -118,10 +118,11 @@ Fish that enter rivers narrower than one cell need a mixed-level operator (`mult
 | `HealpixAnalyseConv`      | no: CPU only (numpy, scipy) |
 | `HealpixConv`             | no: CPU only (numpy)        |
 
-- A CPU-only method with another device raises a `ValueError`.
+- A CPU-only method with a CUDA device raises a `ValueError`.
 - `device="cuda"` without a CUDA device raises a `RuntimeError` before the data are loaded.
-- The results come back as numpy arrays on the CPU.
-- `compute_states` and `decode_trajectories` do not read the device from `parameters.json`. Pass it again.
+- The convolution returns NumPy arrays on the CPU.
+- Pass `device` to each call. The device stored in `parameters.json` records the optimization run.
+- `decode_trajectories` runs on the CPU. It uses the computed states for mean and modal tracks and runs Viterbi directly on the emission.
 
 The GPU tests run only when PyTorch sees a CUDA device. The CI has no GPU, so they are skipped there.
 

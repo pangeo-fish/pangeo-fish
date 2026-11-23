@@ -123,19 +123,25 @@ def test_cpu_only_methods_refuse_another_device(emission, conv_method):
         )
 
 
+@pytest.mark.parametrize("device", ["meta", torch.device("mps")])
+def test_other_torch_device_types_are_refused_before_loading(monkeypatch, emission, device):
+    def unexpected_compute(*args, **kwargs):
+        pytest.fail("the emission was loaded before device validation")
+
+    monkeypatch.setattr(xr.Dataset, "compute", unexpected_compute)
+    monkeypatch.setattr(helpers, "_load_emission", unexpected_compute)
+    with pytest.raises(ValueError, match="Unsupported device"):
+        _optimize(emission, "FFTConv", device)
+    with pytest.raises(ValueError, match="Unsupported device"):
+        helpers.compute_states(chunks={}, save=False, device=device)
+
+
 @pytest.mark.skipif(torch.cuda.is_available(), reason="PyTorch sees a CUDA device")
-def test_cuda_without_a_cuda_device_is_a_clear_error(emission, tmp_path):
+def test_cuda_without_a_cuda_device_is_a_clear_error(emission):
     with pytest.raises(RuntimeError, match="sees no CUDA device"):
         _optimize(emission, "FFTConv", "cuda")
-    for func in (helpers.compute_states, helpers.decode_trajectories):
-        with pytest.raises(RuntimeError, match="sees no CUDA device"):
-            func(
-                ds=emission,
-                target_root=str(tmp_path),
-                chunks={},
-                save=False,
-                device="cuda",
-            )
+    with pytest.raises(RuntimeError, match="sees no CUDA device"):
+        helpers.compute_states(chunks={}, save=False, device="cuda")
 
 
 @requires_cuda
@@ -152,12 +158,11 @@ def test_optimize_pdf_passes_the_device(monkeypatch, emission):
     assert seen["device"] is device
 
 
-@pytest.mark.parametrize("name", ["compute_states", "decode_trajectories"])
-def test_states_and_decoding_pass_the_device(monkeypatch, emission, name):
+def test_compute_states_passes_the_device(monkeypatch, emission):
     device = torch.device("cpu")
     seen = _stop_at(monkeypatch, "_build_estimator")
     with pytest.raises(_Stop):
-        getattr(helpers, name)(
+        helpers.compute_states(
             ds=emission, target_root="unused", chunks={}, save=False, device=device
         )
     assert seen["device"] is device

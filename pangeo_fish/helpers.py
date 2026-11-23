@@ -1986,13 +1986,8 @@ def _blocked_cells(ds: xr.Dataset):
 _CPU_ONLY_CONV_METHODS = ("HealpixConv", "HealpixAnalyseConv")
 
 
-def _check_device(device, conv_method: str | None = None) -> None:
-    """Refuse a ``device`` that cannot run ``conv_method``, with an actionable message.
-
-    ``device`` is anything ``torch.device`` accepts ("cpu", "cuda", "cuda:1",
-    a ``torch.device``...). With ``conv_method=None`` only the device itself is
-    checked (used before the method is read from ``parameters.json``).
-    """
+def _check_device(device: str | torch.device, conv_method: str | None = None) -> None:
+    """Validate the CPU or CUDA device before building the predictor."""
     try:
         resolved = torch.device(device)
     except (RuntimeError, TypeError) as err:
@@ -2001,6 +1996,10 @@ def _check_device(device, conv_method: str | None = None) -> None:
         ) from err
     if resolved.type == "cpu":
         return
+    if resolved.type != "cuda":
+        raise ValueError(
+            f'Unsupported device {device!r}. Use "cpu" or "cuda" (or "cuda:<index>").'
+        )
     if conv_method in _CPU_ONLY_CONV_METHODS:
         raise ValueError(
             f'conv_method="{conv_method}" runs on the CPU only (numpy/scipy), so '
@@ -2008,19 +2007,18 @@ def _check_device(device, conv_method: str | None = None) -> None:
             'PyTorch methods: "FFTConv", "LargeHealpixConv" or '
             '"HealpixAnalyseLargeConv".'
         )
-    if resolved.type == "cuda":
-        if not torch.cuda.is_available():
-            raise RuntimeError(
-                f"device={device!r} was requested, but PyTorch sees no CUDA device "
-                f"(torch {torch.__version__}, built for CUDA: {torch.version.cuda}). "
-                "Install the CUDA build of PyTorch (see the installation guide), "
-                'or use device="cpu".'
-            )
-        if resolved.index is not None and resolved.index >= torch.cuda.device_count():
-            raise RuntimeError(
-                f"device={device!r} was requested, but PyTorch sees only "
-                f"{torch.cuda.device_count()} CUDA device(s)."
-            )
+    if not torch.cuda.is_available():
+        raise RuntimeError(
+            f"device={device!r} was requested, but PyTorch sees no CUDA device "
+            f"(torch {torch.__version__}, built for CUDA: {torch.version.cuda}). "
+            "Check the CUDA build of PyTorch and the GPUs visible to this process "
+            '(see the installation guide), or use device="cpu".'
+        )
+    if resolved.index is not None and resolved.index >= torch.cuda.device_count():
+        raise RuntimeError(
+            f"device={device!r} was requested, but PyTorch sees only "
+            f"{torch.cuda.device_count()} CUDA device(s)."
+        )
 
 
 def _get_predictor_factory(
@@ -2028,7 +2026,7 @@ def _get_predictor_factory(
     truncate: float | None,
     dims: list[str],
     conv_method: str,
-    device: str = "cpu",
+    device: str | torch.device = "cpu",
     ellipsoid=None,
     max_sigma: float | None = None,
     normalization: str = "full_disc",
@@ -2310,7 +2308,7 @@ def optimize_pdf(
     normalization: str = "full_disc",
     land_barrier: bool = False,
     projection: str = "conservative",
-    device: str = "cpu",
+    device: str | torch.device = "cpu",
     **kwargs,
 ) -> dict:
     """Optimize a temporal probability distribution.
@@ -2571,7 +2569,11 @@ def _compute_predictor_indices(indices: list[list[int]]):
 
 
 def _build_estimator(
-    emission, target_root, storage_options, ellipsoid=None, device="cpu"
+    emission,
+    target_root,
+    storage_options,
+    ellipsoid=None,
+    device: str | torch.device = "cpu",
 ):
     """Build the ``EagerEstimator`` from ``parameters.json`` and the emission.
 
@@ -2772,7 +2774,7 @@ def compute_states(
     chunks,
     ellipsoid=None,
     save=True,
-    device="cpu",
+    device: str | torch.device = "cpu",
     **kwargs,
 ):
     """Compute the positional temporal probabilities (states) of the fish.
@@ -2864,7 +2866,6 @@ def decode_trajectories(
     ellipsoid=None,
     additional_track_quantities=["speed", "distance"],
     save=True,
-    device="cpu",
     **kwargs,
 ):
     """Decode the trajectories from the states of the fish.
@@ -2899,9 +2900,6 @@ def decode_trajectories(
         Additional quantities to compute from the decoded tracks.
     save : bool, default: True
         Whether to save the trajectories under ``trajectories.parq``.
-    device : str or torch.device, default: "cpu"
-        Device that runs the convolution of the estimator, e.g. ``"cuda"``;
-        see `compute_states`.
 
     Returns
     -------
@@ -2922,10 +2920,9 @@ def decode_trajectories(
 
     from pangeo_fish import tracks
 
-    _check_device(device)  # before loading the emission
     emission = _load_emission(ds, target_root, storage_options, chunks)
     estimator, emission, _ = _build_estimator(
-        emission, target_root, storage_options, ellipsoid, device=device
+        emission, target_root, storage_options, ellipsoid
     )
     needs_states = not set(track_modes) <= {"viterbi", "viterbi_healpix"}
     print(needs_states)
