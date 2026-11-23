@@ -62,7 +62,10 @@ pip install torch --index-url https://download.pytorch.org/whl/cpu
 
 The conda environment above already contains the CPU-only build (`pytorch-cpu` from conda-forge).
 
-If you want to run on a GPU, install the CUDA build instead (`pip install torch`, or `pytorch-gpu` from conda-forge) and pass `device="cuda"` to the functions that accept a `device` argument.
+If you want to run on a GPU, install the CUDA build instead:
+`pip install torch` (the default build on Linux; see the [PyTorch selector](https://pytorch.org/get-started/locally/) for the build that matches your CUDA version), or, with conda, replace `pytorch-cpu` by `pytorch-gpu` in `docs/environment.yaml`.
+
+Note that the helper functions (`optimize_pdf`, `compute_states`) and the demo notebooks currently run on the CPU even when a GPU is available: only the predictor classes of `pangeo_fish.hmm.prediction` (`UpDownGaussian1DHealpix`, `FFTGaussian1DHealpix`) accept `device="cuda"`.
 
 ## For HPC use
 
