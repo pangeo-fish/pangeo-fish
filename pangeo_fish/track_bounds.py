@@ -64,7 +64,7 @@ def _to_frame(tag_log):
         raise ValueError("the tag records need a 'pressure' variable")
     variables = [name for name in ("pressure", "temperature") if name in ds]
     df = ds[variables].to_dataframe()
-    df = df[df.index.notna()].sort_index()
+    df = df[df.index.notna()].sort_index(kind="stable")
     # duplicated times: keep the first record
     df = df[~df.index.duplicated()]
     return df, ds.attrs
@@ -78,9 +78,12 @@ def _pressure_activity(pressure, window):
     few cm) for a tag in the air, stranded or lying on the seabed (the tide is
     removed by the running median), and of the order of 1 m for a swimming fish.
     """
-    median = pressure.rolling(window, center=True, min_periods=1).median()
+    # closed on both sides: an odd number of regularly sampled records, so that
+    # the running median of a steady trend (tide) is the record in the middle
+    rolling = dict(center=True, min_periods=1, closed="both")
+    median = pressure.rolling(window, **rolling).median()
     deviation = (pressure - median).abs()
-    return deviation.rolling(window, center=True, min_periods=1).mean()
+    return deviation.rolling(window, **rolling).mean()
 
 
 def _warn_if_undetectable(df, activity, *, window, activity_threshold, stacklevel=3):
@@ -88,7 +91,8 @@ def _warn_if_undetectable(df, activity, *, window, activity_threshold, stackleve
 
     Detection itself is not changed.
     """
-    interval = df.index.to_series().diff().median()
+    steps = df.index.to_series().diff().dropna()
+    interval = steps.median() if len(steps) else pd.NaT
     if pd.notna(interval) and interval > _timedelta(window) / 3:
         warnings.warn(
             f"track_bounds: the median sampling interval ({interval}) is longer"
@@ -248,7 +252,11 @@ def _runs(mask, max_gap):
 def _timestamp(value):
     if value is None:
         return None
-    return pd.Timestamp(np.asarray(value).ravel()[0])
+    value = np.asarray(value).ravel()[0]
+    if isinstance(value, str):
+        # numpy.str_, refused by pd.Timestamp with pandas < 3
+        value = str(value)
+    return pd.Timestamp(value)
 
 
 def _daily_range(series):
@@ -420,9 +428,11 @@ def _air_cycle_onset(temperature, window, threshold, margin=0.5):
     (°C). The onset is the first record, up to the end of that bin, whose
     temperature leaves by more than ``margin`` (°C) the range of the day before
     it (or of the records since the first one), not counting the last
-    ``window``, and whose next day has a range of at least ``threshold``: a slow
-    change of the water temperature (tide, trend) is not an onset. Without such
-    a record, the onset is the beginning of the bin.
+    ``window``, whose next day has a range of at least ``threshold``, and after
+    which the temperature keeps changing (by more than ``margin`` between one and
+    three ``window`` later). A slow change of the water temperature (tide, trend)
+    or a step to a steady one (front, another water mass) is not an onset.
+    Without such a record, the onset is the beginning of the bin.
     """
     temperature = temperature.dropna()
     if temperature.empty:
@@ -456,8 +466,13 @@ def _air_cycle_onset(temperature, window, threshold, margin=0.5):
     departed &= temperature.index < cycle + day
     for time in temperature.index[departed]:
         following = temperature[time : time + day]
-        if following.max() - following.min() >= threshold:
-            return time
+        if following.max() - following.min() < threshold:
+            continue
+        # after a step of the water temperature, the temperature is steady again
+        soon = following[time + window : time + 3 * window]
+        if len(soon) and soon.max() - soon.min() <= margin:
+            continue
+        return time
     return cycle
 
 
@@ -631,9 +646,8 @@ def detect_end_of_track(
         outside the sensor or water temperature range. Shorter ones are ignored.
     min_active_duration : str, default: "2h"
         Minimum duration of the first active period after ``start``. The periods
-        before it are not examined; if the tag is never active that long, all
-        the periods after ``start`` are, but none is reported as
-        ``inactive_period`` and the in-air pressure reading is not reported.
+        before it are not examined; if the tag is never active that long, there
+        is no end (the tag may not have been in the water after ``start``).
     max_gap : str, default: "30min"
         Periods separated by less than this (e.g. a short handling of the tag)
         are merged.
@@ -661,11 +675,10 @@ def detect_end_of_track(
         ``end``: suggested last record before the tag leaves the water (never
         before ``start``), or ``None`` if nothing shows that the tag leaves the
         water (the whole record after ``start`` can be used, but read the
-        ``warning``);
+        ``warning`` and the ``reason``);
         ``inactive_period``: (first, last) record of the first period without
         vertical movement *in the water*, or ``None``. It does **not** end the
-        track: the fish is probably dead or resting, or the tag was shed. If the
-        tag then leaves the water, ``last`` is the suggested ``end``;
+        track: the fish is probably dead or resting, or the tag was shed;
         ``likely_cause``: ``None`` if no end, else:
 
         - ``"out_of_sensor_range"``: the records are outside the sensor range
@@ -698,14 +711,17 @@ def detect_end_of_track(
     Notes
     -----
     Known limits: the onset of a diurnal cycle is the first record that leaves
-    the temperature range of the previous day by 0.5 °C, so it is found to
-    about an hour or a few hours (later at night, when the temperature in the
-    air changes slowly). One found within three ``window`` of the beginning of
-    the period is moved to the beginning: a tag floating less than about three
-    hours before it strands ends when it starts floating. In water whose
-    temperature changes by more than 0.5 °C within hours (tide, fronts), the
-    onset can be found early when the tag strands less than a day after the
-    beginning of the period. A tag that leaves the water without a
+    the temperature range of the previous day by 0.5 °C and keeps changing, so
+    it is found to about an hour or a few hours, later when the temperature in
+    the air changes slowly (at night, or near the daily maximum of a weak cycle:
+    up to about half a day). One found within three ``window`` of
+    the beginning of the period is moved to the beginning: a tag floating less
+    than about three hours before it strands ends when it starts floating. In
+    water whose temperature changes by more than 0.5 °C within hours (tide,
+    fronts), the onset can be found early when the tag strands less than a day
+    after the beginning of the period. The diurnal cycle must last about two
+    days: a tag picked up from the beach (or the deck) sooner gets no end from
+    it. A tag that leaves the water without a
     temperature signal (a pressure-only tag, or a tag kept indoors) gets no
     ``end``: only a pressure back at ``air_level`` is reported, and not even
     that if the pressure reading drifts in the sun or the in-air reading changed
@@ -784,12 +800,19 @@ def detect_end_of_track(
     # the periods before the fish is in the water (tag in the air or on the deck
     # before the release) are not examined
     in_water = _sustained_activity_start(flags, start, max_gap, min_active_duration)
+    if in_water is None:
+        result["reason"] = (
+            f"no sustained vertical activity (at least {min_active_duration})"
+            f" after {start}: the tag may not have been in the water, or"
+            " `start` is too late"
+        )
+        return result
     candidates = [
         (first, last)
         for first, last in _long_runs(
             flags["suspect"], max_gap, min_duration, last_record
         )
-        if first > start and (in_water is None or first >= in_water)
+        if first >= in_water
     ]
 
     # the first period without movement in the water, and the exit from the water
@@ -805,13 +828,14 @@ def detect_end_of_track(
             parameters=parameters,
         )
         if hard is None:
-            if inactive_period is None and in_water is not None:
+            if inactive_period is None:
                 inactive_period = (first, last)
             continue
         onset, cause = hard
         end = onset - pd.Timedelta(1, "ns")
         if onset - first <= window_:
-            level = float(pressure[onset : onset + window_].median())
+            at_onset = pressure[onset : onset + window_].dropna()
+            level = float(at_onset.median()) if len(at_onset) else np.nan
             search = pressure[
                 (pressure.index >= onset - window_) & (pressure.index < onset)
             ]
@@ -822,30 +846,23 @@ def detect_end_of_track(
                 moved = search[(search - level).abs() > level_change_threshold]
             if not moved.empty:
                 end = moved.index[-1]
-        # the last record before the onset, but never before ``start``
-        after_start = pressure.index[pressure.index >= start]
-        before = after_start[after_start <= end]
-        end = before[-1] if len(before) else after_start[0]
-        if (
-            inactive_period is None
-            and in_water is not None
-            and end - first >= _timedelta(min_duration)
-        ):
+        # the last record before the onset, not before the fish is in the water
+        before = pressure.index[(pressure.index <= end) & (pressure.index >= in_water)]
+        end = before[-1] if len(before) else in_water
+        if inactive_period is None and end - first >= _timedelta(min_duration):
             inactive_period = (first, end)
         exit_ = (first, last, onset, cause, end)
         break
 
-    air_from = None
-    if in_water is not None:
-        air_from = _air_level_from(
-            flags,
-            pressure,
-            after=in_water,
-            end=exit_[4] if exit_ is not None else None,
-            last_record=last_record,
-            min_active_duration=min_active_duration,
-            parameters=parameters,
-        )
+    air_from = _air_level_from(
+        flags,
+        pressure,
+        after=in_water,
+        end=exit_[4] if exit_ is not None else None,
+        last_record=last_record,
+        min_active_duration=min_active_duration,
+        parameters=parameters,
+    )
 
     air_reading = f"{parameters['air_level']:.2f} ± {air_level_tolerance:g} m"
     if exit_ is None:
@@ -854,12 +871,6 @@ def detect_end_of_track(
             f"the tag stays in the water until the last record: no period out of"
             f" the water after {start}"
         )
-        if in_water is None:
-            result["reason"] = (
-                f"no sustained vertical activity (at least {min_active_duration})"
-                f" after {start}: the tag may not have been in the water, or"
-                " `start` is too late"
-            )
         if inactive_period is not None:
             first, last = inactive_period
             result["reason"] += (

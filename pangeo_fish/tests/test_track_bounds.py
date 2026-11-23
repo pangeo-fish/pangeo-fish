@@ -184,8 +184,9 @@ def tag_with_tail(*phases):
     """Active fish until STRANDED, then ``phases``: (days, pressure, temperature).
 
     ``pressure`` is a constant level (NaN: no pressure), or "swim" for an active
-    fish; ``temperature`` is a constant, "diurnal" for a tag in the air, or "tide"
-    for water whose temperature changes with the tide.
+    fish; ``temperature`` is a constant, "diurnal" for a tag in the air, "tide"
+    for water whose temperature changes with the tide, or (from, to) for a
+    linear change.
     """
     rng = np.random.default_rng(3)
     ds = synthetic_tag(end="none")
@@ -205,6 +206,8 @@ def tag_with_tail(*phases):
             t = 19.5 + 4.5 * np.sin(2 * np.pi * (hours - 6) / 24)
         elif temperature == "tide":
             t = 16 + 0.8 * np.sin(2 * np.pi * hours / 12.42)
+        elif isinstance(temperature, tuple):
+            t = np.linspace(*temperature, n)
         else:
             t = temperature + rng.normal(0, 0.05, n)
         parts.append(
@@ -423,40 +426,47 @@ class TestDetectEndOfTrack:
         assert actual["likely_cause"] == "out_of_water"
         assert actual["inactive_period"] is None
 
-    @pytest.mark.parametrize("diurnal", [True, False], ids=["deck", "desk"])
-    def test_never_in_the_water(self, diurnal):
-        # the tag stays on the deck (diurnal cycle) or on a desk: with a diurnal
-        # cycle the end is the first record, not earlier than it; the in-air
-        # pressure reading is not reported, the fish was never in the water
+    @pytest.mark.parametrize("handling", [False, True], ids=["deck", "handled"])
+    @pytest.mark.parametrize(
+        "start", [None, "first-record", "2023-04-30"], ids=["none", "first", "before"]
+    )
+    def test_never_in_the_water(self, start, handling):
+        # the tag stays on the deck (diurnal cycle), maybe handled at switch-on:
+        # no end, whatever the start, and nothing in the water is reported
         rng = np.random.default_rng(6)
         time = pd.date_range("2023-05-01 08:00", "2023-05-04 08:00", freq="1min")
         hours = ((time - time[0]) / pd.Timedelta(1, "h")).to_numpy()
-        temperature = 19.5 + 4.5 * np.sin(2 * np.pi * (hours - 6) / 24)
+        pressure = 1.8 + rng.normal(0, 0.02, len(time))
+        if handling:
+            pressure[:40] = 1.8 + 2 * rng.random(40)
         ds = xr.Dataset(
             {
-                "pressure": ("time", quantize(1.8 + rng.normal(0, 0.02, len(time)))),
-                "temperature": ("time", temperature if diurnal else 20 + 0 * hours),
+                "pressure": ("time", quantize(pressure)),
+                "temperature": (
+                    "time",
+                    19.5 + 4.5 * np.sin(2 * np.pi * (hours - 6) / 24),
+                ),
             },
             coords={"time": time.to_numpy()},
         )
-        start = pd.Timestamp("2023-04-30")
+        if start == "first-record":
+            start = time[0]
         actual = track_bounds.detect_end_of_track(ds, start=start, air_level=1.8)
 
-        assert actual["end"] == (time[0] if diurnal else None)
-        assert actual["likely_cause"] == ("out_of_water" if diurnal else None)
-        assert actual["evidence"]["pressure_at_air_level_from"] is None
+        assert actual["end"] is None
+        assert actual["likely_cause"] is None
         assert actual["inactive_period"] is None
-        if not diurnal:
-            assert "may not have been in the water" in actual["reason"]
+        assert actual["evidence"] == {"pressure_at_air_level_from": None}
+        assert "may not have been in the water" in actual["reason"]
 
-    def test_end_is_never_before_the_start(self):
-        # active in a tank until the given start, then on the deck and never in
-        # the water: the active records before the start are not the end
-        ds = tag_with_tail((3, 1.8, "diurnal"))
-        actual = track_bounds.detect_end_of_track(ds, start=STRANDED)
+    def test_start_as_a_string(self):
+        ds = synthetic_tag(end="stranded")
+        actual = track_bounds.detect_end_of_track(ds, start="2023-05-03 11:07")
 
-        assert actual["end"] >= STRANDED
-        assert actual["likely_cause"] == "out_of_water"
+        assert actual["parameters"]["start"] == RELEASE
+        assert (
+            actual["end"] == track_bounds.detect_end_of_track(ds, start=RELEASE)["end"]
+        )
 
     def test_stranded_at_the_in_air_reading_is_not_reported(self):
         # on a beach at the in-air reading from the stranding: no earlier sign
@@ -512,6 +522,63 @@ class TestDetectEndOfTrack:
         stranding = STRANDED + pd.Timedelta(2.5, "D")
         assert abs(actual["end"] - stranding) <= pd.Timedelta(1, "h")
 
+    @pytest.mark.parametrize("hours", [4, 14])
+    @pytest.mark.parametrize("step", [0.7, -0.7])
+    def test_water_temperature_step_before_the_stranding(self, hours, step):
+        # floating for 5 days, the water temperature changes by a step (front,
+        # coastal water) some hours before the stranding: the end is not early
+        floating = 5 - hours / 24
+        ds = tag_with_tail(
+            (floating, 1.8, 16.0), (hours / 24, 1.8, 16.0 + step), (3, 1.8, "diurnal")
+        )
+        actual = track_bounds.detect_end_of_track(ds, start=RELEASE)
+
+        stranding = STRANDED + pd.Timedelta(5, "D")
+        assert stranding - pd.Timedelta(5, "min") <= actual["end"]
+        assert actual["end"] <= stranding + pd.Timedelta(6, "h")
+
+    def test_slow_change_of_the_water_temperature_is_not_the_exit(self):
+        # while the tag floats, the water warms by 3 °C in 3 hours, two days
+        # before the stranding
+        ds = tag_with_tail(
+            (2, 1.8, 16.0),
+            (3 / 24, 1.8, (16.0, 19.0)),
+            (2, 1.8, 19.0),
+            (3, 1.8, "diurnal"),
+        )
+        actual = track_bounds.detect_end_of_track(ds, start=RELEASE)
+
+        stranding = STRANDED + pd.Timedelta(4, "D") + pd.Timedelta(3, "h")
+        assert stranding - pd.Timedelta(5, "min") <= actual["end"]
+        assert actual["end"] <= stranding + pd.Timedelta(6, "h")
+
+    def test_one_warm_day_in_shallow_water_is_not_an_end(self):
+        # dead fish in 2.5 m of water, one day with a 9 °C swing: no lasting
+        # diurnal cycle, the tag stays in the water
+        ds = tag_with_tail((1, 2.5, 16.0), (1, 2.5, "diurnal"), (2, 2.5, 16.0))
+        actual = track_bounds.detect_end_of_track(ds, start=RELEASE)
+
+        assert actual["end"] is None
+
+    def test_picked_up_from_the_beach_then_kept_indoors(self):
+        # half a day on a beach is too short for the diurnal cycle: no end, but
+        # the in-air reading from the stranding is reported
+        ds = tag_with_tail((2, 25.0, 16.0), (0.5, 1.8, "diurnal"), (20, 1.8, 4.0))
+        actual = track_bounds.detect_end_of_track(ds, start=RELEASE)
+
+        stranding = STRANDED + pd.Timedelta(2, "D")
+        assert actual["end"] is None
+        reported = actual["evidence"]["pressure_at_air_level_from"]
+        assert abs(reported - stranding) <= pd.Timedelta(1, "h")
+
+    def test_tidal_seabed_with_coarse_sampling(self):
+        # dead fish on the seabed with the tide, 10-min records: no activity
+        ds = synthetic_tag(end="seabed").isel(time=slice(None, None, 10))
+        actual = track_bounds.detect_end_of_track(ds, start=RELEASE)
+
+        assert actual["end"] is None
+        assert abs(actual["inactive_period"][0] - STRANDED) <= pd.Timedelta(2, "h")
+
     def test_hot_deck_after_the_capture(self):
         # fish caught and the tag left on a hot deck: the in-air reading starts
         # after the end, it is not an earlier sign of the exit
@@ -560,6 +627,24 @@ class TestDetectEndOfTrack:
         assert track_bounds.detect_start_of_track(duplicated)["start"] == (
             track_bounds.detect_start_of_track(ds)["start"]
         )
+
+    def test_duplicated_times_keep_the_first_record(self):
+        ds = synthetic_tag(end="none").isel(time=slice(0, 3000))
+        copy = ds.isel(time=slice(0, 1500)).copy(deep=True)
+        copy["pressure"].values[:] = -1.0
+        # unsorted times, each record before its copy
+        rng = np.random.default_rng(0)
+        shuffled = xr.concat(
+            [
+                ds.isel(time=rng.permutation(3000)),
+                copy.isel(time=rng.permutation(1500)),
+            ],
+            dim="time",
+        )
+        df, _ = track_bounds._to_frame(shuffled)
+
+        assert len(df) == 3000
+        assert (df["pressure"] >= 0).all()
 
     def test_no_pressure_after_the_stranding(self):
         ds = tag_with_tail((3, np.nan, "diurnal"))
