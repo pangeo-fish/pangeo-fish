@@ -1,3 +1,13 @@
+"""Bathymetry likelihood: the fish cannot be deeper than the seabed.
+
+For every HEALPix cell, :py:func:`compute_healpix_histogram_region_bin_size`
+summarises the GEBCO depths that fall in the cell as the probability that the
+seabed is at least ``d`` metres deep, for depths ``d`` on a regular grid
+(``depth_bins``). For every time step, :py:func:`batch_compute_pdf_bathy` takes
+the deepest depth of the fish below the model sea surface, ``max(P) - XE``, and
+reads that probability at this depth (linear between grid depths).
+"""
+
 import warnings
 
 import healpix_geo.nested as hpg_n
@@ -9,7 +19,12 @@ from tqdm import tqdm
 from pangeo_fish.dggs import canonical_ellipsoid, grid_attrs
 from pangeo_fish.storage import open_healpix_zarr
 
-warnings.filterwarnings("ignore", category=RuntimeWarning)
+#: Number of depth bins kept above ``depth_offset`` (land and intertidal points).
+_ABOVE_BINS = 10
+#: Default vertical uncertainty of the GEBCO depths (m) when there is no ``stdev``.
+_DEFAULT_STDEV_M = 1.0
+#: A pressure above this value (dbar) is deeper than any ocean: likely in Pa.
+_MAX_PRESSURE_DBAR = 12000.0
 
 
 def compute_healpix_histogram_region_bin_size(
@@ -22,123 +37,123 @@ def compute_healpix_histogram_region_bin_size(
     depth_bin_size=1,
     ellipsoid="sphere",
 ):
-    """
-    Compute HEALPix histogram over the geographic region covered by `ds`.
+    """Probability that the seabed of each HEALPix cell is at least ``d`` deep.
 
     Parameters
     ----------
     ds : xarray.Dataset
-        Contains `elevation` (2D lat×lon) and optionally `stdev`.
+        ``elevation`` on (latitude, longitude), in metres, negative below sea
+        level (GEBCO), and optionally ``stdev`` (m), its vertical uncertainty.
     nside : int
         HEALPix resolution (power of 2).
     nb_depth_bins : int or None
-        Number of depth bins (in units of `depth_bin_size`). If provided, used directly.
+        Number of depth bins of ``depth_bin_size`` metres below ``depth_offset``.
     max_depth_m : float or None
-        If provided and nb_depth_bins is None, nb_depth_bins = ceil(max_depth_m / depth_bin_size).
+        Used when ``nb_depth_bins`` is None: ``ceil(max_depth_m / depth_bin_size)``
+        bins. Seabeds deeper than this are counted as "deeper than max_depth_m".
     chunk_size : int
-        Number of latitude rows per iteration.
+        Number of latitude rows read at once.
     depth_offset : float
-        Offset applied to bathymetry before binning.
+        Depth (m) of the first bin edge below the surface; ten more bins are kept
+        above it.
     depth_bin_size : float
-        Bin width in meters (default=1). Example: 100 → bins de 100 m.
-    """
+        Bin width in metres.
+    ellipsoid : str or dict
+        Ellipsoid of the HEALPix grid (the one of ``diff-regridded.zarr``).
 
-    # --- determine nb_depth_bins from max_depth_m if needed ---
+    Returns
+    -------
+    xarray.Dataset
+        ``bathy_pixel_hist`` on (cells, depth_bins): the probability that the
+        seabed is at least ``depth_bins`` metres deep (1 at the shallowest depth,
+        decreasing with depth). The last depth is ``depth_offset + nb_depth_bins
+        * depth_bin_size``.
+    """
     if nb_depth_bins is None:
         if max_depth_m is None:
             raise ValueError("Either nb_depth_bins or max_depth_m must be provided.")
         nb_depth_bins = int(np.ceil(float(max_depth_m) / float(depth_bin_size)))
     else:
         nb_depth_bins = int(nb_depth_bins)
-
     if nb_depth_bins <= 0:
         raise ValueError("nb_depth_bins must be > 0")
+    bin_size = float(depth_bin_size)
+    if not bin_size > 0:
+        raise ValueError("depth_bin_size must be > 0")
 
-    nest = True
-    # historic behaviour: we keep +10 buffer bins as in original code
-    bins = nb_depth_bins + 10
+    # Bin j holds depths in [edge_j, edge_j+1); the last bin also holds every
+    # deeper seabed. edge_j = depth_offset + (j - _ABOVE_BINS) * bin_size.
+    n_edges = nb_depth_bins + _ABOVE_BINS + 1
+    edges = depth_offset + (np.arange(n_edges) - _ABOVE_BINS) * bin_size
+    n_bins = n_edges  # the last bin is the overflow bin
 
     lats = ds.latitude.values
     lons = ds.longitude.values
     nlat, nlon = len(lats), len(lons)
+    level = int(np.log2(nside))
 
-    # --- PASS 1: Collect unique used HEALPix cells ---
+    # --- PASS 1: HEALPix cells that contain GEBCO points ---
     used_cells = set()
     for i in tqdm(range(0, nlat, chunk_size), desc="Pass 1 – collect cells"):
         j = min(i + chunk_size, nlat)
-
         elev = ds.elevation[i:j, :].load().values.flatten()
         valid = ~np.isnan(elev)
         if not valid.any():
             continue
-
         lat_blk = np.repeat(lats[i:j], nlon)[valid]
         lon_blk = np.tile(lons, j - i)[valid]
-
-        depth = int(np.log2(nside))
         hidx = hpg_n.lonlat_to_healpix(
-            lon_blk, lat_blk, depth=depth, ellipsoid=ellipsoid
+            lon_blk, lat_blk, depth=level, ellipsoid=ellipsoid
         )
         used_cells.update(np.unique(hidx))
 
     used_cells = np.array(sorted(used_cells), dtype=np.int64)
-    n_cells = used_cells.size
-    cell_to_idx = {cell: idx for idx, cell in enumerate(used_cells)}
+    hist = np.zeros((used_cells.size, n_bins), dtype=np.float64)
 
-    hist = np.zeros((n_cells, bins), dtype=np.float64)
-
-    # --- PASS 2: Accumulate histogram ---
+    # --- PASS 2: histogram of depths, spread by the GEBCO uncertainty ---
     for i in tqdm(range(0, nlat, chunk_size), desc="Pass 2 – compute histogram"):
         j = min(i + chunk_size, nlat)
-
         elev = ds.elevation[i:j, :].load().values.flatten()
-        st = (
-            ds.stdev[i:j, :].load().values.flatten()
-            if "stdev" in ds
-            else np.full_like(elev, 1.0)
-        )
-
         valid = ~np.isnan(elev)
         if not valid.any():
             continue
+        if "stdev" in ds:
+            stdev = ds.stdev[i:j, :].load().values.flatten()[valid]
+            stdev = np.nan_to_num(stdev, nan=_DEFAULT_STDEV_M)
+        else:
+            stdev = np.full(int(valid.sum()), _DEFAULT_STDEV_M)
+        # uncertainty in bins; at least half a bin
+        sigma = np.maximum(stdev / bin_size, 0.5)
 
-        elev_v = elev[valid]
-        st_v = np.maximum(np.nan_to_num(st[valid], nan=1.0), 0.5)
         lat_v = np.repeat(lats[i:j], nlon)[valid]
         lon_v = np.tile(lons, j - i)[valid]
+        hidx = hpg_n.lonlat_to_healpix(lon_v, lat_v, depth=level, ellipsoid=ellipsoid)
 
-        depth = int(np.log2(nside))
-        hidx = hpg_n.lonlat_to_healpix(lon_v, lat_v, depth=depth, ellipsoid=ellipsoid)
-        # --- binning basé sur depth_bin_size ---
-        # profondeur positive = -elev_v (elev is negative for bathy)
-        depth_val = (-elev_v - depth_offset) / float(depth_bin_size)
-        # clip entre -10 (buffer) et nb_depth_bins - tiny
-        depth_idx = np.clip(depth_val, -10, nb_depth_bins - 0.01).astype(np.int64) + 10
+        depth_m = -elev[valid]  # positive below sea level
+        position = (depth_m - edges[0]) / bin_size
+        # spread before clipping, so that a seabed deeper than the last depth
+        # stays entirely in the overflow bin
+        bin_idx = np.floor(np.clip(position, -1e6, 1e6)).astype(np.int64)
 
-        mask_zone = np.isin(hidx, used_cells)
-        hidx = hidx[mask_zone]
-        depth_idx = depth_idx[mask_zone]
-        st_v = st_v[mask_zone]
+        row = np.searchsorted(used_cells, hidx)
+        radius = int(min(np.ceil(3 * sigma.max()), 50))
+        offsets = np.arange(-radius, radius + 1)
+        weights = np.exp(-(offsets[None, :] ** 2) / (2 * sigma[:, None] ** 2))
+        weights /= weights.sum(axis=1, keepdims=True)
+        for k, offset in enumerate(offsets):
+            np.add.at(
+                hist,
+                (row, np.clip(bin_idx + offset, 0, n_bins - 1)),
+                weights[:, k],
+            )
 
-        sum_w = np.zeros_like(st_v)
-        for dj in range(-2, 3):
-            sum_w += np.exp(-(dj**2) / (2 * st_v**2))
-        inv_sum = 1.0 / sum_w
-
-        uniq, inv = np.unique(hidx, return_inverse=True)
-        hist_local = np.zeros((uniq.size, bins), dtype=np.float64)
-
-        for dj in range(-2, 3):
-            w = np.exp(-(dj**2) / (2 * st_v**2)) * inv_sum
-            idx_shifted = np.clip(depth_idx + dj, 0, bins - 1)
-            np.add.at(hist_local, (inv, idx_shifted), w)
-
-        for u_idx, cell in enumerate(uniq):
-            hist[cell_to_idx[cell], :] += hist_local[u_idx, :]
-
-    with np.errstate(invalid="ignore"):
-        hist /= hist.sum(axis=1, keepdims=True)
-    h_im = 1 - np.cumsum(hist[:, :nb_depth_bins], axis=1)
+    total = hist.sum(axis=1, keepdims=True)
+    hist = np.divide(hist, total, out=np.full_like(hist, np.nan), where=total > 0)
+    # P(seabed >= edge_k) = 1 - P(seabed in a bin below edge_k)
+    exceedance = 1.0 - np.concatenate(
+        [np.zeros((hist.shape[0], 1)), np.cumsum(hist, axis=1)[:, :-1]], axis=1
+    )
+    exceedance = np.clip(exceedance, 0.0, 1.0)
 
     var_cell_ids = xr.DataArray(
         used_cells,
@@ -146,105 +161,125 @@ def compute_healpix_histogram_region_bin_size(
         name="cell_ids",
         attrs={
             "grid_name": "healpix",
-            "level": int(np.log2(nside)),
-            "indexing_scheme": "nested" if nest else "ring",
+            "level": level,
+            "indexing_scheme": "nested",
             "ellipsoid": canonical_ellipsoid(ellipsoid),
         },
     )
-
-    ds_out = xr.Dataset(
-        {"bathy_pixel_hist": (("cells", "depth_bins"), h_im)},
-        coords={"cell_ids": var_cell_ids},
-    )
-    # depth_bins: valeur du début du bin en mètres (0, depth_bin_size, 2*depth_bin_size, ...)
-    ds_out["depth_bins"] = np.arange(nb_depth_bins) * depth_bin_size
-
-    # Cell centres on the same ellipsoid as the cell ids.
-    depth = int(np.log2(nside))
     lon, lat = hpg_n.healpix_to_lonlat(
-        ds_out.cell_ids.values.astype("uint64"), depth, ellipsoid=ellipsoid
+        used_cells.astype("uint64"), level, ellipsoid=ellipsoid
     )
-    ds_out = ds_out.assign_coords(
-        {"latitude": ("cells", lat), "longitude": ("cells", lon)}
+    return xr.Dataset(
+        {
+            "bathy_pixel_hist": (
+                ("cells", "depth_bins"),
+                exceedance,
+                {
+                    "long_name": "probability that the seabed is at least depth_bins deep",
+                    "units": "1",
+                },
+            )
+        },
+        coords={
+            "cell_ids": var_cell_ids,
+            "depth_bins": (
+                "depth_bins",
+                edges,
+                {"long_name": "depth below the mean sea level", "units": "m"},
+            ),
+            "latitude": ("cells", lat),
+            "longitude": ("cells", lon),
+        },
     )
-    return ds_out
 
 
 @njit(parallel=True)
 def compute_pdf_bathy_numba_like_numpy(hist, pressure, XE, depth_bins):
+    """Probability that the seabed is deeper than the deepest fish depth.
 
+    ``hist`` (C, K) is ``bathy_pixel_hist``, ``depth_bins`` (K) its depths,
+    ``pressure`` (T, C, O) the fish depths (dbar ~ m) and ``XE`` (T, C) the model
+    sea surface height (m). The fish depth below the mean sea level is
+    ``max(pressure) - XE``. Returns (T, C), NaN on land, for time steps without
+    observations and for cells without histogram. ``hist`` is not modified.
+    """
     T, C, n_obs = pressure.shape
-    B = hist.shape[1]
-
-    depth_bin_size = depth_bins[1] - depth_bins[0]
+    K = hist.shape[1]
+    first = depth_bins[0]
+    step = depth_bins[1] - depth_bins[0]
     out = np.empty((T, C), dtype=np.float64)
-
-    # ---- land : hist[c,:] = NaN ----
-    for c in range(C):
-        if np.isnan(XE[0, c]):
-            for b in range(B):
-                hist[c, b] = np.nan
-        else:
-            # ---- RÈGLE 1 : hist <= 0 → 1e-14 ----
-            for b in range(B):
-                if hist[c, b] <= 0 or np.isnan(hist[c, b]):
-                    hist[c, b] = 1e-14
 
     for t in prange(T):
         for c in range(C):
-
-            if np.isnan(XE[t, c]):
+            if np.isnan(XE[t, c]) or np.isnan(hist[c, 0]):
                 out[t, c] = np.nan
                 continue
 
-            max_val = -1e32
-
-            all_nan = True
-
+            deepest = -np.inf
             for o in range(n_obs):
-                val = pressure[t, c, o]
-
-                if np.isnan(val):
-                    val = 1e-14
-                else:
-                    all_nan = False
-
-                pc = val - XE[t, c] + 10
-
-                if pc > max_val:
-                    max_val = pc
-
-            if all_nan:
+                value = pressure[t, c, o]
+                if not np.isnan(value) and value > deepest:
+                    deepest = value
+            if deepest == -np.inf:
                 out[t, c] = np.nan
                 continue
 
-            # Compute bin
-            bin_idx = int(max_val / depth_bin_size)
-            if bin_idx < 0:
-                bin_idx = 0
-            elif bin_idx >= B:
-                bin_idx = B - 1
-
-            out[t, c] = hist[c, bin_idx]
+            position = (deepest - XE[t, c] - first) / step
+            if position <= 0.0:
+                value = hist[c, 0]
+            elif position >= K - 1:
+                # deeper than the last depth: the seabed share beyond it
+                value = hist[c, K - 1]
+            else:
+                k = int(np.floor(position))
+                frac = position - k
+                value = hist[c, k] * (1.0 - frac) + hist[c, k + 1] * frac
+            # never exactly impossible (keeps one bad depth from emptying a map)
+            out[t, c] = max(value, 1e-14)
 
     return out
 
 
-def compute_pdf_bathy_batch_numba(ds_chunk, reshaped_tag, copernicus_chunk):
+def _check_depth_bins(depth_bins):
+    depth_bins = np.asarray(depth_bins, dtype=np.float64)
+    if depth_bins.size < 2 or not np.allclose(
+        np.diff(depth_bins), depth_bins[1] - depth_bins[0]
+    ):
+        raise ValueError("depth_bins must be regularly spaced")
+    return depth_bins
 
-    hist = np.asarray(ds_chunk["bathy_pixel_hist"].values)  # (C,B)
-    pressure = np.asarray(reshaped_tag["pressure"].values)  # (T,n_obs) or (T,C,n_obs)
-    XE = np.asarray(copernicus_chunk["XE"].values)  # (T,C)
-    depth_bins = np.asarray(ds_chunk.depth_bins.values)
 
-    if pressure.ndim == 2:
-        pressure = pressure[:, None, :]
-        pressure = np.broadcast_to(
-            pressure, (XE.shape[0], XE.shape[1], pressure.shape[2])
+def _check_pressure(pressure):
+    deepest = np.nanmax(pressure) if np.isfinite(pressure).any() else np.nan
+    if deepest > _MAX_PRESSURE_DBAR:
+        raise ValueError(
+            f"the deepest pressure is {deepest:.0f}, deeper than any ocean in dbar:"
+            " is the pressure in Pa?"
         )
 
-    result = compute_pdf_bathy_numba_like_numpy(hist, pressure, XE, depth_bins)
 
+def compute_pdf_bathy_batch_numba(ds_chunk, reshaped_tag, copernicus_chunk):
+    """Bathymetry likelihood of one batch of cells (see the module docstring)."""
+    xe = copernicus_chunk["XE"]
+    if "depth" in xe.dims:
+        xe = xe.isel(depth=0)
+    tag_time = reshaped_tag["pressure"]["time"].values
+    if "time" in xe.coords and not np.array_equal(xe["time"].values, tag_time):
+        raise ValueError("the tag and the model XE have different time steps")
+
+    hist = np.asarray(ds_chunk["bathy_pixel_hist"].values, dtype=np.float64)
+    pressure = np.asarray(reshaped_tag["pressure"].values, dtype=np.float64)
+    XE = np.asarray(xe.transpose("time", ...).values, dtype=np.float64)
+    depth_bins = _check_depth_bins(ds_chunk["depth_bins"].values)
+    _check_pressure(pressure)
+
+    if pressure.ndim == 2:
+        pressure = np.broadcast_to(
+            pressure[:, None, :], (XE.shape[0], XE.shape[1], pressure.shape[1])
+        )
+    result = compute_pdf_bathy_numba_like_numpy(
+        hist, np.ascontiguousarray(pressure), XE, depth_bins
+    )
     return xr.DataArray(
         result,
         dims=["time", "cells"],
@@ -255,9 +290,34 @@ def compute_pdf_bathy_batch_numba(ds_chunk, reshaped_tag, copernicus_chunk):
     )
 
 
-def batch_compute_pdf_bathy(ds_lr, reshaped_tag, target_root: str, batch_size=50000):
-    pdf_chunks = []
-    reference = open_healpix_zarr(f"{target_root}/diff-regridded.zarr")
+def batch_compute_pdf_bathy(
+    ds_lr, reshaped_tag, target_root: str, batch_size=50000, storage_options=None
+):
+    """Bathymetry likelihood on the cells of ``{target_root}/diff-regridded.zarr``.
+
+    Parameters
+    ----------
+    ds_lr : xarray.Dataset
+        Output of :py:func:`compute_healpix_histogram_region_bin_size`, on the grid
+        of ``diff-regridded.zarr``.
+    reshaped_tag : xarray.Dataset
+        ``pressure`` (dbar) on (time, obs), on the time steps of the model.
+    target_root : str
+        Folder that holds ``diff-regridded.zarr`` (with ``XE``).
+    batch_size : int
+        Number of cells computed at once.
+    storage_options : dict, optional
+        Passed to :py:func:`pangeo_fish.storage.open_healpix_zarr`.
+
+    Returns
+    -------
+    xarray.Dataset
+        ``pdf_bathy`` on (time, cells) for every cell of ``diff-regridded.zarr``:
+        NaN on land, 1 (no information) on sea cells without GEBCO points.
+    """
+    reference = open_healpix_zarr(
+        f"{target_root}/diff-regridded.zarr", storage_options=storage_options
+    )
     reference_grid = grid_attrs(reference)
     histogram_grid = grid_attrs(ds_lr)
     if reference_grid is None:
@@ -272,41 +332,60 @@ def batch_compute_pdf_bathy(ds_lr, reshaped_tag, target_root: str, batch_size=50
             "the bathymetry histogram and diff-regridded.zarr use different grids: "
             f"{histogram_grid} != {reference_grid}"
         )
-    common_ids = np.intersect1d(reference.cell_ids.values, ds_lr.cell_ids.values)
 
-    ds_histo_coords = ds_lr.assign_coords(cell_ids=("cells", ds_lr.cell_ids.values))
-    ds_histo_coords = ds_histo_coords.set_index(cells="cell_ids")
-    histogram_ds_subset_model = ds_histo_coords.sel(cells=common_ids)
+    tag_time = reshaped_tag["pressure"]["time"].values
+    missing_time = np.setdiff1d(tag_time, reference["time"].values)
+    if missing_time.size:
+        raise ValueError(
+            f"{missing_time.size} time step(s) of the tag are not in"
+            f" diff-regridded.zarr, e.g. {missing_time[0]}"
+        )
+    reference = reference[["XE"]].sel(time=tag_time)
 
-    reference = reference.assign_coords(cells=("cell_ids", reference["cell_ids"].data))
-    reference = reference.swap_dims({"cell_ids": "cells"})
+    reference_ids = reference["cell_ids"].values
+    common_ids = np.intersect1d(reference_ids, ds_lr.cell_ids.values)
 
-    reference = reference.sel(cells=common_ids)
+    histogram = ds_lr.assign_coords(cells=("cells", ds_lr.cell_ids.values))
+    histogram = histogram.drop_vars("cell_ids").sel(cells=common_ids)
+    model = reference.assign_coords(cells=("cells", reference_ids))
+    model = model.drop_vars("cell_ids").sel(cells=common_ids)
 
-    assert np.array_equal(
-        histogram_ds_subset_model.cells.values, reference.cells.values
-    )
-
-    # Loop over batches
-    n_cells = histogram_ds_subset_model.sizes["cells"]
-
+    pdf_chunks = []
+    n_cells = common_ids.size
     for start in range(0, n_cells, batch_size):
         end = min(start + batch_size, n_cells)
         print(f"Batch cells {start}–{end}")
+        pdf_chunks.append(
+            compute_pdf_bathy_batch_numba(
+                histogram.isel(cells=slice(start, end)),
+                reshaped_tag,
+                model.isel(cells=slice(start, end)),
+            )
+        )
+    pdf = xr.concat(pdf_chunks, dim="cells")
 
-        ds_chunk = histogram_ds_subset_model.isel(cells=slice(start, end))
-        copernicus_chunk = reference.isel(cells=slice(start, end))
-
-        pdf_chunk = compute_pdf_bathy_batch_numba(
-            ds_chunk, reshaped_tag, copernicus_chunk
+    # Every cell of the model grid: sea cells without GEBCO points carry no
+    # bathymetry information (1), land stays NaN.
+    xe = reference["XE"]
+    if "depth" in xe.dims:
+        xe = xe.isel(depth=0)
+    xe = xe.transpose("time", ...).assign_coords(cells=("cells", reference_ids))
+    pdf = pdf.reindex(cells=reference_ids, fill_value=1.0).where(xe.notnull())
+    n_missing = int(np.isin(reference_ids, common_ids, invert=True).sum())
+    if n_missing:
+        warnings.warn(
+            f"{n_missing} cell(s) of the model grid have no GEBCO point: their"
+            " bathymetry likelihood is 1 (no information)",
+            UserWarning,
+            stacklevel=2,
         )
 
-        pdf_chunks.append(pdf_chunk)
-    # Concatenate results
-    concat_pdf = xr.concat(pdf_chunks, dim="cells")
-    pdf_da_func = concat_pdf.to_dataset(name="pdf_bathy")
-    pdf_da_func = pdf_da_func.rename_vars({"cells": "cell_ids"})
-    # The bathymetry pdf is on the grid of the reference model.
-    pdf_da_func["cell_ids"].attrs = dict(reference_grid)
-
-    return pdf_da_func
+    result = pdf.drop_vars("cells").to_dataset(name="pdf_bathy")
+    result = result.assign_coords(
+        cell_ids=("cells", reference_ids, dict(reference_grid))
+    )
+    result["pdf_bathy"].attrs = {
+        "long_name": "probability that the seabed is deeper than the fish",
+        "units": "1",
+    }
+    return result
