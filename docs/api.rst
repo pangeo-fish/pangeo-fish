@@ -298,5 +298,3 @@ ETN Acoustic Detections
 
    find_etn_acoustic_detections
    ETNAcousticDetections
-
-

@@ -1459,6 +1459,8 @@ def estimate_refinement_costs(
     else:
         table["relative_cost"] = pd.Series(dtype=float)
     return table
+
+
 def compute_emission_pdf(
     *,
     diff_ds: xr.Dataset,
