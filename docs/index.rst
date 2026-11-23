@@ -7,5 +7,9 @@ Welcome to pangeo-fish's documentation!
     installation
     pangeo-notebook
     format
+    copernicus-models
+    choosing-conv-method
     notebook
+    tide
     api
+    dry-cells

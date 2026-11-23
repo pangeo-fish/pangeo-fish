@@ -5,7 +5,7 @@ result="demo-results/$1"
 mkdir -p "$result"
 python ci/notebook_environment.py "$result/before.json"
 install_status=0
-python -m pip install -e '.[notebooks]' --report "$result/install.json" \
+python -m pip install -c ci/requirements/demo-constraints.txt -e '.[notebooks]' --report "$result/install.json" \
   2>&1 | tee "$result/install.log" || install_status=$?
 python ci/notebook_environment.py "$result/after.json"
 compare_status=0
