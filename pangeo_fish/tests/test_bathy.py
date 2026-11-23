@@ -171,34 +171,6 @@ def test_sea_surface_height_moves_the_fish_relative_to_the_seabed():
     assert _likelihood(hist, 54.0, xe=6.0) > 0.9 > _likelihood(hist, 54.0)
 
 
-def test_depth_offset_is_applied_to_both_sides():
-    seabed = _flat_seabed(60.0)
-    plain = compute_healpix_histogram_region_bin_size(
-        seabed, nside=2**8, max_depth_m=200, depth_bin_size=4
-    )
-    shifted = compute_healpix_histogram_region_bin_size(
-        seabed, nside=2**8, max_depth_m=200, depth_bin_size=4, depth_offset=2
-    )
-    # only the position of the bin edges changes
-    for depth in [30.0, 45.0, 75.0, 90.0]:
-        assert _likelihood(shifted, depth) == pytest.approx(
-            _likelihood(plain, depth), abs=0.01
-        )
-    for hist in (plain, shifted):
-        assert _likelihood(hist, 50.0) > 0.9 > 0.1 > _likelihood(hist, 70.0)
-
-
-def test_stdev_is_in_metres():
-    narrow = compute_healpix_histogram_region_bin_size(
-        _flat_seabed(100.0, stdev=1.0), nside=2**8, max_depth_m=300, depth_bin_size=1
-    )
-    wide = compute_healpix_histogram_region_bin_size(
-        _flat_seabed(100.0, stdev=10.0), nside=2**8, max_depth_m=300, depth_bin_size=1
-    )
-    assert _likelihood(narrow, 90.0) > 0.99
-    assert 0.6 < _likelihood(wide, 95.0) < 0.8  # P(N(100, 10) >= 95) ~ 0.69
-
-
 def test_beyond_the_last_depth():
     shallow = compute_healpix_histogram_region_bin_size(
         _flat_seabed(100.0), nside=2**8, max_depth_m=200, depth_bin_size=10
@@ -258,16 +230,111 @@ def test_tag_time_steps_must_be_in_the_model(tmp_path):
         batch_compute_pdf_bathy(hist, tag, str(tmp_path))
 
 
-def test_model_cells_without_gebco_carry_no_information(tmp_path):
+def test_depth_offset_is_a_clearance_above_the_seabed():
+    seabed = _flat_seabed(40.0)
+    kwargs = dict(nside=2**8, max_depth_m=200, depth_bin_size=1)
+    plain = compute_healpix_histogram_region_bin_size(seabed, **kwargs)
+    above = compute_healpix_histogram_region_bin_size(seabed, depth_offset=10, **kwargs)
+    below = compute_healpix_histogram_region_bin_size(
+        seabed, depth_offset=-10, **kwargs
+    )
+    assert above.attrs["depth_offset"] == 10
+    # 35 m is possible on a 40 m seabed, not with 10 m clearance
+    assert _likelihood(plain, 35.0) > 0.99 and _likelihood(above, 35.0) < 0.01
+    assert _likelihood(above, 25.0) > 0.99
+    # 45 m is below a 40 m seabed, possible if 10 m below it are allowed
+    assert _likelihood(plain, 45.0) < 0.01 and _likelihood(below, 45.0) > 0.99
+    assert _likelihood(below, 55.0) < 0.01
+
+
+@pytest.mark.parametrize("bin_size", [1, 16])
+def test_stdev_is_in_metres_and_centred_on_the_depth(bin_size):
+    from scipy.stats import norm
+
+    hist = compute_healpix_histogram_region_bin_size(
+        _flat_seabed(100.0, stdev=10.0),
+        nside=2**8,
+        max_depth_m=300,
+        depth_bin_size=bin_size,
+    )
+    for depth in [85.0, 95.0, 100.0, 105.0, 115.0]:
+        expected = norm.sf(depth, loc=100.0, scale=10.0)
+        tolerance = 0.01 if bin_size == 1 else 0.06
+        assert _likelihood(hist, depth) == pytest.approx(expected, abs=tolerance)
+
+
+def test_linear_between_bin_edges():
+    hist = compute_healpix_histogram_region_bin_size(
+        _flat_seabed(100.0, stdev=20.0), nside=2**8, max_depth_m=300, depth_bin_size=16
+    )
+    edges = hist.depth_bins.values
+    k = int(np.searchsorted(edges, 96.0))
+    low, high = edges[k - 1], edges[k]
+    middle = (low + high) / 2
+    assert _likelihood(hist, middle) == pytest.approx(
+        (_likelihood(hist, low) + _likelihood(hist, high)) / 2, rel=1e-9
+    )
+
+
+def test_land_points_are_not_seabed():
+    lat = np.linspace(47.0, 47.4, 24)
+    lon = np.linspace(-5.0, -4.6, 24)
+    elevation = np.full((24, 24), -80.0)
+    elevation[:, np.arange(24) % 5 < 2] = 25.0  # 40 % land in every cell
+    ds = xr.Dataset(
+        {"elevation": (("latitude", "longitude"), elevation)},
+        coords={"latitude": lat, "longitude": lon},
+    )
+    hist = compute_healpix_histogram_region_bin_size(
+        ds, nside=2**8, max_depth_m=200, depth_bin_size=4
+    )
+    for cell in range(hist.sizes["cells"]):
+        assert _likelihood(hist.isel(cells=[cell]), 50.0) > 0.99
+
+
+def test_deepest_record_of_the_time_step_counts(tmp_path):
+    hist, reference, tag = _pdf_inputs(tmp_path)
+    write_healpix_zarr(reference, str(tmp_path / "diff-regridded.zarr"))
+    shallow = tag.assign(pressure=tag.pressure * 0 + 5.0)
+    one_deep = shallow.copy(deep=True)
+    one_deep["pressure"][:, 0] = 190.0  # first record deep, the others shallow
+    pdf_shallow = batch_compute_pdf_bathy(hist, shallow, str(tmp_path))
+    pdf_deep = batch_compute_pdf_bathy(hist, one_deep, str(tmp_path))
+    assert float(pdf_deep.pdf_bathy.max()) < 0.01 < float(pdf_shallow.pdf_bathy.min())
+
+
+def test_time_step_without_record_carries_no_information(tmp_path):
     hist, reference, tag = _pdf_inputs(tmp_path)
     reference["XE"][:, 0] = np.nan  # land
     write_healpix_zarr(reference, str(tmp_path / "diff-regridded.zarr"))
-    missing = hist.isel(cells=slice(1, 3)).cell_ids.values
-    partial = hist.isel(cells=slice(3, None)).assign_attrs(hist.attrs)
-    partial = xr.concat([hist.isel(cells=[0]), partial], dim="cells")
-    with pytest.warns(UserWarning, match="2 cell"):
+    tag["pressure"][1, :] = np.nan
+    pdf = batch_compute_pdf_bathy(hist, tag, str(tmp_path))
+    on_sea = pdf.pdf_bathy.isel(time=1, cells=slice(1, None))
+    np.testing.assert_array_equal(on_sea, 1.0)
+    assert pdf.pdf_bathy.isel(cells=0).isnull().all()
+
+
+def test_old_histograms_are_refused(tmp_path):
+    hist, reference, tag = _pdf_inputs(tmp_path)
+    write_healpix_zarr(reference, str(tmp_path / "diff-regridded.zarr"))
+    old = hist.assign_attrs(bathy_histogram_version=None)
+    with pytest.raises(ValueError, match="older pangeo-fish"):
+        batch_compute_pdf_bathy(old, tag, str(tmp_path))
+
+
+def test_model_cells_without_gebco_use_the_nearest_cell(tmp_path):
+    hist, reference, tag = _pdf_inputs(tmp_path)
+    reference["XE"][:, 0] = np.nan  # land
+    write_healpix_zarr(reference, str(tmp_path / "diff-regridded.zarr"))
+    full = batch_compute_pdf_bathy(hist, tag, str(tmp_path))
+    partial = hist.drop_isel(cells=[1, 2])
+    with pytest.warns(UserWarning, match="2 cell.*nearest cell"):
         pdf = batch_compute_pdf_bathy(partial, tag, str(tmp_path))
     np.testing.assert_array_equal(pdf.cell_ids, reference.cell_ids)
-    on_missing = pdf.pdf_bathy.where(pdf.cell_ids.isin(missing), drop=True)
-    np.testing.assert_array_equal(on_missing, 1.0)
+    assert pdf.pdf_bathy.isel(cells=[1, 2]).notnull().all()
+    assert (pdf.pdf_bathy.isel(cells=[1, 2]) < 1).all()
+    xr.testing.assert_equal(
+        pdf.pdf_bathy.isel(cells=slice(3, None)),
+        full.pdf_bathy.isel(cells=slice(3, None)),
+    )
     assert pdf.pdf_bathy.isel(cells=0).isnull().all()
