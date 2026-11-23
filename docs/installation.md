@@ -62,8 +62,10 @@ pip install torch --index-url https://download.pytorch.org/whl/cpu
 
 The conda environment above already contains the CPU-only build (`pytorch-cpu` from conda-forge).
 
-If you want to run on a GPU, install the CUDA build instead:
-`pip install torch` (the default build on Linux; see the [PyTorch selector](https://pytorch.org/get-started/locally/) for the build that matches your CUDA version), or, with conda, replace `pytorch-cpu` by `pytorch-gpu` in `docs/environment.yaml`.
+For GPU runs, create a separate environment with a CUDA build of PyTorch before installing `pangeo-fish`.
+
+- With pip, use the command from the [PyTorch installation selector](https://pytorch.org/get-started/locally/) for your platform and CUDA version.
+- With conda or micromamba, use `pytorch-gpu` in place of `pytorch-cpu` in `docs/environment.yaml` when creating the environment.
 
 From a GPU allocation, check that PyTorch can see a CUDA device:
 
@@ -71,7 +73,7 @@ From a GPU allocation, check that PyTorch can see a CUDA device:
 python -c "import torch; print(torch.version.cuda, torch.cuda.is_available(), torch.cuda.device_count())"
 ```
 
-The second value should be `True`. In the workflow, pass `device="cuda"` to both `optimize_pdf` and `compute_states` and select a CUDA-capable convolution method in `optimize_pdf`. The default method, `FFTConv`, supports CUDA. See [Choosing a convolution method](choosing-conv-method.md#running-on-a-gpu-device) for the full list. The demo notebooks use the CPU by default, and `decode_trajectories` runs on the CPU.
+The command prints the CUDA version used to build PyTorch, whether CUDA is available to the process, and the number of visible CUDA devices. In the workflow, pass `device="cuda"` to both `optimize_pdf` and `compute_states`. Select a CUDA-capable convolution method such as the default, `FFTConv`, in `optimize_pdf`. See the GPU section in [Choosing a convolution method](choosing-conv-method.md) for the full list. The demo notebooks use the CPU by default, and `decode_trajectories` runs on the CPU.
 
 Total runtime includes predictor setup, CPU work and transfers between host and GPU memory. Compare CPU and GPU times for your dataset if runtime is a concern.
 

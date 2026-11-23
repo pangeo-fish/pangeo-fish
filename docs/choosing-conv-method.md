@@ -108,7 +108,7 @@ Fish that enter rivers narrower than one cell need a mixed-level operator (`mult
 
 ## Running on a GPU (`device`)
 
-`optimize_pdf` and `compute_states` accept `device="cpu"` (the default), `device="cuda"`, or an indexed device such as `device="cuda:0"`. You can also pass a corresponding `torch.device` object. A CUDA device runs the convolution on a GPU and requires the CUDA build of PyTorch. See [Installation](installation.md#pytorch-cpu-or-gpu).
+`optimize_pdf` and `compute_states` accept `device="cpu"` (the default), `device="cuda"`, or an indexed device such as `device="cuda:0"`. You can also pass a corresponding `torch.device` object. A CUDA device runs the convolution on a GPU and requires the CUDA build of PyTorch. See [Installation](installation.md).
 
 | `conv_method`             | Runs on a GPU               |
 | ------------------------- | --------------------------- |
