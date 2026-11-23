@@ -138,13 +138,21 @@ def dummy_tag():
     return tag
 
 
+@pytest.mark.parametrize("cf_time", [False, True])
 @pytest.mark.parametrize("detections", [False, True])
-def test_emission_probability(detections, dummy_tag, dummy_grid):
+def test_emission_probability(detections, cf_time, dummy_tag, dummy_grid):
     """
     Test of the ``emission_probability`` function using small datasets (10 time steps).
+
+    ``cf_time``: the grid read back from a workflow store has CF attributes on
+    ``time`` (``standard_name="time"``), so cf_xarray finds its bounds under two keys.
     """
     # Set receiver buffer size to 1000 m
     receiver_buffer = ureg.Quantity(1000, "m")
+    if cf_time:
+        from pangeo_fish.dggs import with_cf_attrs
+
+        dummy_grid = with_cf_attrs(dummy_grid)
 
     dummy_grid.cell_ids.attrs["lat"] = 0
     dummy_grid.cell_ids.attrs["lon"] = 0

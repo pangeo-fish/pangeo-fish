@@ -7,7 +7,6 @@ import healpix_geo as hpg
 import numpy as np
 import pandas as pd
 import xarray as xr
-from tlz.itertoolz import first
 from xhealpixify.conversions import geographic_to_cartesian
 
 from pangeo_fish import utils
@@ -58,10 +57,13 @@ def count_detections(detections, by):
     xarray.Dataset.groupby
     """
     if "bounds" in getattr(by, "dims", []):
-        if len(by.cf.bounds) != 1:
+        # cf_xarray lists the same bounds variable under every key of its
+        # coordinate (e.g. "time" and, with ``standard_name="time"``, "T").
+        bounds_vars = sorted({name for names in by.cf.bounds.values() for name in names})
+        if len(bounds_vars) != 1:
             raise ValueError("cannot find a valid bounds variable")
 
-        bounds_var = first(by.cf.bounds.values())[0]
+        bounds_var = bounds_vars[0]
         bins_var = f"{bounds_var.removesuffix('_bounds')}_bins"
         by = bounds_to_bins(by)[bins_var]
 
