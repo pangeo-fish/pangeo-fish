@@ -8,3 +8,5 @@ dependencies:
   - pytest
   - pytest-cov
   - ffmpeg
+  # optional: astronomical arguments and nodal corrections for pangeo_fish.tide_healpix
+  - pyfes

@@ -1,3 +1,4 @@
+# Install in pangeo-fish/pangeo-fish. Setup: see the Docker repository README.
 name: Trigger Docker image publication
 
 on:
@@ -21,7 +22,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "$GH_TOKEN" ]; then
-            echo "::error::Set DOCKER_IMAGE_DISPATCH_TOKEN as documented in docs/docker-images.md"
+            echo "::error::Set DOCKER_IMAGE_DISPATCH_TOKEN as documented in the pangeo-fish-docker README (Connect source events)"
             exit 1
           fi
           jq -n --arg sha "$SOURCE_SHA" --arg release_tag "$RELEASE_TAG" \

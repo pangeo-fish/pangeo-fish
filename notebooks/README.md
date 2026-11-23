@@ -17,7 +17,12 @@ The defaults shared by the demos are identical except for their output folders:
 | Main trajectories                    | Viterbi, mode, mean              |
 | Manual-sigma comparison trajectories | mode, mean                       |
 
-The complete demo retains its bathymetry, tides and two-sigma model. The
+In the Complete demo's **Study settings**, set `tide_method = "legacy"` for
+the original gridded likelihood or `tide_method = "healpix"` to predict tides
+from local harmonic constants directly on the HMM grid. Install `.[notebooks,tide]`
+for the HEALPix method. See the [tide methods guide](../docs/tide.rst) for details.
+
+The Complete demo also includes bathymetry and a two-sigma model. The
 manual-sigma appendix uses a separate `comparison_track_modes` setting in both
 demos; Viterbi with the appendix's large manually chosen sigma can require very
 large transition tables.
@@ -33,6 +38,14 @@ papermill notebooks/pangeo-fish-base-demo.ipynb executed/base-A19124.ipynb \
   -k python3 -p tag_name A19124 -p scratch_root ./results/base
 papermill notebooks/pangeo-fish-complete-demo.ipynb executed/complete-A19124.ipynb \
   -k python3 -p tag_name A19124 -p scratch_root ./results/complete
+```
+
+To compare with the HEALPix tide method, use a separate results folder.
+
+```bash
+python -m pip install -e '.[notebooks,tide]'
+papermill notebooks/pangeo-fish-complete-demo.ipynb executed/complete-healpix-A19124.ipynb \
+  -k python3 -p tide_method healpix -p scratch_root ./results/complete-healpix
 ```
 
 The `parameters` cell contains serializable defaults. Papermill inserts overrides
@@ -61,7 +74,18 @@ using `pip install -e '.[notebooks]'` before executing through Papermill.
 
 Configure Copernicus Marine authentication in your environment before running;
 never pass credentials as notebook parameters or commit them in parameter files.
-The fork's demo workflow uses the `DEMO_COPERNICUS_CREDENTIALS` Actions secret.
+The demo workflow uses the `DEMO_COPERNICUS_CREDENTIALS` Actions secret. It runs
+the A19124 demos (about 5 minutes) on pushes and on pull requests to `main` and
+`DEV` that touch `pangeo_fish/` or the demo files. In this repository, pushes to
+branches other than `main` and `DEV` are checked through their pull request only.
+A new push cancels the older run of the same pull request or branch, except on
+`main` and `DEV`, where the running check finishes (GitHub keeps only the newest
+waiting run, so quick successive merges can skip an intermediate commit).
+GitHub does not pass secrets to pull requests from forks: there the demo is
+skipped with a warning and the job still succeeds, so a green check does not mean
+the notebooks ran. Such changes are checked by the push run in the fork (it needs
+Actions enabled and its own `DEMO_COPERNICUS_CREDENTIALS` secret) or by running
+the workflow by hand.
 
 The [archive](archive/README.md) contains historical experiments, not supported
 demos for this release.

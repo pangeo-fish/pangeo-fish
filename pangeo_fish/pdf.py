@@ -10,46 +10,40 @@ from pangeo_fish.utils import _detect_spatial_dims, normalize
 
 
 # also try: multivariate_normal, gaussian_kde
-# TODO: use numba to vectorize (using `guvectorize`?)
 def normal(samples, mean, std, *, dims):
-    """Compute the combined pdf of independent layers
+    """Evaluate the normal pdf element by element.
+
+    The density of each sample only depends on that sample, so the computation
+    works with any dask chunking: a store reopened with its on-disk chunks (for
+    example several chunks along ``cells``) does not need rechunking first.
 
     Parameters
     ----------
-    samples : xarray.DataArray, Variable, or array-like
+    samples : xarray.DataArray
         The samples to compute the pdf from
-    mean : float
-        The mean of the distribution
-    std : float
-        The standard deviation of the distribution
+    mean : float or xarray.DataArray
+        The mean of the distribution. Arrays are broadcast by dimension name.
+    std : float or xarray.DataArray
+        The standard deviation of the distribution. Arrays are broadcast by
+        dimension name.
     dims : list of hashable
-        The dimension to compute the pdf along
+        The spatial dimensions of ``samples``. They are moved to the end of the
+        result, as before.
 
     Returns
     -------
     pdf : xarray.DataArray
         The computed pdf
     """
-
-    def _pdf(samples, mean, std):
-        return scipy.stats.norm.pdf(samples, mean, std)
-
-    if isinstance(std, int | float) or std.size == 1:
-        param_dims = []
-    else:
-        param_dims = mean.dims
-
     result = xr.apply_ufunc(
-        _pdf,
+        scipy.stats.norm.pdf,
         samples,
         mean,
-        std,  # **2,
+        std,
         dask="parallelized",
-        input_core_dims=[dims, param_dims, param_dims],
-        output_core_dims=[dims],
-        exclude_dims=set(param_dims),
-        vectorize=True,
+        output_dtypes=[float],
     )
+    result = result.transpose(..., *dims)
     return result.rename("pdf").drop_attrs(deep=False)
 
 

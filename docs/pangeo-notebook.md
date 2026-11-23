@@ -78,7 +78,7 @@ Both workflows run for pushes and pull requests targeting `main`, `DEV`, and
 out `main`. GitHub activates the schedule from the repository's default branch,
 so this schedule change takes effect after it reaches `main`.
 
-On the local Mac, running the full suite reproduced a native `foscat`/PyTorch
+On the local Mac, running the full suite reproduced a native PyTorch
 crash on both unchanged `release` and the migrated source after earlier tests;
 the estimator tests pass when run separately. Linux container CI is the target
 environment verification; the Mac crash remains a separate limitation.

@@ -48,7 +48,6 @@ dependencies = [
   "xdggs>=0.6.0,<0.7; python_version < '3.12'",
   "xdggs>=0.7.0,<0.8; python_version >= '3.12'",
   "healpix-convolution",
-  "foscat>=2026.6.1,<2027",
   "cf_xarray>=0.10.4",
   "pint",
   "pint-xarray",
@@ -69,6 +68,7 @@ dependencies = [
   "cmocean",
   "imageio[ffmpeg]",
   "ipywidgets",
+  "pyproj>=3.7,<3.8",
   # CLI / progress
   "rich",
   "rich-click",
@@ -77,13 +77,16 @@ dependencies = [
   "copernicusmarine>=2.4,<3",
   # deep learning (CPU-only usage in notebooks via CUDA_VISIBLE_DEVICES="")
   "torch>=2.7,<3",
-  "healpix-analyse>=2026.10.2,<2027",
+  "healpix-analyse>=2026.11.1",
+  "healpix-geo>=0.5",
   "healpix-resample>=2026.11.2,<2027",
 ]
 dynamic = ["version"]
 
 [project.optional-dependencies]
 notebooks = ["papermill>=2.7,<3", "ipykernel>=6.29,<8"]
+# astronomical arguments and nodal corrections for pangeo_fish.tide_healpix
+tide = ["pyfes>=2026.10"]
 
 [project.urls]
 "Homepage" = "https://github.com/pangeo-fish/pangeo-fish"

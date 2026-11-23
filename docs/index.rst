@@ -8,5 +8,9 @@ Welcome to pangeo-fish's documentation!
     pangeo-notebook
     format
     dggs-output
+    copernicus-models
+    choosing-conv-method
     notebook
+    tide
     api
+    dry-cells
