@@ -211,7 +211,10 @@ class OldUpDownGaussian1DHealpix(Predictor):
         if self.kernel_sz is None:
             self.kernel_sz = 2 * radius + 1
         if self.ellipsoid is None:
-            self.ellipsoid = self.cell_ids.attrs.get("ellipsoid")
+            # as in FFTGaussian1DHealpix: numpy cell ids have no attrs, and a
+            # grid without an ellipsoid is a sphere
+            attrs = getattr(self.cell_ids, "attrs", {})
+            self.ellipsoid = attrs.get("ellipsoid") or "sphere"
         # --- 1. Build the multi-resolution operator ---
         self.layer = LargeConv(
             level=self.grid_info.level,
@@ -465,7 +468,10 @@ class UpDownGaussian1DHealpix(Predictor):
         nside = 2**self.grid_info.level
 
         if self.ellipsoid is None:
-            self.ellipsoid = self.cell_ids.attrs.get("ellipsoid")
+            # as in FFTGaussian1DHealpix: numpy cell ids have no attrs, and a
+            # grid without an ellipsoid is a sphere
+            attrs = getattr(self.cell_ids, "attrs", {})
+            self.ellipsoid = attrs.get("ellipsoid") or "sphere"
 
         # Nominal fine-resolution kernel size: radius = 3 * sigma (in pixels)
         if self.kernel_sz is None:
@@ -641,7 +647,7 @@ class FFTGaussian1DHealpix(Predictor):
         np_dtype = np.float64 if self.dtype == torch.float64 else np.float32
         if self.ellipsoid is None:
             attrs = getattr(self.cell_ids, "attrs", {})
-            self.ellipsoid = attrs.get("ellipsoid", "sphere")
+            self.ellipsoid = attrs.get("ellipsoid") or "sphere"
 
         # Projected pixel size, passed explicitly to LocalFFT so that the
         # radians -> pixels conversion is exact in the projected plane.

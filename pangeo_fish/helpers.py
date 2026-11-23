@@ -2280,6 +2280,33 @@ def _build_estimator(emission, target_root, storage_options, ellipsoid=None):
     """
     predictor_index = "predictor_index"
 
+    with fsspec.open(
+        f"{target_root}/parameters.json", mode="r", **(storage_options or {})
+    ) as f:
+        params = json.load(f)
+
+    if not isinstance(params.get("predictor_factory"), dict):
+        raise ValueError(
+            f"{target_root}/parameters.json has no predictor_factory entry; write"
+            " it with create_parameters."
+        )
+    factory_class = str(params["predictor_factory"].get("class"))
+    if "Foscat1DHealpix" in factory_class:
+        raise ValueError(
+            'The predictor "Foscat1DHealpix" (found in the parameters file) has been '
+            'removed together with the foscat dependency. Use "FFTGaussian1DHealpix" '
+            '(conv_method="FFTConv", the default) instead: set conv_method/class_name '
+            "accordingly and edit the parameters file. A sigma fitted with the removed "
+            "predictor may need to be fitted again."
+        )
+    if "OldUpDownGaussian1DHealpix" in factory_class:
+        raise ValueError(
+            'The predictor "OldUpDownGaussian1DHealpix" (found in the parameters file) '
+            "is kept as a class for comparison only and cannot be built from a "
+            'parameters file. Use "UpDownGaussian1DHealpix" (conv_method="LargeHealpixConv") '
+            'or "FFTGaussian1DHealpix" (conv_method="FFTConv") instead.'
+        )
+    # after the checks above, so that a removed predictor is reported first
     if "cells" in emission.dims:
         emission = to_healpix(emission)
         if ellipsoid is None:
@@ -2288,26 +2315,6 @@ def _build_estimator(emission, target_root, storage_options, ellipsoid=None):
                 "cell_ids"
             ].attrs.get("ellipsoid")
 
-    with fsspec.open(
-        f"{target_root}/parameters.json", mode="r", **(storage_options or {})
-    ) as f:
-        params = json.load(f)
-
-    if "Foscat1DHealpix" in str(params["predictor_factory"].get("class")):
-        raise ValueError(
-            'The predictor "Foscat1DHealpix" (found in the parameters file) has been '
-            'removed together with the foscat dependency. Use "FFTGaussian1DHealpix" '
-            '(conv_method="FFTConv", the default) instead: set conv_method/class_name '
-            "accordingly and edit the parameters file. A sigma fitted with the removed "
-            "predictor may need to be fitted again."
-        )
-    if "OldUpDownGaussian1DHealpix" in str(params["predictor_factory"].get("class")):
-        raise ValueError(
-            'The predictor "OldUpDownGaussian1DHealpix" (found in the parameters file) '
-            "is kept as a class for comparison only and cannot be built from a "
-            'parameters file. Use "UpDownGaussian1DHealpix" (conv_method="LargeHealpixConv") '
-            'or "FFTGaussian1DHealpix" (conv_method="FFTConv") instead.'
-        )
     # one sigma value: every time step uses the same predictor
     if len(params["sigma"]) == 1:
         emission = emission.assign(

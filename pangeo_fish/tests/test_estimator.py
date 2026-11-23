@@ -168,3 +168,45 @@ def test_old_updown_class_is_not_read_as_the_new_one(tmp_path):
         _build_estimator(xr.Dataset(), str(tmp_path), None)
     with pytest.raises(ValueError, match="comparison only"):
         create_parameters([0.0004], class_name="OldUpDownGaussian1DHealpix")
+
+
+def test_removed_predictor_reported_before_converting_the_emission(
+    tmp_path, sample_dataset
+):
+    """The removal message comes first, also for an emission with a cells dim."""
+    import json
+
+    from pangeo_fish.helpers import _build_estimator
+
+    params = {"sigma": [0.0004], "predictor_factory": {"class": "Foscat1DHealpix"}}
+    (tmp_path / "parameters.json").write_text(json.dumps(params))
+    with pytest.raises(ValueError, match="FFTGaussian1DHealpix"):
+        _build_estimator(sample_dataset, str(tmp_path), None)
+
+
+def test_updown_predictor_without_ellipsoid_uses_a_sphere(sample_dataset):
+    """Numpy cell ids and a grid without an ellipsoid: treated as a sphere."""
+    from pangeo_fish.hmm.prediction import UpDownGaussian1DHealpix
+
+    predictor = UpDownGaussian1DHealpix(
+        cell_ids=sample_dataset["cell_ids"].data,
+        grid_info=sample_dataset.dggs.grid_info,
+        sigma=0.001,
+    )
+    assert predictor.ellipsoid == "sphere"
+    state = sample_dataset["initial"].values
+    np.testing.assert_allclose(predictor.predict(state).sum(), 1.0, rtol=1e-3)
+
+
+@pytest.mark.parametrize("factory", [None, "missing"])
+def test_parameters_file_without_predictor_factory(tmp_path, factory):
+    import json
+
+    from pangeo_fish.helpers import _build_estimator
+
+    params = {"sigma": [0.0004]}
+    if factory is None:
+        params["predictor_factory"] = None
+    (tmp_path / "parameters.json").write_text(json.dumps(params))
+    with pytest.raises(ValueError, match="no predictor_factory"):
+        _build_estimator(xr.Dataset(), str(tmp_path), None)
