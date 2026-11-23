@@ -266,7 +266,10 @@ def describe_tag(
     start = detect_start_of_track(records, **flag_kwargs, **(start_kwargs or {}))
     start_time = start["start"]
     end = detect_end_of_track(
-        records, start=start_time, **flag_kwargs, **(end_kwargs or {})
+        records,
+        start=start_time,
+        **flag_kwargs,
+        **{"air_level": start["pre_release_level"], **(end_kwargs or {})},
     )
     end_time = end["end"]
     description["suggested_start"] = start

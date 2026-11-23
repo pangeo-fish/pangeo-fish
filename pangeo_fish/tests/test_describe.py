@@ -36,6 +36,10 @@ def synthetic_records(end="stranded", seed=0):
         pressure[after] = 25 + 2.5 * np.sin(2 * np.pi * hours_after / 12.42)
         pressure[after] += rng.normal(0, 0.02, after.sum())
         temperature[after] = 16 + rng.normal(0, 0.05, after.sum())
+    elif end == "fridge":
+        # recovered and stored: in-air pressure reading, constant cold temperature
+        pressure[after] = 1.8 + rng.normal(0, 0.02, after.sum())
+        temperature[after] = 4 + rng.normal(0, 0.1, after.sum())
 
     pressure = np.round(pressure / 0.0625) * 0.0625
     return xr.Dataset(
@@ -129,6 +133,16 @@ class TestDescribeTag:
         assert comparison["fish_death_minus_suggested_end_days"] == pytest.approx(
             (fish_death - end) / pd.Timedelta(1, "D")
         )
+
+    def test_tag_kept_in_a_fridge(self):
+        description = describe_tag(synthetic_tag(end="fridge"), tide=False)
+        suggested = description["suggested_end"]
+
+        assert abs(suggested["end"] - END) <= pd.Timedelta(1, "h")
+        assert suggested["likely_cause"] == "pressure_at_air_level"
+        # the in-air days are not part of the track, and the events are compared
+        assert description["ranges"]["track"]["temperature"]["min"] > 10
+        assert "fish_death_minus_suggested_end_days" in description["comparison"]
 
     def test_pressure_offset_uses_the_pre_release_period(self):
         tag = synthetic_tag()

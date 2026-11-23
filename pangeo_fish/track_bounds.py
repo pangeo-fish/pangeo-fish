@@ -14,8 +14,9 @@ shows the sensor noise (and the slow tide for a tag on the seabed). The start is
 the first sustained activity. The end is the last record before the tag leaves the
 water, found among the periods without activity. The activity
 is the mean absolute deviation of the pressure from its running median (the
-``activity`` variable of :py:func:`flag_records`). Values outside the sensor range
-and temperatures outside the plausible water range are also used.
+``activity`` variable of :py:func:`flag_records`). Values outside the sensor range,
+temperatures outside the plausible water range and a pressure back at the in-air
+reading of the tag are also used.
 
 :py:func:`pangeo_fish.visualization.plot_track_bounds` shows the records with the
 suggestions.
@@ -440,23 +441,37 @@ def _air_cycle_onset(temperature, window, threshold):
     return None
 
 
-def _water_exit(flags, temperature, first, last, *, last_record, parameters):
+_EXIT_CAUSE_PRIORITY = {
+    "out_of_sensor_range": 0,
+    "out_of_water": 1,
+    "pressure_at_air_level": 2,
+}
+
+
+def _water_exit(flags, pressure, temperature, first, last, *, last_record, parameters):
     """Onset and cause of the exit from the water inside one suspect run, or None.
 
-    Hard evidence (records outside the sensor range, or with a temperature
-    outside the water range, in a run lasting at least ``min_duration`` or
-    reaching the last record) and the diurnal temperature cycle are looked for
-    in the run only. The earliest onset wins; a tie goes to the sensor range.
+    Hard evidence (records outside the sensor range, with a temperature outside
+    the water range, or without vertical movement at the in-air pressure
+    reading, in a run lasting at least ``min_duration`` or reaching the last
+    record) and the diurnal temperature cycle are looked for in the run only.
+    The earliest onset wins; a tie goes to the sensor range, then to the
+    temperature.
     """
     max_gap = parameters["max_gap"]
     min_duration = parameters["min_duration"]
     inside = flags.loc[first:last]
+    at_air_level = inside["inactive"] & (
+        (pressure.loc[first:last] - parameters["air_level"]).abs()
+        <= parameters["level_change_threshold"]
+    )
     onsets = {}
-    for cause, name in [
-        ("out_of_sensor_range", "out_of_sensor_range"),
-        ("out_of_water", "temperature_outside_water_range"),
+    for cause, mask in [
+        ("out_of_sensor_range", inside["out_of_sensor_range"]),
+        ("out_of_water", inside["temperature_outside_water_range"]),
+        ("pressure_at_air_level", at_air_level),
     ]:
-        runs = _long_runs(inside[name], max_gap, min_duration, last_record)
+        runs = _long_runs(mask, max_gap, min_duration, last_record)
         if runs:
             onsets[cause] = runs[0][0]
     if temperature is not None:
@@ -471,7 +486,7 @@ def _water_exit(flags, temperature, first, last, *, last_record, parameters):
             onsets["out_of_water"] = air
     if not onsets:
         return None
-    cause = min(onsets, key=lambda name: (onsets[name], name != "out_of_sensor_range"))
+    cause = min(onsets, key=lambda name: (onsets[name], _EXIT_CAUSE_PRIORITY[name]))
     return onsets[cause], cause
 
 
@@ -484,6 +499,7 @@ def detect_end_of_track(
     min_duration="12h",
     max_gap=DEFAULTS["max_gap"],
     level_change_threshold=0.5,
+    air_level=None,
     sensor_ranges=None,
     sensor_range_tolerance=DEFAULTS["sensor_range_tolerance"],
     temperature_range=DEFAULTS["temperature_range"],
@@ -510,6 +526,10 @@ def detect_end_of_track(
     - records outside the sensor range (for at least ``min_duration``);
     - temperatures outside the plausible water range (for at least
       ``min_duration``);
+    - no vertical movement with the pressure within ``level_change_threshold``
+      of the in-air reading ``air_level`` (for at least ``min_duration``): the
+      tag is out of the water, e.g. kept indoors or in a fridge after its
+      recovery, where the temperature looks like water;
     - a diurnal temperature cycle (a daily range of at least
       ``air_temperature_daily_range``, kept for the next days).
 
@@ -539,7 +559,11 @@ def detect_end_of_track(
         are merged.
     level_change_threshold : float, default: 0.5
         Pressure change (m) used to refine the end (and the start, if ``start`` is
-        not given).
+        not given), and tolerance around ``air_level``.
+    air_level : float, optional
+        Pressure (m) read by the tag in the air. Defaults to the pre-release
+        level found by :py:func:`detect_start_of_track` (called with the same
+        parameters as above), or to 0 if the tag records no pre-release period.
     air_temperature_daily_range : float, default: 5.0
         A daily temperature range (°C) of at least this, in a period without
         vertical movement, suggests the tag is in the air (diurnal cycle).
@@ -564,6 +588,9 @@ def detect_end_of_track(
           (sensor failure, or tag out of the water);
         - ``"out_of_water"``: temperatures outside the plausible water range, or
           a diurnal temperature cycle (tag in the air, e.g. stranded on a beach);
+        - ``"pressure_at_air_level"``: no vertical movement at the in-air
+          pressure reading (tag out of the water and kept indoors, or a
+          pressure-only tag; a tag floating at the surface looks the same);
 
         ``evidence``: the numbers behind it (fraction of each flag, median daily
         temperature range before and after the onset of the period examined,
@@ -585,8 +612,11 @@ def detect_end_of_track(
     Notes
     -----
     Known limits: the onset of a diurnal cycle inside a long period is found to
-    about an hour or a few hours, and a tag that leaves the water without a
-    temperature or pressure signal cannot be detected.
+    about an hour or a few hours. A tag that leaves the water without a
+    temperature signal and whose pressure does not come back to ``air_level``
+    (for example a pressure reading that drifts in the sun, or an in-air
+    reading that changed since the release) cannot be detected; pass
+    ``air_level`` if the in-air reading is known.
 
     Examples
     --------
@@ -625,20 +655,27 @@ def detect_end_of_track(
         sensor_range_tolerance=sensor_range_tolerance,
         temperature_range=temperature_range,
     )
-    if start is None:
+    if start is None or air_level is None:
         with warnings.catch_warnings():
             # the warnings of this call are emitted once, below
             warnings.filterwarnings("ignore", message="track_bounds:")
-            start = detect_start_of_track(
+            suggestion = detect_start_of_track(
                 df.to_xarray().assign_attrs(attrs),
                 max_gap=max_gap,
                 level_change_threshold=level_change_threshold,
                 **flag_kwargs,
-            )["start"]
+            )
         if start is None:
-            start = df.index[0]
+            start = suggestion["start"]
+            if start is None:
+                start = df.index[0]
+        if air_level is None:
+            air_level = suggestion["pre_release_level"]
+            if air_level is None:
+                air_level = 0.0
     start = _timestamp(start)
     parameters["start"] = start
+    parameters["air_level"] = float(air_level)
 
     flags = _flags(df, attrs, **flag_kwargs)
     _warn_if_undetectable(
@@ -662,6 +699,7 @@ def detect_end_of_track(
     for first, last in candidates:
         found = _water_exit(
             flags,
+            pressure,
             temperature,
             first,
             last,

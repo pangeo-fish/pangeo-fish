@@ -149,6 +149,35 @@ def tag_with_phases(*, rest_days, final):
     return xr.concat([active, tail], dim="time")
 
 
+def tag_kept_indoors(*, rest_days, temperature):
+    """Active fish, ``rest_days`` days on the seabed, then 5 days indoors.
+
+    Indoors, the pressure is back at the pre-release reading (1.8 m) and the
+    temperature is constant (``None``: a pressure-only tag).
+    """
+    rng = np.random.default_rng(1)
+    ds = tag_with_phases(rest_days=rest_days, final="water")
+    exit_time = np.datetime64(STRANDED + pd.Timedelta(rest_days, "D"))
+    ds = ds.sel(time=ds["time"] < exit_time)
+    time = pd.date_range(
+        pd.Timestamp(exit_time),
+        pd.Timestamp(exit_time) + pd.Timedelta(5, "D"),
+        freq="1min",
+    )
+    n = len(time)
+    indoors = xr.Dataset(
+        {
+            "pressure": ("time", quantize(1.8 + rng.normal(0, 0.02, n))),
+            "temperature": ("time", np.full(n, temperature or np.nan)),
+        },
+        coords={"time": time.to_numpy()},
+    )
+    ds = xr.concat([ds, indoors], dim="time")
+    if temperature is None:
+        ds = ds.drop_vars("temperature")
+    return ds
+
+
 class TestDetectEndOfTrack:
     @pytest.mark.parametrize(
         ["make_tag", "start", "tolerance", "expected_cause"],
@@ -240,6 +269,40 @@ class TestDetectEndOfTrack:
 
         assert abs(actual["end"] - STRANDED) <= pd.Timedelta(5, "min")
         assert actual["likely_cause"] == "out_of_sensor_range"
+
+    @pytest.mark.parametrize(
+        ["rest_days", "temperature"],
+        [
+            pytest.param(0, 4.0, id="fridge"),
+            pytest.param(0, 20.0, id="drawer"),
+            pytest.param(3, 4.0, id="death-then-fridge"),
+            pytest.param(0, None, id="pressure-only"),
+        ],
+    )
+    def test_kept_indoors_after_recovery(self, rest_days, temperature):
+        # in the air at the pre-release reading, with a temperature that looks
+        # like water and no diurnal cycle: only the pressure level tells
+        ds = tag_kept_indoors(rest_days=rest_days, temperature=temperature)
+        actual = track_bounds.detect_end_of_track(ds, start=RELEASE)
+
+        exit_time = STRANDED + pd.Timedelta(rest_days, "D")
+        assert abs(actual["end"] - exit_time) <= pd.Timedelta(1, "h")
+        assert actual["likely_cause"] == "pressure_at_air_level"
+        assert actual["parameters"]["air_level"] == pytest.approx(1.8, abs=0.1)
+        if rest_days:
+            first, _ = actual["inactive_period"]
+            assert abs(first - STRANDED) <= pd.Timedelta(1, "h")
+
+    def test_air_level_without_pre_release_period(self):
+        ds = tag_kept_indoors(rest_days=0, temperature=4.0)
+        ds = ds.sel(time=ds["time"] >= np.datetime64(RELEASE))
+
+        # no in-air period before the release: the default in-air reading is 0
+        assert track_bounds.detect_end_of_track(ds)["end"] is None
+
+        actual = track_bounds.detect_end_of_track(ds, air_level=1.8)
+        assert abs(actual["end"] - STRANDED) <= pd.Timedelta(1, "h")
+        assert actual["likely_cause"] == "pressure_at_air_level"
 
     def test_rest_then_activity_is_not_an_end(self):
         ds = synthetic_tag(end="none")
