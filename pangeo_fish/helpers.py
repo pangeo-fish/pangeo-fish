@@ -138,6 +138,20 @@ def _plot_in_figure(ds: xr.Dataset, **plot_kwargs) -> Figure:
     return fig
 
 
+def _lonlat_shape(ds):
+    """``[n_lon, n_lat]`` of the source grid, as used by :py:func:`open_distributions`.
+
+    Read from the dimensions of the ``longitude``/``latitude`` coordinates (1D, or
+    2D ``(y, x)``), not from the order of ``ds.sizes``, which also holds ``time``.
+    """
+    lon, lat = ds["longitude"], ds["latitude"]
+    if lon.ndim == 2:
+        lat_dim, lon_dim = lon.dims
+    else:
+        lat_dim, lon_dim = lat.dims[0], lon.dims[0]
+    return [int(ds.sizes[lon_dim]), int(ds.sizes[lat_dim])]
+
+
 def merge_on_cells(total, other):
     """Merge the variables of ``other`` into ``total``, matching the cells by id.
 
@@ -1389,7 +1403,7 @@ def regrid_dataset_hpresample(
     if save:
         print("you can save outside of the function")
     return new_ds, {
-        "resolution_2D": list(ds.sizes.values())[0:2],
+        "resolution_2D": _lonlat_shape(ds),
         "refinement_level": refinement_level,
         "ellipsoid": ellipsoid,
     }
@@ -3055,7 +3069,11 @@ def render_distributions(
     sliced_data = (
         data.isel(time=time_slice)
         .chunk({"time": 1, "x": -1, "y": -1})
-        .pipe(lambda ds: ds.merge(ds[["longitude", "latitude"]].compute()))
+        .pipe(
+            lambda ds: ds.assign_coords(
+                longitude=ds["longitude"].compute(), latitude=ds["latitude"].compute()
+            )
+        )
     ).pipe(
         filter_by_states
     )  # type: xr.Dataset
@@ -3065,11 +3083,24 @@ def render_distributions(
     )
     sliced_data = sliced_data.chunk({"time": 1, "x": -1, "y": -1})
 
+    if sliced_data.sizes["x"] == 0 or sliced_data.sizes["y"] == 0:
+        raise ValueError(
+            "no grid point with states > 0 to render: the 2D `states` are all zero"
+            f" or NaN (finite values: {int(data['states'].notnull().sum())},"
+            f" sizes {dict(data.sizes)})"
+        )
+
     path_to_frames = Path(frames_dir)
     path_to_frames.mkdir(parents=True, exist_ok=True)
 
     # see pangeo-fish.visualization.render_frame()
     render_frames(ds=sliced_data, **(kwargs | {"frames_dir": frames_dir}))
+    n_frames = len(list(path_to_frames.glob("*.png")))
+    if n_frames == 0:
+        raise RuntimeError(
+            f"no frame was rendered for {sliced_data.sizes['time']} time steps;"
+            " see the messages printed by render_frame above"
+        )
     try:
         video_fp = _render_video(
             frames_fp=[file.resolve() for file in path_to_frames.glob("*.png")],
