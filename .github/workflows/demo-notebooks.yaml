@@ -1,0 +1,139 @@
+name: Execute base and complete demo notebooks
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "pangeo_fish/**"
+      - ".github/workflows/demo-notebooks.yaml"
+      - "ci/run_demo_notebook.py"
+      - "ci/demo_configuration.py"
+      - "ci/check_papermill.py"
+      - "ci/run_demo_notebook.sh"
+      - "ci/requirements/demo-constraints.txt"
+      - "ci/notebook_environment.py"
+      - "ci/notebook-image.txt"
+      - "pyproject.toml"
+      - "notebooks/pangeo-fish-base-demo.ipynb"
+      - "notebooks/pangeo-fish-complete-demo.ipynb"
+  pull_request:
+    branches: [main, DEV]
+    paths:
+      - "pangeo_fish/**"
+      - ".github/workflows/demo-notebooks.yaml"
+      - "ci/run_demo_notebook.py"
+      - "ci/demo_configuration.py"
+      - "ci/check_papermill.py"
+      - "ci/run_demo_notebook.sh"
+      - "ci/requirements/demo-constraints.txt"
+      - "ci/notebook_environment.py"
+      - "ci/notebook-image.txt"
+      - "pyproject.toml"
+      - "notebooks/pangeo-fish-base-demo.ipynb"
+      - "notebooks/pangeo-fish-complete-demo.ipynb"
+  workflow_dispatch:
+    inputs:
+      dataset_case:
+        description: A18828 is a base-demo-only bounded manual trial
+        type: choice
+        options: [A19124-both, A18828-base]
+        default: A19124-both
+
+permissions:
+  contents: read
+
+# One run per event type and pull request or branch (manual runs also per
+# dataset case), so a push never cancels a manual run. Elsewhere a newer run
+# cancels the older one; on main and DEV the running one finishes, but GitHub
+# keeps only the newest pending run, so quick successive merges can skip an
+# intermediate commit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}-${{ inputs.dataset_case || 'default' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/DEV' }}
+
+jobs:
+  demo:
+    # In the upstream repository, branches other than main and DEV are checked
+    # through their pull request, so their push runs would be duplicates.
+    # Forks keep the push runs: their pull requests get no secrets upstream.
+    if: >-
+      github.event_name != 'push'
+      || github.repository != 'pangeo-fish/pangeo-fish'
+      || github.ref == 'refs/heads/main'
+      || github.ref == 'refs/heads/DEV'
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.dataset_case == 'A18828-base' && 55 || 180 }}
+    strategy:
+      fail-fast: false
+      matrix:
+        notebook: ${{ fromJSON(inputs.dataset_case == 'A18828-base' && '["base"]' || '["base", "complete"]') }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Check that Copernicus Marine credentials are available
+        id: credentials
+        env:
+          HAS_CREDENTIALS: ${{ secrets.DEMO_COPERNICUS_CREDENTIALS != '' }}
+        run: |
+          if [ "$HAS_CREDENTIALS" = true ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            message="DEMO_COPERNICUS_CREDENTIALS is not available (for example a pull request from a fork), so the ${{ matrix.notebook }} demo notebook was NOT run. Check the push run on the fork, or run this workflow by hand."
+            echo "::warning::$message"
+            echo "### Demo notebook skipped" >> "$GITHUB_STEP_SUMMARY"
+            echo "$message" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Run the parameterized demo in the pinned Notebook image
+        if: steps.credentials.outputs.available == 'true'
+        timeout-minutes: ${{ inputs.dataset_case == 'A18828-base' && 45 || 160 }}
+        env:
+          DEMO_TAG_NAME: ${{ inputs.dataset_case == 'A18828-base' && 'A18828' || 'A19124' }}
+          COPERNICUS_CREDENTIALS_FILE_CONTENT: ${{ secrets.DEMO_COPERNICUS_CREDENTIALS }}
+        run: |
+          python - <<'PY'
+          import base64, configparser, os
+          def mask(value):
+              if isinstance(value, dict):
+                  for item in value.values():
+                      mask(item)
+              elif isinstance(value, str) and value:
+                  escaped = value.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+                  print(f'::add-mask::{escaped}')
+          content = os.environ.get('COPERNICUS_CREDENTIALS_FILE_CONTENT', '')
+          if content:
+              config = configparser.RawConfigParser()
+              config.read_string(base64.standard_b64decode(content).decode('utf8'))
+              mask(dict(config.items('credentials')))
+          PY
+          mkdir -p demo-results
+          image=$(cat ci/notebook-image.txt)
+          docker pull "$image"
+          docker image inspect "$image" > demo-results/image.json
+          docker run --rm --user root --entrypoint bash \
+            -e HOME=/tmp -e COPERNICUS_CREDENTIALS_FILE_CONTENT -e MPLBACKEND=Agg -e DEMO_TAG_NAME \
+            -e NUMBA_NUM_THREADS=2 -e OMP_NUM_THREADS=2 -e CUDA_VISIBLE_DEVICES= \
+            -v "$PWD:/work" -w /work "$image" -c \
+            'bash ci/run_demo_notebook.sh "$1"' \
+            bash '${{ matrix.notebook }}'
+      - uses: actions/upload-artifact@v6
+        if: always() && steps.credentials.outputs.available == 'true'
+        with:
+          name: demo-${{ matrix.notebook }}-summary
+          path: |
+            demo-results/image.json
+            demo-results/${{ matrix.notebook }}/summary.json
+            demo-results/${{ matrix.notebook }}/before.json
+            demo-results/${{ matrix.notebook }}/after.json
+            demo-results/${{ matrix.notebook }}/comparison.json
+      - uses: actions/upload-artifact@v6
+        if: always() && steps.credentials.outputs.available == 'true'
+        with:
+          name: demo-${{ matrix.notebook }}
+          path: |
+            demo-results/image.json
+            demo-results/${{ matrix.notebook }}/summary.json
+            demo-results/${{ matrix.notebook }}/before.json
+            demo-results/${{ matrix.notebook }}/after.json
+            demo-results/${{ matrix.notebook }}/comparison.json
+            demo-results/${{ matrix.notebook }}/executed.ipynb

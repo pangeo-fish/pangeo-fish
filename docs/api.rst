@@ -77,6 +77,38 @@ Emission Computations
    diff.diff_z
 
 
+Tides on HEALPix
+----------------
+
+Tidal harmonic constants on HEALPix cells, tide prediction with nodal corrections
+(requires ``pyfes``, extra ``pangeo-fish[tide]``) and the tidal likelihood of a tag
+lying still on the seabed.
+
+See :ref:`tide-methods` for the Complete demo selector and the comparison
+with the legacy method.
+
+.. currentmodule:: pangeo_fish.tide_healpix
+.. autosummary::
+   :toctree: generated
+
+   make_cell_ids
+   cell_centers
+   harmonic_constants_dataset
+   open_harmonic_constants
+   select_constants
+   as_complex
+   write_harmonic_constants
+   nodal_modulations
+   predict_tide
+   still_tag_tide_likelihood
+   write_tide_pdf_healpix
+   harmonic_analysis
+   constants_misfit
+   latlon_constants_from_tmd
+   latlon_constants_from_amplitude_phase
+   constants_to_healpix
+
+
 Tag/time Operations
 -------------------
 
@@ -177,3 +209,16 @@ HMM Filtering
    forward
    backward
    forward_backward
+
+
+Dry Cells
+#########
+
+.. currentmodule:: pangeo_fish.drycells
+.. autosummary::
+   :toctree: generated
+
+   dry_mask
+   count_dry_cells
+   mask_dry_cells
+   DryCellWarning

@@ -1,66 +1,22 @@
+# Install the project from the repository root with: python -m pip install -e .
 channels:
   - conda-forge
+  - nodefaults
 dependencies:
-  # development
-  - python=3.11
+  - python=3.13
+  - pip
   - jupyterlab
   - ipython
   - ipykernel
   - graphviz
   - python-graphviz
-  # plotting
-  - cmocean
-  - holoviews
-  - hvplot
-  - geoviews
-  - selenium
-  - firefox
-  - geckodriver
-  # I/O
-  - fsspec
-  - h5netcdf
-  - intake-xarray
-  - zstandard
-  # units, bounds, and cf-conventions
-  - cf_xarray>=0.10.4
-  - pint-xarray
-  # general computing
-  - flox
-  - xarray
-  - more-itertools
-  - scipy
-  - opt_einsum
-  - sparse
-  # geographic manipulations
-  - movingpandas
-  - geopandas
-  - cartopy
-  - healpy
-  - cdshealpix
-  - healpix-convolution
-  - scikit-learn
-  - astropy
-  # video processing
   - ffmpeg
-  - xmovie
-  # distributed computing
-  - dask-labextension
-  - dask-image
-  - dask
-  # parameterizing and executing Jupyter Notebooks
   - papermill
-  # code formatting
   - jupyterlab_code_formatter
   - black
   - isort
-  - rich
-  - rich-click
   - pre-commit
-  # other utilities
   - jupyterlab-git
   - git
-  - pip
-  - pip:
-      - dask-hpcconfig
-      # - git+https://github.com/iaocea/xarray-healpy.git@0ffca6058f4008f4f22f076e2d60787fcf32ac82
-      - xhealpixify
+  - pytest
+  - pytest-cov
