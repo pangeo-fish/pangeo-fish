@@ -32,7 +32,9 @@ identifies the versioned convention.
 ```python
 from pangeo_fish.storage import open_healpix_zarr, write_healpix_zarr
 
-write_healpix_zarr(emission, f"{target_root}/combined.zarr", storage_options=storage_options)
+write_healpix_zarr(
+    emission, f"{target_root}/combined.zarr", storage_options=storage_options
+)
 emission = open_healpix_zarr(
     f"{target_root}/combined.zarr",
     storage_options=storage_options,
