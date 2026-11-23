@@ -20,6 +20,7 @@ deployments that detected it as the ``acoustic`` and ``stations`` nodes of a tag
 import warnings
 
 import fsspec
+import numpy as np
 import pandas as pd
 import xarray as xr
 
@@ -65,6 +66,13 @@ def _naive_utc(values):
     if getattr(values.dt, "tz", None) is not None:
         values = values.dt.tz_convert(None)
     return values
+
+
+def _id_text(value):
+    """Tag id as text: integer-valued numbers are written without ``.0``."""
+    if isinstance(value, (float, np.floating)) and float(value).is_integer():
+        return str(int(value))
+    return str(value).strip()
 
 
 def _select_animal(animals, project, tag_id):
@@ -234,7 +242,7 @@ def find_etn_acoustic_detections(
     ]
     acoustic_rows = rows.loc[rows["tag_type"].isin(ACOUSTIC_TAG_TYPES), id_columns]
     acoustic_tag_ids = sorted(
-        acoustic_rows.stack().dropna().astype(str).str.strip().unique().tolist()
+        {_id_text(value) for value in acoustic_rows.stack().dropna()}
     )
     acoustic_tag_ids = [tag_id for tag_id in acoustic_tag_ids if tag_id]
 
@@ -283,6 +291,20 @@ def find_etn_acoustic_detections(
         return nothing_found(
             f"acoustic tag(s) {acoustic_tag_ids} but 0 detections in ETN"
         )
+
+    n_no_deployment = int(raw["deployment_id"].isna().sum())
+    if n_no_deployment:
+        warnings.warn(
+            f"animal {animal_id} ({project}): {n_no_deployment} detection(s)"
+            " without a deployment_id in ETN were dropped",
+            UserWarning,
+            stacklevel=2,
+        )
+        raw = raw.dropna(subset=["deployment_id"])
+        if raw.empty:
+            return nothing_found("no detection with a deployment_id in ETN")
+    # the detections of ETN may contain exact duplicates
+    raw = raw.drop_duplicates().astype({"deployment_id": "int64"})
 
     detections = (
         raw.rename(

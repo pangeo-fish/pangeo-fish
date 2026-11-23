@@ -187,3 +187,51 @@ def test_nothing_found(etn_root, project, tag_id, double_tagged, match):
 def test_select_animal_errors(etn_root, project, tag_id, match):
     with pytest.raises(ValueError, match=match):
         find_etn_acoustic_detections(project, tag_id, root=str(etn_root))
+
+
+def test_duplicates_and_missing_deployments(etn_root):
+    path = etn_root / "acoustic/detections/eels/part-0.parquet"
+    raw = pd.read_parquet(path)
+    extra = pd.concat([raw.iloc[[0]], raw.iloc[[1]].assign(deployment_id=np.nan)])
+    raw = pd.concat([raw.astype({"deployment_id": "float64"}), extra])
+    raw.to_parquet(path, index=False)
+
+    with pytest.warns(UserWarning) as record:
+        result = find_etn_acoustic_detections("eels", "111", root=str(etn_root))
+
+    assert any(
+        "1 detection(s) without a deployment_id" in str(w.message) for w in record
+    )
+    acoustic = result["acoustic"].to_dataset()
+    # the duplicated row and the row without deployment are dropped
+    assert acoustic.sizes["time"] == 4
+    assert acoustic["deployment_id"].dtype.kind == "i"
+    stations = result["stations"].to_dataset()
+    assert list(stations["deployment_id"].values) == [10, 20, 40]
+
+
+def test_float_acoustic_tag_ids(etn_root):
+    animals = pd.read_parquet(etn_root / "acoustic/animals/part-0.parquet")
+    animals = pd.concat(
+        [
+            animals,
+            animals.iloc[[0]].assign(
+                animal_id=7,
+                tag_serial_number="777",
+                acoustic_tag_id=1234.0,
+                acoustic_tag_id_alternative=np.nan,
+            ),
+        ]
+    )
+    animals = animals.assign(
+        acoustic_tag_id=animals["acoustic_tag_id"].where(
+            animals["animal_id"] != 7, 1234.0
+        )
+    )
+
+    with pytest.warns(UserWarning, match="0 detections"):
+        result = find_etn_acoustic_detections(
+            "eels", "777", root=str(etn_root), animals=animals
+        )
+
+    assert result.attrs["acoustic_tag_ids"] == ["1234"]
