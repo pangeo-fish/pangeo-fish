@@ -7,6 +7,8 @@ import xarray as xr
 from numba import njit, prange
 from tqdm import tqdm
 
+from pangeo_fish.storage import open_healpix_zarr
+
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 
@@ -249,13 +251,7 @@ def compute_pdf_bathy_batch_numba(ds_chunk, reshaped_tag, copernicus_chunk):
 
 def batch_compute_pdf_bathy(ds_lr, reshaped_tag, target_root: str, batch_size=50000):
     pdf_chunks = []
-    reference = xr.open_dataset(
-        f"{target_root}/diff-regridded.zarr",
-        engine="zarr",
-        chunks={},
-        inline_array=True,
-        storage_options=None,
-    )
+    reference = open_healpix_zarr(f"{target_root}/diff-regridded.zarr")
     common_ids = np.intersect1d(reference.cell_ids.values, ds_lr.cell_ids.values)
 
     ds_histo_coords = ds_lr.assign_coords(cell_ids=("cells", ds_lr.cell_ids.values))

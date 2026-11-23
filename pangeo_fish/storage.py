@@ -5,6 +5,8 @@ from numbers import Integral
 
 import numpy as np
 
+from pangeo_fish.dggs import canonical_ellipsoid, with_cf_attrs, with_grid_attrs
+
 
 def write_time_blocks(ds, store, *, step):
     """Write bounded, chunk-aligned time regions and time-independent variables.
@@ -34,33 +36,11 @@ def write_time_blocks(ds, store, *, step):
 
 
 def _with_dggs_attrs(ds):
-    """Return ``ds`` with the DGGS grid attributes written on ``cell_ids``.
+    """Return ``ds`` with the canonical HEALPix grid attributes on ``cell_ids``.
 
-    The attributes follow the Zarr DGGS convention used by xdggs (``grid_name``,
-    ``level``, ``indexing_scheme`` and ``ellipsoid``). They are taken from the
-    xdggs index when the dataset has one, else from the existing ``cell_ids``
-    attributes, so that the grid definition survives a round trip to Zarr.
+    Kept for compatibility; see :py:func:`pangeo_fish.dggs.with_grid_attrs`.
     """
-    if "cell_ids" not in ds.variables:
-        return ds
-
-    try:
-        grid_attrs = ds.dggs.grid_info.to_dict()
-    except Exception:
-        attrs = ds["cell_ids"].attrs
-        if "level" not in attrs:
-            return ds
-        grid_attrs = {
-            "grid_name": attrs.get("grid_name", "healpix"),
-            "level": int(attrs["level"]),
-            "indexing_scheme": attrs.get("indexing_scheme", "nested"),
-        }
-        if attrs.get("ellipsoid") is not None:
-            grid_attrs["ellipsoid"] = attrs["ellipsoid"]
-
-    ds = ds.copy()
-    ds["cell_ids"].attrs.update(grid_attrs)
-    return ds
+    return with_grid_attrs(ds)
 
 
 _DGGS_CONVENTION = {
@@ -106,44 +86,21 @@ def _storage_chunks(ds, dim, target_chunk_bytes):
     return chunks
 
 
-def prepare_dggs_zarr(
-    ds, *, cell_chunk_size=None, target_chunk_bytes=DEFAULT_TARGET_CHUNK_BYTES
-):
-    """Prepare a HEALPix dataset for a new Zarr store without adding cells.
+def with_dggs_metadata(ds):
+    """Return ``ds`` with the full HEALPix metadata, ready to be written to Zarr.
 
-    Write the DGGS v1 group metadata alongside the xdggs coordinate
-    attributes, with cells last. Sparse cells retain their order.
-
-    By default the chunks are sized from the data, up to ``target_chunk_bytes``
-    per chunk. One time step of the largest variable with cells (one map) sets
-    the scale:
-
-    * when a map fits in the target, all the cells stay in one chunk and as
-      many time steps as fit are grouped. This is the common case: one map of
-      a coastal box at level 12 is about 1 MB, of the Mediterranean at
-      level 12 about 20 MB;
-    * when a single map is larger than the target (e.g. a basin-scale domain
-      at level 12), each chunk holds one time step and the cells are split
-      into the fewest chunks of (nearly) equal size that fit; only the last
-      chunk can be slightly smaller. Sparse chunks need not coincide with
-      HEALPix parent cells.
-
-    Pass ``cell_chunk_size`` to force one time step per chunk and at most
-    ``cell_chunk_size`` cells per chunk instead.
-    The input dataset and its encodings are not modified.
+    Sets the canonical grid attributes on ``cell_ids``, the CF attributes of the
+    known variables and ``Conventions``, and the Zarr DGGS v1 group attributes
+    (``dggs`` and ``zarr_conventions``). Checks the ``cell_ids``, clears inherited
+    encodings and puts the cells last. Chunks are not changed. The input dataset
+    and its encodings are not modified.
     """
     import healpix_geo.ellipsoid
     import xarray as xr
 
     if isinstance(ds, xr.DataArray):
         ds = ds.to_dataset()
-    if cell_chunk_size is not None and (
-        not isinstance(cell_chunk_size, Integral) or cell_chunk_size <= 0
-    ):
-        raise ValueError("cell_chunk_size must be None or a positive integer")
-    if not isinstance(target_chunk_bytes, Integral) or target_chunk_bytes <= 0:
-        raise ValueError("target_chunk_bytes must be a positive integer")
-    ds = _with_dggs_attrs(ds).copy(deep=False)
+    ds = with_cf_attrs(with_grid_attrs(ds)).copy(deep=False)
     if "cell_ids" not in ds.coords or ds.cell_ids.ndim != 1:
         raise ValueError("a one-dimensional cell_ids coordinate is required")
     attrs = ds.cell_ids.attrs
@@ -161,13 +118,9 @@ def prepare_dggs_zarr(
     if np.unique(ids).size != ids.size:
         raise ValueError("cell_ids must be unique")
     dim = ds.cell_ids.dims[0]
-    ellipsoid = attrs.get("ellipsoid")
-    if ellipsoid is None:
-        ellipsoid = "sphere"
+    ellipsoid = canonical_ellipsoid(attrs.get("ellipsoid"))
     if isinstance(ellipsoid, str):
         ellipsoid = healpix_geo.ellipsoid.resolve(ellipsoid)
-    elif hasattr(ellipsoid, "to_dict"):
-        ellipsoid = ellipsoid.to_dict()
     ellipsoid = dict(ellipsoid)
     if "semimajor_axis" in ellipsoid:
         ellipsoid["semi_major_axis"] = ellipsoid.pop("semimajor_axis")
@@ -194,7 +147,48 @@ def prepare_dggs_zarr(
     # Let xarray encode the decoded values afresh, preserving real zeros and IDs.
     for name in ds.variables:
         ds[name].encoding = {}
-    ds = ds.transpose(..., dim)
+    return ds.transpose(..., dim)
+
+
+def prepare_dggs_zarr(
+    ds, *, cell_chunk_size=None, target_chunk_bytes=DEFAULT_TARGET_CHUNK_BYTES
+):
+    """Prepare a HEALPix dataset for a new Zarr store without adding cells.
+
+    Add the metadata of :py:func:`with_dggs_metadata` (grid, CF and DGGS v1),
+    with cells last, and choose the storage chunks. Sparse cells retain their
+    order.
+
+    By default the chunks are sized from the data, up to ``target_chunk_bytes``
+    per chunk. One time step of the largest variable with cells (one map) sets
+    the scale:
+
+    * when a map fits in the target, all the cells stay in one chunk and as
+      many time steps as fit are grouped. This is the common case: one map of
+      a coastal box at level 12 is about 1 MB, of the Mediterranean at
+      level 12 about 20 MB;
+    * when a single map is larger than the target (e.g. a basin-scale domain
+      at level 12), each chunk holds one time step and the cells are split
+      into the fewest chunks of (nearly) equal size that fit; only the last
+      chunk can be slightly smaller. Sparse chunks need not coincide with
+      HEALPix parent cells.
+
+    Pass ``cell_chunk_size`` to force one time step per chunk and at most
+    ``cell_chunk_size`` cells per chunk instead.
+    The input dataset and its encodings are not modified.
+    """
+    import xarray as xr
+
+    if isinstance(ds, xr.DataArray):
+        ds = ds.to_dataset()
+    if cell_chunk_size is not None and (
+        not isinstance(cell_chunk_size, Integral) or cell_chunk_size <= 0
+    ):
+        raise ValueError("cell_chunk_size must be None or a positive integer")
+    if not isinstance(target_chunk_bytes, Integral) or target_chunk_bytes <= 0:
+        raise ValueError("target_chunk_bytes must be a positive integer")
+    ds = with_dggs_metadata(ds)
+    dim = ds.cell_ids.dims[0]
     if cell_chunk_size is None:
         chunks = _storage_chunks(ds, dim, int(target_chunk_bytes))
     else:
@@ -260,3 +254,87 @@ def write_dggs_zarr(ds, store, *, chunk_level=None, storage_options=None):
         encoding=encoding,
     )
     return ds
+
+
+def write_healpix_zarr(
+    ds,
+    store,
+    *,
+    storage_options=None,
+    mode="w",
+    target_chunk_bytes=DEFAULT_TARGET_CHUNK_BYTES,
+    consolidated=True,
+):
+    """Write a HEALPix dataset of the workflow to a new Zarr store.
+
+    This is the single entry point for the intermediate and output stores
+    (``diff-regridded``, ``emission``, ``combined``, ``states``, ...). It:
+
+    - sets the canonical grid attributes on ``cell_ids``
+      (:py:func:`pangeo_fish.dggs.with_grid_attrs`);
+    - adds the CF attributes of the known variables and ``Conventions``
+      (:py:func:`pangeo_fish.dggs.with_cf_attrs`);
+    - adds the Zarr DGGS v1 group metadata and chooses the chunks
+      (:py:func:`prepare_dggs_zarr`);
+    - writes Zarr format 2 with consolidated metadata.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset or xarray.DataArray
+        A dataset with a one-dimensional ``cell_ids`` coordinate.
+    store : str or zarr store
+        Where to write. A path or URL; ``.zarr`` is not appended.
+    storage_options : dict, optional
+        Passed to :py:meth:`xarray.Dataset.to_zarr`.
+    mode : {"w", "w-"}, default: "w"
+        ``"w"`` replaces an existing store, ``"w-"`` refuses to.
+    target_chunk_bytes : int, default: 64 MiB
+        Upper bound of one storage chunk, see :py:func:`prepare_dggs_zarr`.
+    consolidated : bool, default: True
+        Write consolidated metadata.
+
+    Returns
+    -------
+    xarray.Dataset
+        The prepared dataset that was written (lazy).
+    """
+    prepared = prepare_dggs_zarr(ds, target_chunk_bytes=target_chunk_bytes)
+    prepared.to_zarr(
+        store,
+        mode=mode,
+        storage_options=storage_options,
+        zarr_format=2,
+        consolidated=consolidated,
+    )
+    return prepared
+
+
+def open_healpix_zarr(store, *, storage_options=None, chunks=None, **kwargs):
+    """Open a HEALPix Zarr store written by the workflow.
+
+    The store is opened with its storage chunks (each read once) and then
+    rechunked to ``chunks`` along the dimensions it has. The grid attributes of
+    ``cell_ids`` are put in canonical form, so stores written by earlier versions
+    (e.g. with the ellipsoid as a dict of parameters) give the same dataset.
+
+    Parameters
+    ----------
+    store : str or zarr store
+    storage_options : dict, optional
+    chunks : dict, optional
+        Dask chunks to use after opening, e.g. ``{"time": 1, "cells": -1}``.
+    **kwargs
+        Passed to :py:func:`xarray.open_dataset`.
+    """
+    import xarray as xr
+
+    ds = xr.open_dataset(
+        store,
+        engine="zarr",
+        chunks={},
+        storage_options=storage_options,
+        **({"inline_array": True} | kwargs),
+    )
+    if chunks:
+        ds = ds.chunk({dim: size for dim, size in chunks.items() if dim in ds.dims})
+    return with_grid_attrs(ds)

@@ -517,7 +517,7 @@ def test_merge_tide_matches_cell_ids_and_grid(tmp_path, level, ellipsoid, mismat
     np.testing.assert_array_equal(merged.pdf_tide, likelihood.pdf[:, ::-1])
     merged.to_zarr(tmp_path / "merged.zarr", zarr_format=2, consolidated=True)
     with xr.open_zarr(tmp_path / "merged.zarr") as written:
-        xr.testing.assert_identical(written.pdf_bathy, total.pdf_bathy)
+        xr.testing.assert_equal(written.pdf_bathy, total.pdf_bathy)
 
 
 @pytest.mark.parametrize("use_xarray", [False, True])

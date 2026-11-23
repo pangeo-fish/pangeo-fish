@@ -37,6 +37,8 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from pangeo_fish.dggs import canonical_ellipsoid
+
 CONSTITUENT_DIM = "constituent"
 CELL_DIM = "cells"
 GRID_ATTRS = ("grid_name", "level", "indexing_scheme", "ellipsoid")
@@ -73,7 +75,7 @@ def _grid_info(cell_ids):
         "grid_name": attrs.get("grid_name", "healpix"),
         "level": int(attrs["level"]),
         "indexing_scheme": attrs.get("indexing_scheme", "nested"),
-        "ellipsoid": attrs["ellipsoid"],
+        "ellipsoid": canonical_ellipsoid(attrs["ellipsoid"]),
     }
     if info["grid_name"] != "healpix" or info["indexing_scheme"] != "nested":
         raise ValueError(f"only nested HEALPix cells are supported, got {info}")
@@ -765,7 +767,7 @@ def write_harmonic_constants(
     chunk_constituents : int, optional
         Constituents per chunk. The default (-1) groups all constituents together.
     """
-    from pangeo_fish.storage import _with_dggs_attrs
+    from pangeo_fish.storage import with_dggs_metadata
 
     _grid_info(constants["cell_ids"])
     order = np.argsort(constants["cell_ids"].values, kind="stable")
@@ -774,7 +776,7 @@ def write_harmonic_constants(
         {name: ds[name].astype(dtype) for name in ("tide_real", "tide_imag")}
     )
     ds = ds.assign_coords({CONSTITUENT_DIM: _names(ds[CONSTITUENT_DIM].values)})
-    ds = _with_dggs_attrs(ds).chunk(
+    ds = with_dggs_metadata(ds).chunk(
         {CONSTITUENT_DIM: chunk_constituents, CELL_DIM: chunk_cells}
     )
     for var in ds.variables.values():
@@ -812,7 +814,7 @@ def write_tide_pdf_healpix(likelihood, target_root, behav_found, step=200):
     """
     import zarr
 
-    from pangeo_fish.storage import _with_dggs_attrs, write_time_blocks
+    from pangeo_fish.storage import with_dggs_metadata, write_time_blocks
 
     ds = likelihood[["pdf", "ocean_mask", "tide_found"]].copy()
     if isinstance(behav_found, xr.DataArray) and "time" in behav_found.coords:
@@ -839,7 +841,7 @@ def write_tide_pdf_healpix(likelihood, target_root, behav_found, step=200):
         )
     ds["behav_found"] = ("time", flags)
     ds["tide_found"] = ds["tide_found"].astype(float)
-    ds = _with_dggs_attrs(ds)
+    ds = with_dggs_metadata(ds)
     store = f"{target_root}/tide_pdf_healpix.zarr"
     write_time_blocks(ds.chunk({"cells": -1}), store, step=step)
     zarr.consolidate_metadata(store)

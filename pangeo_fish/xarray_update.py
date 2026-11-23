@@ -1,5 +1,7 @@
 import xarray as xr
 
+from pangeo_fish.dggs import canonical_ellipsoid
+
 
 @xr.register_dataset_accessor("healpix")
 class Accessor:
@@ -35,8 +37,9 @@ class Accessor:
                 pass
         if refinement_level is None:
             refinement_level = int(attrs["level"])
-        if ellipsoid is None:
-            ellipsoid = attrs.get("ellipsoid") or "sphere"
+        ellipsoid = canonical_ellipsoid(
+            attrs.get("ellipsoid") if ellipsoid is None else ellipsoid
+        )
 
         plot = (
             self._obj[var]

@@ -11,9 +11,9 @@ from zarr.abc.store import Store
 from zarr.storage import LocalStore
 
 from pangeo_fish import tracks, utils
+from pangeo_fish.dggs import with_grid_attrs
 from pangeo_fish.hmm.decode import mean_track, modal_track, viterbi, viterbi2
 from pangeo_fish.hmm.filter import _backward_zarr, _forward_zarr
-from pangeo_fish.storage import _with_dggs_attrs
 
 
 def _cache_store(cache):
@@ -82,7 +82,7 @@ class CachedEstimator:
         dims = temporal_dims + spatial_dims
 
         # write the dataset to disk
-        _with_dggs_attrs(X).transpose(*dims).to_zarr(
+        with_grid_attrs(X).transpose(*dims).to_zarr(
             cache_store, group="emission", mode="w", consolidated=False, zarr_format=2
         )
         group = zarr.open_group(
@@ -123,7 +123,7 @@ class CachedEstimator:
         dims = temporal_dims + spatial_dims
 
         # write the dataset to disk
-        _with_dggs_attrs(X).transpose(*dims).to_zarr(
+        with_grid_attrs(X).transpose(*dims).to_zarr(
             cache_store, group="emission", mode="w", consolidated=False, zarr_format=2
         )
 

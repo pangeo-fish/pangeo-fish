@@ -12,6 +12,7 @@ from xhealpixify.conversions import geographic_to_cartesian
 
 from pangeo_fish import utils
 from pangeo_fish.cf import bounds_to_bins
+from pangeo_fish.dggs import canonical_ellipsoid, grid_ellipsoid
 from pangeo_fish.healpy import (
     astronomic_to_cartesian,
     astronomic_to_cell_ids,
@@ -120,11 +121,9 @@ def deployment_reception_masks(
     dims=["cells"],
     ellipsoid=None,
 ):
-    if ellipsoid is None:
-        info = getattr(grid.dggs, "grid_info", None)
-        ellipsoid = getattr(info, "ellipsoid", None) or grid["cell_ids"].attrs.get(
-            "ellipsoid"
-        )
+    ellipsoid = (
+        grid_ellipsoid(grid) if ellipsoid is None else canonical_ellipsoid(ellipsoid)
+    )
     rot = {
         "lat": grid["cell_ids"].attrs.get("lat", 0),
         "lon": grid["cell_ids"].attrs.get("lon", 0),
@@ -180,8 +179,11 @@ def buffer_points_cells(
     intersect=False,
 ):
     """ """
-    if ellipsoid is None:
-        ellipsoid = cell_ids.attrs.get("ellipsoid")
+    ellipsoid = (
+        grid_ellipsoid(cell_ids)
+        if ellipsoid is None
+        else canonical_ellipsoid(ellipsoid)
+    )
 
     def _buffer_masks(
         cell_ids, vector, nside, radius, factor=4, intersect=False, ellipsoid=ellipsoid
@@ -317,11 +319,9 @@ def emission_probability(
     emission : xarray.Dataset
         The resulting emission probability maps.
     """
-    if ellipsoid is None:
-        info = getattr(grid.dggs, "grid_info", None)
-        ellipsoid = getattr(info, "ellipsoid", None) or grid["cell_ids"].attrs.get(
-            "ellipsoid"
-        )
+    ellipsoid = (
+        grid_ellipsoid(grid) if ellipsoid is None else canonical_ellipsoid(ellipsoid)
+    )
     if dims != ["cells"]:
         raise ValueError("dims is not filed right: try 'cells' ")
 

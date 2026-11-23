@@ -57,8 +57,21 @@ DGGS Zarr Output
 .. autosummary::
    :toctree: generated
 
+   write_healpix_zarr
+   open_healpix_zarr
    prepare_dggs_zarr
+   with_dggs_metadata
    write_dggs_zarr
+
+.. currentmodule:: pangeo_fish.dggs
+.. autosummary::
+   :toctree: generated
+
+   canonical_ellipsoid
+   grid_ellipsoid
+   grid_attrs
+   with_grid_attrs
+   with_cf_attrs
 
 
 Grid Manipulation

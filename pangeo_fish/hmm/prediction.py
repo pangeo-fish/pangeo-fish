@@ -10,6 +10,8 @@ from tlz.functoolz import curry
 from xarray.namedarray._typing import _arrayfunction_or_api as _ArrayLike
 from xdggs.grid import DGGSInfo
 
+from pangeo_fish.dggs import canonical_ellipsoid, grid_ellipsoid
+
 
 def gaussian_filter(X, sigma, **kwargs):
     if isinstance(X, da.Array) and X.npartitions > 1:
@@ -25,6 +27,20 @@ def gaussian_filter(X, sigma, **kwargs):
         )
     else:
         return scipy.ndimage.gaussian_filter(X, sigma=sigma, **kwargs)
+
+
+def _predictor_ellipsoid(ellipsoid, grid_info, cell_ids):
+    """Canonical ellipsoid of a predictor.
+
+    An explicit ``ellipsoid`` wins, then the one of the grid, then the
+    ``ellipsoid`` attribute of ``cell_ids``; a grid without one is a sphere.
+    """
+    if ellipsoid is not None:
+        return canonical_ellipsoid(ellipsoid)
+    from_grid = getattr(grid_info, "ellipsoid", None)
+    if from_grid is not None:
+        return canonical_ellipsoid(from_grid)
+    return grid_ellipsoid(cell_ids)
 
 
 @dataclass
@@ -149,7 +165,7 @@ class GaussianHealpixAnalyse(Predictor):
             )
 
         ellipsoid = getattr(self.grid_info, "ellipsoid", None)
-        name = getattr(ellipsoid, "name", ellipsoid)
+        name = None if ellipsoid is None else canonical_ellipsoid(ellipsoid)
         if name is not None and str(name).upper() != "WGS84":
             raise NotImplementedError(
                 "GaussianHealpixAnalyse supports the WGS84 ellipsoid only; "
@@ -210,11 +226,9 @@ class OldUpDownGaussian1DHealpix(Predictor):
         radius = int(np.ceil(3 * sigma_opt))
         if self.kernel_sz is None:
             self.kernel_sz = 2 * radius + 1
-        if self.ellipsoid is None:
-            # as in FFTGaussian1DHealpix: numpy cell ids have no attrs, and a
-            # grid without an ellipsoid is a sphere
-            attrs = getattr(self.cell_ids, "attrs", {})
-            self.ellipsoid = attrs.get("ellipsoid") or "sphere"
+        self.ellipsoid = _predictor_ellipsoid(
+            self.ellipsoid, self.grid_info, self.cell_ids
+        )
         # --- 1. Build the multi-resolution operator ---
         self.layer = LargeConv(
             level=self.grid_info.level,
@@ -467,11 +481,9 @@ class UpDownGaussian1DHealpix(Predictor):
     def __post_init__(self):
         nside = 2**self.grid_info.level
 
-        if self.ellipsoid is None:
-            # as in FFTGaussian1DHealpix: numpy cell ids have no attrs, and a
-            # grid without an ellipsoid is a sphere
-            attrs = getattr(self.cell_ids, "attrs", {})
-            self.ellipsoid = attrs.get("ellipsoid") or "sphere"
+        self.ellipsoid = _predictor_ellipsoid(
+            self.ellipsoid, self.grid_info, self.cell_ids
+        )
 
         # Nominal fine-resolution kernel size: radius = 3 * sigma (in pixels)
         if self.kernel_sz is None:
@@ -645,9 +657,9 @@ class FFTGaussian1DHealpix(Predictor):
         level = self.grid_info.level
         nside = 2**level
         np_dtype = np.float64 if self.dtype == torch.float64 else np.float32
-        if self.ellipsoid is None:
-            attrs = getattr(self.cell_ids, "attrs", {})
-            self.ellipsoid = attrs.get("ellipsoid") or "sphere"
+        self.ellipsoid = _predictor_ellipsoid(
+            self.ellipsoid, self.grid_info, self.cell_ids
+        )
 
         # Projected pixel size, passed explicitly to LocalFFT so that the
         # radians -> pixels conversion is exact in the projected plane.
@@ -803,7 +815,7 @@ class LargeGaussianHealpixAnalyse(Predictor):
         from healpix_analyse import LargeConv
 
         ellipsoid = getattr(self.grid_info, "ellipsoid", None)
-        name = getattr(ellipsoid, "name", ellipsoid)
+        name = None if ellipsoid is None else canonical_ellipsoid(ellipsoid)
         if name is not None and str(name).upper() != "WGS84":
             raise NotImplementedError(
                 "LargeGaussianHealpixAnalyse supports the WGS84 ellipsoid only; "

@@ -6,6 +6,7 @@ import xarray as xr
 import zarr
 from zarr.storage import MemoryStore
 
+from pangeo_fish.dggs import with_cf_attrs
 from pangeo_fish.storage import prepare_dggs_zarr, write_dggs_zarr
 
 
@@ -82,7 +83,8 @@ def test_parent_chunks_roundtrip(tmp_path, sparse_maps, indexed, ellipsoid):
     assert not actual["mask"].isel(cells=[1, 3, 4, 5, 6]).any()
     assert actual.states[0, 0] == 0.0
     assert actual.cell_ids[0] == 0
-    xr.testing.assert_identical(actual.sigma, source.sigma)
+    # the export adds the CF attributes (e.g. ``standard_name`` on ``time``)
+    xr.testing.assert_identical(actual.sigma, with_cf_attrs(source).sigma)
     assert actual.states.attrs["units"] == "1"
     group = zarr.open_group(path)
     assert group.metadata.zarr_format == 2

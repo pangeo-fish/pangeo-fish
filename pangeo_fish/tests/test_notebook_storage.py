@@ -36,7 +36,9 @@ def test_hand_sigma_copy_rechunked_multisigma_data(tmp_path, emissions):
     assert params["sigma"] == [0.03]
     assert params["sigma_indices"] == [[0, 1, 2]]
     with xr.open_zarr(tmp_path / "manual/combined.zarr") as actual:
-        xr.testing.assert_identical(actual.load(), source)
+        # same data; the store also carries the CF and DGGS metadata
+        xr.testing.assert_equal(actual.load(), source)
+        assert actual.attrs["Conventions"].startswith("CF-")
 
 
 class MatrixPredictor:

@@ -8,8 +8,13 @@ from numpy.linalg import lstsq
 from scipy.signal import savgol_filter
 from tqdm import tqdm
 
-from pangeo_fish.helpers import _with_dggs_attrs, regrid_dataset_hpresample
-from pangeo_fish.storage import write_time_blocks
+from pangeo_fish.dggs import CF_ATTRS
+from pangeo_fish.helpers import regrid_dataset_hpresample
+from pangeo_fish.storage import (
+    open_healpix_zarr,
+    with_dggs_metadata,
+    write_time_blocks,
+)
 
 #####################################################################
 #  First part : extraction of a tidal signal
@@ -613,7 +618,7 @@ def tide_to_healpix(
 
     print("Concatenating chunks...")
     ds = xr.concat(chunks, dim="time")
-    ds = _with_dggs_attrs(ds)
+    ds = with_dggs_metadata(ds)
     # Write format 2, with region boundaries aligned to the storage chunks.
     store_path = f"{target_root}/tide_pdf_healpix.zarr"
     write_time_blocks(ds.chunk({"cells": -1}), store_path, step=step)
@@ -649,9 +654,12 @@ def merge_tide_with_total(target_root, storage_options=None):
     tide_mask : xarray.DataArray
         Daily ``tide_found`` on the common time steps.
     """
-    open_kw = dict(engine="zarr", chunks={}, storage_options=storage_options)
-    total = xr.open_dataset(f"{target_root}/total_pdf.zarr", **open_kw).load()
-    daily = xr.open_dataset(f"{target_root}/tide_pdf_healpix.zarr", **open_kw)
+    total = open_healpix_zarr(
+        f"{target_root}/total_pdf.zarr", storage_options=storage_options
+    ).load()
+    daily = open_healpix_zarr(
+        f"{target_root}/tide_pdf_healpix.zarr", storage_options=storage_options
+    )
     for name in ("grid_name", "level", "indexing_scheme", "ellipsoid"):
         tide_value = daily.cell_ids.attrs.get(name)
         total_value = total.cell_ids.attrs.get(name)
@@ -680,6 +688,8 @@ def merge_tide_with_total(target_root, storage_options=None):
         .merge(restrict(total), compat="override", join="exact")
     )
     merged.attrs = total.attrs.copy()
+    # The tide store named its likelihood ``pdf``: describe it as the tide term.
+    merged["pdf_tide"].attrs = dict(CF_ATTRS["pdf_tide"])
 
     tide_mask = merged["tide_found"].broadcast_like(merged["pdf_tide"])
     behav_mask = merged["behav_found"].broadcast_like(merged["pdf_tide"])

@@ -84,7 +84,7 @@ steps to what the observations resolve, before raising the level.
 
 The intermediate HEALPix stores (`diff-regridded.zarr`, `emission.zarr`,
 `combined.zarr`, `states.zarr`, ...) are written through
-{py:func}`pangeo_fish.storage.prepare_dggs_zarr`, which sizes the chunks from
+{py:func}`pangeo_fish.storage.write_healpix_zarr`, which sizes the chunks from
 the data, up to 64 MiB per chunk:
 
 - when one map is smaller than that (all the regional cases above), all the
@@ -95,7 +95,8 @@ the data, up to 64 MiB per chunk:
 
 The computations do not depend on the chunking: element-wise steps such as the
 temperature emission work on any chunks, and the filter loads whole maps. Open
-the stores with `chunks={}` (one Dask chunk per storage chunk) and rechunk
-afterwards if needed, e.g. `xr.open_dataset(..., chunks={}).chunk({"time": 1})`.
-Requesting Dask chunks smaller than the storage chunks directly in
-`open_dataset` makes each storage chunk be read several times.
+the stores with {py:func}`pangeo_fish.storage.open_healpix_zarr`, which reads
+each storage chunk once and then rechunks, e.g.
+`open_healpix_zarr(path, chunks={"time": 1, "cells": -1})`. Requesting Dask
+chunks smaller than the storage chunks directly in `xr.open_dataset` makes each
+storage chunk be read several times.

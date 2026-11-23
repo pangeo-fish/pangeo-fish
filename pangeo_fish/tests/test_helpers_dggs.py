@@ -125,11 +125,13 @@ def test_get_max_sigma_without_resolution_coordinate():
     assert in_pixels == pytest.approx(60 / cell_size)
 
 
-def test_with_dggs_attrs_from_index_only():
+def test_with_grid_attrs_from_index_only():
+    from pangeo_fish.dggs import with_grid_attrs
+
     ds = helpers.to_healpix(_healpix_dataset(ellipsoid="WGS84"))
     ds["cell_ids"].attrs.clear()
 
-    attrs = helpers._with_dggs_attrs(ds)["cell_ids"].attrs
+    attrs = with_grid_attrs(ds)["cell_ids"].attrs
 
     assert attrs["level"] == 2
     _assert_wgs84(attrs["ellipsoid"])

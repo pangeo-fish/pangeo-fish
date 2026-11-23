@@ -38,6 +38,13 @@ from xhealpixify import HealpyGridInfo, HealpyRegridder
 import pangeo_fish.distributions as distrib
 from pangeo_fish.acoustic import emission_probability
 from pangeo_fish.cf import bounds_to_bins
+from pangeo_fish.dggs import (
+    canonical_ellipsoid,
+    grid_attrs,
+    grid_ellipsoid,
+    with_cf_attrs,
+    with_grid_attrs,
+)
 from pangeo_fish.diff import diff_z
 from pangeo_fish.drycells import _apply_min_water_depth
 from pangeo_fish.grid import center_longitude
@@ -61,7 +68,10 @@ from pangeo_fish.io import (
     save_trajectories,
 )
 from pangeo_fish.pdf import combine_emission_pdf, normal
-from pangeo_fish.storage import _with_dggs_attrs, prepare_dggs_zarr
+from pangeo_fish.storage import (
+    open_healpix_zarr,
+    write_healpix_zarr,
+)
 from pangeo_fish.tags import adapt_model_time, reshape_by_bins, to_time_slice
 from pangeo_fish.utils import haversine_distance, temporal_resolution
 from pangeo_fish.visualization import filter_by_states, plot_map, render_frame
@@ -126,27 +136,28 @@ def _plot_in_figure(ds: xr.Dataset, **plot_kwargs) -> Figure:
     return fig
 
 
-def _rechunk_existing(ds: xr.Dataset, chunks: dict | None) -> xr.Dataset:
-    """Rechunk ``ds`` along the dimensions of ``chunks`` that it has."""
-    return ds.chunk(
-        {dim: size for dim, size in (chunks or {}).items() if dim in ds.dims}
-    )
-
-
 def _save_zarr(ds: xr.Dataset, path: str, storage_options=None):
-    """Helper for saving a .zarr array and warning in case of failure."""
-    try:
-        path_to_zarr = path + ".zarr" if not path.endswith(".zarr") else path
-        if "cell_ids" in ds.coords:
-            ds = prepare_dggs_zarr(ds)
-        ds.to_zarr(
-            path_to_zarr, mode="w", storage_options=storage_options, zarr_format=2
-        )
-    except Exception:
-        warnings.warn(
-            f'An error occurred when saving a .zarr array to "{path_to_zarr}")',
-            RuntimeWarning,
-        )
+    """Save ``ds`` to ``path`` (``.zarr`` is appended when missing).
+
+    HEALPix datasets go through :py:func:`pangeo_fish.storage.write_healpix_zarr`
+    (grid, CF and DGGS metadata, chunk policy). Other datasets get the CF
+    attributes and are written as Zarr format 2. Errors are raised, not hidden:
+    a missing store would otherwise only show up in a later step.
+    """
+    path_to_zarr = path if path.endswith(".zarr") else path + ".zarr"
+    if "cell_ids" in ds.coords:
+        write_healpix_zarr(ds, path_to_zarr, storage_options=storage_options)
+        return
+    # Source stores can carry encodings Zarr format 2 cannot write (Zarr 3
+    # serializers, foreign chunks): let xarray encode the values afresh.
+    ds = with_cf_attrs(ds).drop_encoding()
+    ds.to_zarr(
+        path_to_zarr,
+        mode="w",
+        storage_options=storage_options,
+        zarr_format=2,
+        consolidated=True,
+    )
 
 
 def _inspect_curry_obj(curried_obj):
@@ -203,19 +214,12 @@ def _update_params_dict(factory, params: dict):
 def to_healpix(ds: xr.Dataset) -> xr.Dataset:
     """Helper that loads a Dataset as a HEALPix grid (indexed by ``"cell_ids"``)."""
 
-    attrs_to_keep = ["level", "indexing_scheme", "ellipsoid"]
-    cell_ids_attrs = ds["cell_ids"].attrs
-
-    attrs = {
-        k: v
-        for (k, v) in cell_ids_attrs.items()
-        if k in attrs_to_keep and v is not None
-    }
-
-    if "indexing_scheme" not in attrs.keys():
-        attrs["indexing_scheme"] = "nested"
-        attrs["grid_name"] = "healpix"
-    decoded = ds.dggs.decode({"grid_name": "healpix"} | attrs)
+    attrs = grid_attrs(ds)
+    if attrs is None:
+        raise ValueError("cell_ids must carry the HEALPix grid attributes (level)")
+    decoded = ds.dggs.decode(attrs)
+    # xdggs moves the grid into its index and empties the attributes: keep them
+    # in canonical form, so that the grid survives any later write.
     decoded["cell_ids"].attrs.update(attrs)
     return decoded
 
@@ -1324,6 +1328,9 @@ def regrid_dataset_hpresample(
     attrs = ds.attrs.copy()
     attrs.update(grid_type="healpix", level=refinement_level, nside=nside)
     new_ds.attrs.update(attrs)
+    # The dataset becomes HEALPix here: give it its grid and CF metadata once,
+    # in canonical form; later steps keep them and the writer checks them.
+    new_ds = with_cf_attrs(with_grid_attrs(new_ds))
 
     if plot:
         print("no method implemented to plot")
@@ -1403,6 +1410,9 @@ def regrid_dataset(
     reshaped = reshaped.assign_attrs(attrs)
     if "indexing_scheme" not in reshaped["cell_ids"].attrs.keys():
         reshaped["cell_ids"].attrs["indexing_scheme"] = "nested"
+    # The dataset becomes HEALPix here: give it its grid and CF metadata once,
+    # in canonical form; later steps keep them and the writer checks them.
+    reshaped = with_cf_attrs(with_grid_attrs(reshaped))
 
     if save:
         _save_zarr(reshaped, f"{target_root}/diff-regridded.zarr", storage_options)
@@ -1524,7 +1534,7 @@ def compute_emission_pdf(
     emission_pdf = emission_pdf.assign_attrs(attrs)
     if "cell_ids" in diff_ds.coords and "cell_ids" in emission_pdf.coords:
         emission_pdf["cell_ids"].attrs.update(diff_ds["cell_ids"].attrs)
-    emission_pdf = _with_dggs_attrs(emission_pdf)
+    emission_pdf = with_grid_attrs(emission_pdf)
     emission_pdf = emission_pdf.chunk({"time": chunk_time} | {d: -1 for d in dims})
 
     if save:
@@ -1592,11 +1602,11 @@ def compute_acoustic_pdf(
         The plot of ``acoustic_pdf``, or None if ``plot=False``
 
     """
-    if ellipsoid is None:
-        try:
-            ellipsoid = emission_ds.dggs.grid_info.ellipsoid
-        except ValueError:
-            ellipsoid = emission_ds["cell_ids"].attrs.get("ellipsoid")
+    ellipsoid = (
+        grid_ellipsoid(emission_ds)
+        if ellipsoid is None
+        else canonical_ellipsoid(ellipsoid)
+    )
 
     if dims == ["cells"]:
         lat = emission_ds["cell_ids"].attrs.get("lat", 0)
@@ -1623,7 +1633,7 @@ def compute_acoustic_pdf(
             "receiver_buffer": str(receiver_buffer),
         }
     )
-    acoustic_pdf = _with_dggs_attrs(acoustic_pdf.assign_attrs(attrs))
+    acoustic_pdf = with_grid_attrs(acoustic_pdf.assign_attrs(attrs))
 
     if save:
         _save_zarr(acoustic_pdf, f"{target_root}/acoustic.zarr", storage_options)
@@ -1719,7 +1729,7 @@ def combine_pdfs(
         if combined.coords.get("cell_ids", None) is not None:
             combined["cell_ids"].attrs.update(ds["cell_ids"].attrs)
     ds.attrs.update(_get_package_versions())
-    combined = _with_dggs_attrs(combined)
+    combined = with_grid_attrs(combined)
 
     figure = False
     if plot:
@@ -1815,7 +1825,7 @@ def normalize_pdf(
         for item in excluded_pdf:
             normalized = normalized.drop_vars(item)
 
-    normalized = _with_dggs_attrs(normalized.rename({"pdf_normalized": "pdf"}))
+    normalized = with_grid_attrs(normalized.rename({"pdf_normalized": "pdf"}))
     warnings.warn(
         f"you decided to normalize the pdf without: {excluded_pdf}, if you want to include them, change excluded_pdf ",
         UserWarning,
@@ -1847,8 +1857,9 @@ def _get_predictor_factory(
         raise ValueError("dims must be ['cells'], ['x','y'] is not used anymore")
 
     elif dims == ["cells"]:
-        if ellipsoid is None:
-            ellipsoid = ds["cell_ids"].attrs.get("ellipsoid")
+        ellipsoid = (
+            grid_ellipsoid(ds) if ellipsoid is None else canonical_ellipsoid(ellipsoid)
+        )
         if conv_method == "HealpixConv":
             if truncate is None:
                 raise ValueError(
@@ -1952,11 +1963,7 @@ def earth_radius_from_ellipsoid(ellipsoid=None) -> pint.Quantity:
 
 def _earth_radius_from_grid(ds: xr.Dataset) -> pint.Quantity:
     """Derive the Earth radius from the DGGS grid info of ``ds``."""
-    try:
-        ellipsoid = ds.dggs.grid_info.ellipsoid
-    except Exception:
-        ellipsoid = ds["cell_ids"].attrs.get("ellipsoid")
-    return earth_radius_from_ellipsoid(ellipsoid)
+    return earth_radius_from_ellipsoid(grid_ellipsoid(ds))
 
 
 def _grid_resolution_radians(ds: xr.Dataset) -> xr.DataArray:
@@ -2158,11 +2165,9 @@ def optimize_pdf(
     else:
         raise ValueError("dims must be ['cells'], ['x','y'] is not used anymore")
         as_radians = False
-    if ellipsoid is None:
-        info = getattr(ds.dggs, "grid_info", None)
-        ellipsoid = getattr(info, "ellipsoid", None) or ds["cell_ids"].attrs.get(
-            "ellipsoid"
-        )
+    ellipsoid = (
+        grid_ellipsoid(ds) if ellipsoid is None else canonical_ellipsoid(ellipsoid)
+    )
 
     max_sigma = _get_max_sigma(
         ds, earth_radius, adjustment_factor, maximum_speed, as_radians
@@ -2296,13 +2301,11 @@ def _load_emission(ds, target_root, storage_options, chunks):
             raise ValueError(
                 "You must provide either `ds` or `target_root` to load the dataset."
             )
-        emission = xr.open_dataset(
+        emission = open_healpix_zarr(
             f"{target_root}/combined.zarr",
-            engine="zarr",
-            chunks={},
-            inline_array=True,
             storage_options=storage_options,
-        ).chunk(chunks)
+            chunks=chunks,
+        )
     else:
         emission = ds
 
@@ -2390,11 +2393,11 @@ def _build_estimator(emission, target_root, storage_options, ellipsoid=None):
     # after the checks above, so that a removed predictor is reported first
     if "cells" in emission.dims:
         emission = to_healpix(emission)
-        if ellipsoid is None:
-            info = getattr(emission.dggs, "grid_info", None)
-            ellipsoid = getattr(info, "ellipsoid", None) or emission[
-                "cell_ids"
-            ].attrs.get("ellipsoid")
+        ellipsoid = (
+            grid_ellipsoid(emission)
+            if ellipsoid is None
+            else canonical_ellipsoid(ellipsoid)
+        )
 
     # one sigma value: every time step uses the same predictor
     if len(params["sigma"]) == 1:
@@ -2582,7 +2585,7 @@ def compute_states(
         sigma_var = _compute_sigma_var(sigma_indices, params["sigma"])
         states = states.assign(sigma=("time", sigma_var))
 
-    states = _with_dggs_attrs(states)
+    states = with_grid_attrs(states)
 
     if save:
         _save_zarr(states, f"{target_root}/states.zarr", storage_options)
@@ -2666,9 +2669,11 @@ def decode_trajectories(
             raise ValueError(
                 "You must provide either `states` or `target_root` to load the states."
             )
-        states = xr.open_zarr(
-            f"{target_root}/states.zarr", storage_options=storage_options
-        ).chunk(chunks)
+        states = open_healpix_zarr(
+            f"{target_root}/states.zarr",
+            storage_options=storage_options,
+            chunks=chunks,
+        )
 
     trajectories = estimator.decode(
         emission,
@@ -2795,31 +2800,18 @@ def open_distributions(
     ellipsoid = resampling_info["ellipsoid"]
     refinement_level = resampling_info["refinement_level"]
 
-    # Read whole storage chunks, then rechunk: a storage chunk can hold several
-    # time steps, and asking xarray for smaller chunks would read it repeatedly.
     emission = (
-        xr.open_dataset(
+        open_healpix_zarr(
             f"{target_root}/combined.zarr",
-            engine="zarr",
-            chunks={},
-            inline_array=True,
             storage_options=storage_options,
+            chunks=chunks,
         )
-        .pipe(_rechunk_existing, chunks)
         .rename_vars({"pdf": "emission"})
         .drop_vars(["final", "initial"], errors="ignore")
     )
-    states = (
-        xr.open_dataset(
-            f"{target_root}/states.zarr",
-            engine="zarr",
-            chunks={},
-            inline_array=True,
-            storage_options=storage_options,
-        )
-        .pipe(_rechunk_existing, chunks)
-        .where(emission["mask"])
-    )
+    states = open_healpix_zarr(
+        f"{target_root}/states.zarr", storage_options=storage_options, chunks=chunks
+    ).where(emission["mask"])
 
     data_hp = xr.merge([states, emission.drop_vars(["mask"])])
 
@@ -3067,7 +3059,7 @@ def multiplot_healpix(
     """
     plots = []
     for ds, variables in datasets:
-        ellipsoid = ds["cell_ids"].attrs.get("ellipsoid")
+        ellipsoid = grid_ellipsoid(ds)
         for var_name in variables:
             plot = (
                 ds[var_name]
@@ -3558,13 +3550,11 @@ def hand_test_parameter(
     """
     # Open the distributions
     emission = (
-        xr.open_dataset(
+        open_healpix_zarr(
             f"{target_root}/combined.zarr",
-            engine="zarr",
-            chunks={},
-            inline_array=True,
             storage_options=storage_options,
-        ).chunk(default_chunk_dims or {})
+            chunks=default_chunk_dims,
+        )
         if emission is None
         else emission
     )
@@ -3589,17 +3579,9 @@ def hand_test_parameter(
         storage_options=storage_options,
     )
 
-    # Create a new folder
-    # A rechunked read retains the source store's encoding. For this new store,
-    # derive safe storage chunks from the current Dask layout instead.
-    emission = emission.copy(deep=False)
-    for name in emission.variables:
-        emission[name].encoding.pop("chunks", None)
-    emission.to_zarr(
+    write_healpix_zarr(
+        emission,
         f"{target_root}{saving_root}/combined.zarr",
-        mode="w",
-        consolidated=True,
         storage_options=storage_options,
-        zarr_format=2,
     )
     return params
