@@ -124,7 +124,9 @@ def test_cpu_only_methods_refuse_another_device(emission, conv_method):
 
 
 @pytest.mark.parametrize("device", ["meta", torch.device("mps")])
-def test_other_torch_device_types_are_refused_before_loading(monkeypatch, emission, device):
+def test_other_torch_device_types_are_refused_before_loading(
+    monkeypatch, emission, device
+):
     def unexpected_compute(*args, **kwargs):
         pytest.fail("the emission was loaded before device validation")
 
