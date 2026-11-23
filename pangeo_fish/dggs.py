@@ -10,8 +10,10 @@ xdggs and the Zarr DGGS convention:
 - ``ellipsoid``: the reference ellipsoid, in the canonical form returned by
   :py:func:`canonical_ellipsoid`
 
-xdggs 0.6 keeps the ellipsoid as given, xdggs 0.7 resolves a name into a dict of
-parameters (or an ``Ellipsoid`` object), and some libraries only accept a name.
+Decoding with xdggs (0.6 and 0.7) moves the grid into the index and empties the
+attributes of ``cell_ids``; :py:func:`pangeo_fish.helpers.to_healpix` puts the
+canonical attributes back. xdggs 0.7 also resolves a name into a dict of parameters
+(or an ``Ellipsoid`` object), and some libraries only accept a name.
 :py:func:`canonical_ellipsoid` maps all of these to one form: the name for a known
 ellipsoid (``"WGS84"``, ``"sphere"``, ...), else a dict of numeric parameters. Every
 function that needs the ellipsoid reads it through :py:func:`grid_ellipsoid`.
@@ -75,6 +77,21 @@ def _named_parameters(name):
     return {k: float(v) for k, v in dict(params).items() if k != "name"}
 
 
+#: Names tried when an ellipsoid is given by its parameters only, or by a name in
+#: another case (e.g. ``"wgs84"``). Unknown names are skipped.
+_KNOWN_NAMES = ("WGS84", "sphere", "GRS80", "WGS72", "unitsphere")
+
+
+def _known_name(name):
+    """The spelling of ``name`` that healpix-geo knows, or ``None``."""
+    if _named_parameters(name) is not None:
+        return name
+    for known in _KNOWN_NAMES:
+        if known.casefold() == name.casefold() and _named_parameters(known):
+            return known
+    return None
+
+
 def _same_parameters(a, b):
     keys = set(a) & set(b)
     return bool(keys) and all(np.isclose(a[k], b[k], rtol=1e-12) for k in keys)
@@ -99,9 +116,10 @@ def canonical_ellipsoid(ellipsoid):
     if ellipsoid is None:
         return "sphere"
     if isinstance(ellipsoid, str):
-        if _named_parameters(ellipsoid) is None:
+        name = _known_name(ellipsoid)
+        if name is None:
             raise ValueError(f"unknown ellipsoid name {ellipsoid!r}")
-        return ellipsoid
+        return name
     if hasattr(ellipsoid, "to_dict"):
         ellipsoid = ellipsoid.to_dict()
     if not hasattr(ellipsoid, "items"):
@@ -113,11 +131,22 @@ def canonical_ellipsoid(ellipsoid):
     name = params.pop("name", None)
     params = {k: float(v) for k, v in params.items() if v is not None}
     if name is not None:
-        named = _named_parameters(name)
+        known = _known_name(str(name))
+        named = _named_parameters(known) if known is not None else None
         if named is not None and (not params or _same_parameters(params, named)):
-            return name
+            return known
     if not params:
         raise ValueError(f"cannot interpret {ellipsoid!r} as an ellipsoid")
+    if name is None:
+        # e.g. xdggs ``Ellipsoid(name=None)``: recognise a known ellipsoid
+        for known in _KNOWN_NAMES:
+            named = _named_parameters(known)
+            if (
+                named is not None
+                and set(named) == set(params)
+                and _same_parameters(params, named)
+            ):
+                return known
     return params
 
 

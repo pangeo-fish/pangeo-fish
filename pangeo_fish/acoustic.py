@@ -19,49 +19,21 @@ from pangeo_fish.healpy import (
     geographic_to_astronomic,
 )
 
-# en haut de acoustic.py
-_WGS84_E2 = 0.00669437999014  # excentricité² de WGS84
-
-
 def _unit_vector_to_lonlat(vector, ellipsoid):
-    """Cartesian vector -> lon/lat in degrees for a sphere or WGS84."""
-    # xdggs 0.7 resolves names into numeric dictionaries. Retain the existing
-    # conversions, recognizing reference bodies by their parameters, not names.
-    if hasattr(ellipsoid, "to_dict"):
-        ellipsoid = ellipsoid.to_dict()
-    if isinstance(ellipsoid, dict):
-        if "radius" in ellipsoid:
-            ellipsoid = "sphere"
-        else:
-            major = ellipsoid.get("semimajor_axis", ellipsoid.get("semi_major_axis", 0))
-            invf = ellipsoid.get("inverse_flattening", 0)
-            if np.isclose(major, 6378137.0, rtol=0, atol=1e-8) and np.isclose(
-                invf, 298.257223563, rtol=0, atol=1e-10
-            ):
-                ellipsoid = "WGS84"
-    if isinstance(ellipsoid, str) and ellipsoid.lower() == "sphere":
-        # comportement d'origine
-        lon, lat = hpg.cartesian_to_lonlat(
-            vector[0], vector[1], vector[2], ellipsoid=ellipsoid
-        )
-        return float(lon[0]), float(lat[0])
+    """Station unit vector -> (lon, lat) in degrees, for any grid ellipsoid.
 
+    The station vectors are built from the deployment longitude and latitude on
+    the unit sphere (``geographic_to_cartesian``), so their spherical longitude and
+    latitude *are* the station coordinates. They are read back directly; on an
+    ellipsoidal grid the latitude is the geodetic latitude expected by
+    ``healpix_geo`` and must not be converted again.
+    """
+    canonical_ellipsoid(ellipsoid)  # validates the ellipsoid
     x, y, z = (float(v) for v in vector)
-    n = np.sqrt(x * x + y * y + z * z)
-    x, y, z = x / n, y / n, z / n
-    lat_c = np.arcsin(np.clip(z / np.sqrt(x * x + y * y + z * z), -1.0, 1.0))
-    if isinstance(ellipsoid, str) and ellipsoid.lower() == "wgs84":
-        a = 6378137.0
-        e2 = _WGS84_E2
-        scale = a / np.sqrt(x * x + y * y + (1.0 - e2) * z * z)
-        lat = np.degrees(np.arctan(np.tan(lat_c) / (1.0 - _WGS84_E2)))
-        lon, lat = hpg.cartesian_to_lonlat(
-            x * scale, y * scale, z * scale, ellipsoid=ellipsoid
-        )
-        return float(lon[0]), float(lat[0])
-
-    else:
-        raise ValueError(f"unsupported ellipsoid: {ellipsoid!r}")
+    norm = np.sqrt(x * x + y * y + z * z)
+    lon = np.degrees(np.arctan2(y, x))
+    lat = np.degrees(np.arcsin(np.clip(z / norm, -1.0, 1.0)))
+    return float(lon), float(lat)
 
 
 def count_detections(detections, by):

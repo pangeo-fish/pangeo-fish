@@ -64,3 +64,46 @@ def test_multisigma_transitions_and_exact_viterbi(dtype):
     actual = viterbi_healpix(emission, sigmas)
     np.testing.assert_array_equal(actual.cell_ids, cells[list(best_path)])
     xr.testing.assert_identical(actual.time, emission.time)
+
+
+@pytest.mark.parametrize("ellipsoid", ["sphere", "WGS84"])
+def test_viterbi_positions_are_the_grid_cell_centres(ellipsoid):
+    """The track uses the ellipsoid of the grid, not a fixed sphere."""
+    import healpix_geo.nested as hgn
+
+    from pangeo_fish.helpers import to_healpix
+
+    level = 6
+    cells = np.arange(4**level, 2 * 4**level, dtype=np.uint64)
+    pdf = np.full((2, cells.size), 1e-3)
+    pdf[:, 100] = 1.0
+    initial = np.zeros(cells.size)
+    initial[100] = 1.0
+    emission = to_healpix(
+        xr.Dataset(
+            {
+                "pdf": (("time", "cells"), pdf),
+                "initial": ("cells", initial),
+                "mask": ("cells", np.ones(cells.size, dtype=bool)),
+                "predictor_index": ("time", np.zeros(2, dtype=np.int32)),
+            },
+            coords={
+                "cell_ids": (
+                    "cells",
+                    cells.astype("int64"),
+                    {
+                        "grid_name": "healpix",
+                        "level": level,
+                        "indexing_scheme": "nested",
+                        "ellipsoid": ellipsoid,
+                    },
+                ),
+                "time": pd.date_range("2025-01-01", periods=2),
+            },
+        )
+    )
+    actual = viterbi_healpix(emission, [0.01])
+    lon, lat = hgn.healpix_to_lonlat(cells[[100, 100]], level, ellipsoid=ellipsoid)
+    np.testing.assert_array_equal(actual.cell_ids, cells[[100, 100]])
+    np.testing.assert_allclose(actual.latitude, lat)
+    np.testing.assert_allclose(actual.longitude, lon)

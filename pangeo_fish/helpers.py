@@ -3059,19 +3059,16 @@ def multiplot_healpix(
     """
     plots = []
     for ds, variables in datasets:
-        ellipsoid = grid_ellipsoid(ds)
+        # read from the attributes or, for a decoded dataset, from the xdggs index
+        grid = grid_attrs(ds)
+        if grid is None:
+            raise ValueError("the dataset has no HEALPix grid (cell_ids level)")
         for var_name in variables:
             plot = (
                 ds[var_name]
                 .compute()
-                .dggs.decode(
-                    {
-                        "grid_name": "healpix",
-                        "level": ds["cell_ids"].attrs.get("level"),
-                        "indexing_scheme": "nested",
-                        "ellipsoid": ellipsoid,
-                    }
-                )
+                .drop_indexes("cell_ids", errors="ignore")
+                .dggs.decode(grid)
                 .dggs.explore(alpha=alpha)
             )
             plots.append(plot)

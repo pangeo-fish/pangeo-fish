@@ -47,6 +47,13 @@ def test_named_ellipsoid_forms_give_the_name(ellipsoid):
     assert canonical_ellipsoid(ellipsoid) == "WGS84"
 
 
+def test_name_case_and_nameless_parameters():
+    assert canonical_ellipsoid("wgs84") == "WGS84"
+    assert canonical_ellipsoid({"name": "wgs84"}) == "WGS84"
+    assert canonical_ellipsoid(dict(WGS84)) == "WGS84"
+    assert canonical_ellipsoid(_EllipsoidObject(dict(WGS84) | {"name": None})) == "WGS84"
+
+
 def test_sphere_forms():
     assert canonical_ellipsoid(None) == "sphere"
     assert canonical_ellipsoid("sphere") == "sphere"
@@ -178,3 +185,20 @@ def test_save_zarr_raises_instead_of_warning(tmp_path):
 def test_with_grid_attrs_without_grid_is_a_no_op():
     ds = xr.Dataset({"a": ("x", [1, 2])})
     assert with_grid_attrs(ds) is ds
+
+
+def test_write_keeps_only_grid_attrs_on_cell_ids(tmp_path):
+    """Extra keys (e.g. the acoustic ``lat``/``lon``) would break ``xdggs`` decode."""
+    path = str(tmp_path / "acoustic.zarr")
+    source = helpers.to_healpix(_maps(ellipsoid="WGS84"))
+    source["cell_ids"].attrs.update(lat=0, lon=0)
+    write_healpix_zarr(source, path)
+    assert set(zarr.open_group(path, mode="r")["cell_ids"].attrs) <= {
+        "grid_name",
+        "level",
+        "indexing_scheme",
+        "ellipsoid",
+        "_ARRAY_DIMENSIONS",
+    }
+    assert xr.open_zarr(path).dggs.decode().dggs.grid_info.level == 2
+    assert source["cell_ids"].attrs["lat"] == 0  # input unchanged

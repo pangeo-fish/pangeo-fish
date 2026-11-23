@@ -345,16 +345,15 @@ def _angular_distances(cell_ids, disk, level, ellipsoid="sphere"):
     # small but grows at high latitude.
     ids = np.where(valid, disk, 0).astype(np.uint64)
 
-    depth_c = np.full(cell_ids.size, level, dtype=np.uint8)
-    depth_d = np.full(ids.size, level, dtype=np.uint8)
+    depth = int(level)
 
     # centre vectors of the sources, shape (n, 3)
     pc = np.stack(
-        hgn.healpix_to_cartesian(cell_ids, depth_c, ellipsoid=ellipsoid), axis=-1
+        hgn.healpix_to_cartesian(cell_ids, depth, ellipsoid=ellipsoid), axis=-1
     )
     # centre vectors of the neighbours, shape (n, M, 3)
     pd = np.stack(
-        hgn.healpix_to_cartesian(ids.ravel(), depth_d, ellipsoid=ellipsoid), axis=-1
+        hgn.healpix_to_cartesian(ids.ravel(), depth, ellipsoid=ellipsoid), axis=-1
     ).reshape(ids.shape + (3,))
 
     nc = np.linalg.norm(pc, axis=-1)  # (n,)
@@ -459,7 +458,7 @@ def build_transitions(cell_ids, level, sigmas, truncate=4.0, ellipsoid="sphere")
     return tuple(all_nbr), tuple(all_logT)
 
 
-def viterbi_healpix(emission, sigmas, truncate=4.0, ellipsoid="sphere", level=None):
+def viterbi_healpix(emission, sigmas, truncate=4.0, ellipsoid=None, level=None):
     """
     Viterbi decoding on a HEALPix grid, with a sigma that may change per time step.
 
@@ -474,16 +473,22 @@ def viterbi_healpix(emission, sigmas, truncate=4.0, ellipsoid="sphere", level=No
         Standard deviations in radians.
     truncate : float, default 4.0
         Truncation radius in units of sigma.
-    ellipsoid : str, default "sphere"
-        Reference ellipsoid.
+    ellipsoid : str or dict, optional
+        Reference ellipsoid. Defaults to the ellipsoid of the grid of
+        ``emission`` (see :py:func:`pangeo_fish.dggs.grid_ellipsoid`), so the
+        track positions are the centres of the grid cells.
 
     Returns
     -------
     xarray.Dataset
         Most probable track, with 'cell_ids', 'longitude' and 'latitude' on time.
     """
+    from pangeo_fish.dggs import canonical_ellipsoid, grid_ellipsoid
+
     if ellipsoid is None:
-        ellipsoid = "sphere"
+        ellipsoid = grid_ellipsoid(emission)
+    else:
+        ellipsoid = canonical_ellipsoid(ellipsoid)
     if level is None:
         level = emission.dggs.grid_info.level
 

@@ -5,7 +5,12 @@ from numbers import Integral
 
 import numpy as np
 
-from pangeo_fish.dggs import canonical_ellipsoid, with_cf_attrs, with_grid_attrs
+from pangeo_fish.dggs import (
+    _GRID_KEYS,
+    canonical_ellipsoid,
+    with_cf_attrs,
+    with_grid_attrs,
+)
 
 
 def write_time_blocks(ds, store, *, step):
@@ -89,7 +94,8 @@ def _storage_chunks(ds, dim, target_chunk_bytes):
 def with_dggs_metadata(ds):
     """Return ``ds`` with the full HEALPix metadata, ready to be written to Zarr.
 
-    Sets the canonical grid attributes on ``cell_ids``, the CF attributes of the
+    Sets the canonical grid attributes on ``cell_ids`` (and drops its other
+    attributes, which xdggs would read as grid parameters), the CF attributes of the
     known variables and ``Conventions``, and the Zarr DGGS v1 group attributes
     (``dggs`` and ``zarr_conventions``). Checks the ``cell_ids``, clears inherited
     encodings and puts the cells last. Chunks are not changed. The input dataset
@@ -118,6 +124,10 @@ def with_dggs_metadata(ds):
     if np.unique(ids).size != ids.size:
         raise ValueError("cell_ids must be unique")
     dim = ds.cell_ids.dims[0]
+    # xdggs passes every attribute of ``cell_ids`` to the grid constructor, so
+    # anything else (e.g. the ``lat``/``lon`` rotation keys) would make the store
+    # undecodable by plain xdggs. Keep only the grid attributes.
+    ds["cell_ids"].attrs = {key: attrs[key] for key in _GRID_KEYS if key in attrs}
     ellipsoid = canonical_ellipsoid(attrs.get("ellipsoid"))
     if isinstance(ellipsoid, str):
         ellipsoid = healpix_geo.ellipsoid.resolve(ellipsoid)

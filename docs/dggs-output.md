@@ -14,6 +14,11 @@ a known ellipsoid (`"WGS84"`, `"sphere"`), else a dict of its numeric parameters
 xdggs 0.7 turns a name into a dict of parameters, and some libraries
 (healpix-analyse) only accept the name; every function reads the ellipsoid
 through `pangeo_fish.dggs.grid_ellipsoid`, which returns the canonical form.
+When a store is written, `cell_ids` keeps only these four attributes: xdggs passes
+every attribute of `cell_ids` to the grid constructor, so any other key (a CF
+`long_name`, or the `lat`/`lon` rotation keys of the acoustic step) would make the
+store undecodable
+([xarray-contrib/xdggs#282](https://github.com/xarray-contrib/xdggs/issues/282)).
 
 **CF.** The variables of the workflow get `long_name` and `units`
 (`pdf`, `states`, `acoustic`, `initial`, `final`: `units="1"`; `latitude`,

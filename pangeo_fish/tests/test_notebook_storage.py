@@ -40,6 +40,11 @@ def test_hand_sigma_copy_rechunked_multisigma_data(tmp_path, emissions):
         # same data; the store also carries the CF and DGGS metadata
         xr.testing.assert_equal(actual.load(), source)
         assert actual.attrs["Conventions"].startswith("CF-")
+        # no attribute of the source is lost or changed
+        for name, variable in source.variables.items():
+            assert variable.attrs.items() <= actual[name].attrs.items(), name
+        # plain xdggs reads the grid from the written store
+        assert actual.dggs.decode().dggs.grid_info.level == 0
 
 
 class MatrixPredictor:
@@ -179,6 +184,9 @@ def test_cached_healpix_convolution(tmp_path):
     xr.testing.assert_identical(actual.time, ds.time)
     # The grid is kept; a missing ellipsoid is written out as the sphere.
     assert grid_attrs(actual.states.to_dataset()) == grid_attrs(ds)
+    # and the cached states decode with plain xdggs
+    decoded = actual.states.dggs.decode().dggs.grid_info
+    assert decoded.level == ds.dggs.grid_info.level
     assert grid_attrs(ds)["ellipsoid"] == "sphere"
 
 

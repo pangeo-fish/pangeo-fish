@@ -518,6 +518,7 @@ def test_merge_tide_matches_cell_ids_and_grid(tmp_path, level, ellipsoid, mismat
     merged.to_zarr(tmp_path / "merged.zarr", zarr_format=2, consolidated=True)
     with xr.open_zarr(tmp_path / "merged.zarr") as written:
         xr.testing.assert_equal(written.pdf_bathy, total.pdf_bathy)
+        assert total.pdf_bathy.attrs.items() <= written.pdf_bathy.attrs.items()
 
 
 @pytest.mark.parametrize("use_xarray", [False, True])
