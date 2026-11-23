@@ -85,8 +85,41 @@ def check_event_position(
         pseudo-event position, in degrees), ``suggested_sigma`` (smallest
         sigma whose ocean share reaches ``target_ocean_mass``) and ``ok``.
         Values that cannot be computed (no ocean cell, no sigma reaching the
-        target) are ``NaN``.
+        target) are ``NaN``. When the position has a ``NaN`` latitude or
+        longitude (unknown position), all values are ``NaN`` and ``ok`` is
+        ``False``, with a warning if ``warn``.
+
+    Raises
+    ------
+    ValueError
+        If ``sigma`` is not positive, or the mask does not have one value per
+        cell.
     """
+    if not sigma > 0:
+        raise ValueError(f"sigma must be positive (in radians), got {sigma!r}")
+    latitude = float(np.asarray(position["latitude"]))
+    longitude = float(np.asarray(position["longitude"]))
+    if not (np.isfinite(latitude) and np.isfinite(longitude)):
+        # the grid lookup cannot handle NaN: report an unknown position
+        report = xr.Dataset(
+            {
+                "ocean_mass": ((), np.nan),
+                "distance_to_ocean": ((), np.nan, {"units": "rad"}),
+                "nearest_ocean_latitude": ((), np.nan, {"units": "degrees_north"}),
+                "nearest_ocean_longitude": ((), np.nan, {"units": "degrees_east"}),
+                "suggested_sigma": ((), np.nan, {"units": "rad"}),
+                "ok": ((), False),
+            }
+        )
+        if warn:
+            warnings.warn(
+                f"The {event_name} position is unknown (NaN latitude or"
+                " longitude): the position check was skipped.",
+                UserWarning,
+                stacklevel=2,
+            )
+        return report
+
     distances = _angular_distances(grid, position).data
     is_ocean = np.asarray(mask.data, dtype=float)
     is_ocean = np.where(np.isnan(is_ocean), 0.0, is_ocean) > 0
@@ -138,13 +171,7 @@ def check_event_position(
     if warn and not ok:
         # km only in the message; the radius comes from the grid's ellipsoid
         radius_km = float(_earth_radius_from_grid(grid).magnitude)
-        latitude = float(np.asarray(position["latitude"]))
-        longitude = float(np.asarray(position["longitude"]))
-        position_text = (
-            f"({latitude:.4f} N, {longitude:.4f} E)"
-            if np.isfinite(latitude)
-            else "(unknown position)"
-        )
+        position_text = f"({latitude:.4f} N, {longitude:.4f} E)"
         message = (
             f"Only {ocean_mass:.3g} of the {event_name} probability "
             f"(sigma = {sigma:.3g} rad ≈ {sigma * radius_km:.3g} km) lies on ocean "

@@ -130,6 +130,28 @@ class TestCheckEventPosition:
         assert np.isnan(report["distance_to_ocean"])
         assert np.isnan(report["suggested_sigma"])
 
+    @pytest.mark.parametrize("lat, lon", [(np.nan, 1.0), (50.0, np.nan)])
+    def test_unknown_position(self, lat, lon):
+        ds = _grid()
+
+        with pytest.warns(UserWarning, match="position is unknown"):
+            report = check_event_position(
+                grid=ds, position=_position(lat, lon), sigma=1e-3, mask=ds["ocean_mask"]
+            )
+
+        assert not report["ok"]
+        assert np.isnan(report["ocean_mass"])
+        assert np.isnan(report["suggested_sigma"])
+
+    @pytest.mark.parametrize("sigma", [0.0, -1e-3, np.nan])
+    def test_sigma_must_be_positive(self, sigma):
+        ds = _grid()
+
+        with pytest.raises(ValueError, match="sigma must be positive"):
+            check_event_position(
+                grid=ds, position=_ocean_point(ds), sigma=sigma, mask=ds["ocean_mask"]
+            )
+
 
 def _diff_ds(ds):
     time = pd.date_range("2024-01-01", periods=3, freq="1D")
