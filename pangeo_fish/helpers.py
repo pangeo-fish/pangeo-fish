@@ -1133,7 +1133,9 @@ def regrid_dataset_hpresample(
     order = np.argsort(cell_ids)
     ref_cell_ids = cell_ids[order].astype("int64")
     ocean_mask_final = mask_regridded.cell_data[order]
-    is_ocean = ocean_mask_final >= mask_threshold
+    # A cell with no ocean contribution at all is land whatever the threshold:
+    # with ``mask_threshold=0`` the comparison alone would keep every cell.
+    is_ocean = (ocean_mask_final >= mask_threshold) & (ocean_mask_final > 0)
 
     # ------------------------------------------------------------------
     # Part 2 : Clough-Tocher construct only on ocean cells

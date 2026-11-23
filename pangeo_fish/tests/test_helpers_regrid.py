@@ -122,6 +122,38 @@ def test_regrid_coastal_constant_with_real_resamplers():
     assert np.isnan(result.temperature.values[:, unsupported]).all()
 
 
+def test_regrid_mask_threshold_zero_does_not_turn_land_into_ocean():
+    """``mask_threshold=0`` keeps the cells that touch the sea, not every cell."""
+    lon, lat = np.meshgrid(np.arange(-8.0, -3.0, 0.1), np.arange(47.0, 51.0, 0.1))
+    sea = lon < -5.5
+    source = xr.Dataset(
+        {
+            "temperature": (("time", "yi", "xi"), np.where(sea, 17.0, np.nan)[None]),
+            "ocean_mask": (("yi", "xi"), sea),
+        },
+        coords={
+            "time": [0],
+            "longitude": (("yi", "xi"), lon),
+            "latitude": (("yi", "xi"), lat),
+        },
+    )
+    zero, _ = helpers.regrid_dataset_hpresample(
+        ds=source, refinement_level=8, mask_threshold=0.0
+    )
+    tiny, _ = helpers.regrid_dataset_hpresample(
+        ds=source, refinement_level=8, mask_threshold=1e-9
+    )
+    ocean = zero.ocean_mask.values.astype(bool)
+    # the output longitudes are in 0..360
+    longitude = (zero.longitude.values + 180) % 360 - 180
+    inland = longitude > -5.0  # more than 35 km from the coast at -5.5
+
+    assert inland.any()
+    assert not ocean[inland].any()
+    assert np.isnan(zero.temperature.values[:, inland]).all()
+    np.testing.assert_array_equal(ocean, tiny.ocean_mask.values.astype(bool))
+
+
 def test_regrid_keeps_negative_values_of_signed_fields():
     """``diff`` is signed: regridding must not clip negative values to zero."""
     lon, lat = np.meshgrid(np.arange(-8.0, -3.0, 0.1), np.arange(47.0, 51.0, 0.1))
