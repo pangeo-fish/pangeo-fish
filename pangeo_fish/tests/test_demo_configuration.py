@@ -5,7 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from ci.demo_configuration import demo_settings
+from ci.demo_configuration import (
+    DEFAULT_TAG_SOURCE,
+    TAG_SOURCES,
+    demo_settings,
+    tag_source_parameters,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -70,3 +75,23 @@ def test_ambiguous_parameters_are_rejected():
     notebook["cells"].append(cell)
     with pytest.raises(ValueError, match="exactly one"):
         demo_settings(notebook)
+
+
+@pytest.mark.parametrize("name", ["base", "complete"])
+@pytest.mark.parametrize("source", sorted(TAG_SOURCES))
+def test_tag_sources_only_override_tag_parameters(name, source):
+    defaults, _ = demo_settings(load_demo(name))
+    overrides = tag_source_parameters(source)
+    assert set(overrides) <= {"tag_root", "tag_storage_options"}
+    assert set(overrides) <= set(defaults)
+
+
+def test_default_tag_source_is_used_when_none_is_given():
+    assert DEFAULT_TAG_SOURCE in TAG_SOURCES
+    assert tag_source_parameters() == tag_source_parameters(DEFAULT_TAG_SOURCE)
+    assert tag_source_parameters("") == tag_source_parameters(DEFAULT_TAG_SOURCE)
+
+
+def test_unknown_tag_source_is_rejected():
+    with pytest.raises(ValueError, match="Unknown tag source"):
+        tag_source_parameters("elsewhere")
