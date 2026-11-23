@@ -74,7 +74,7 @@ jobs:
       matrix:
         notebook: ${{ fromJSON(inputs.dataset_case == 'A18828-base' && '["base"]' || '["base", "complete"]') }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Check that Copernicus Marine credentials are available
@@ -124,7 +124,7 @@ jobs:
             -v "$PWD:/work" -w /work "$image" -c \
             'bash ci/run_demo_notebook.sh "$1"' \
             bash '${{ matrix.notebook }}'
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: always() && steps.credentials.outputs.available == 'true'
         with:
           name: demo-${{ matrix.notebook }}-summary
@@ -134,7 +134,7 @@ jobs:
             demo-results/${{ matrix.notebook }}/before.json
             demo-results/${{ matrix.notebook }}/after.json
             demo-results/${{ matrix.notebook }}/comparison.json
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: always() && steps.credentials.outputs.available == 'true'
         with:
           name: demo-${{ matrix.notebook }}
