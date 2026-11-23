@@ -72,8 +72,7 @@ _DGGS_CONVENTION = {
 }
 
 
-DEFAULT_TARGET_CHUNK_BYTES = 64 * 2**20
-"""Default upper bound (64 MiB) for one storage chunk of a HEALPix store."""
+DEFAULT_TARGET_CHUNK_BYTES = 64 * 2**20  # default upper bound (64 MiB) for one HEALPix storage chunk
 
 
 def _storage_chunks(ds, dim, target_chunk_bytes):
