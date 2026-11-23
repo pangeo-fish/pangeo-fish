@@ -89,6 +89,11 @@ class TestDiagnoseDepthVsBathymetry:
             record[0].message
         )
 
+        text = str(record[0].message)
+        assert "does not remove these cells" in text
+        assert "would remove" not in text
+        assert "relative_depth_threshold=0" not in text
+
         np.testing.assert_allclose(diag["model_too_shallow"], [1 / 3, 1, 1])
         np.testing.assert_allclose(diag["reference_too_shallow"], [0, 1 / 3, 2 / 3])
         # too shallow in the model only
@@ -188,3 +193,10 @@ class TestSampleMaxDepth:
 
         assert isinstance(depth, xr.DataArray)
         np.testing.assert_allclose(depth, [80, 10])
+
+
+def test_docstring_does_not_claim_cell_removal():
+    doc = diagnose_depth_vs_bathymetry.__doc__
+    assert "to drop cells" not in doc
+    assert "to see which cells it removes" not in doc
+    assert "do not use ``relative_depth_threshold``" not in doc

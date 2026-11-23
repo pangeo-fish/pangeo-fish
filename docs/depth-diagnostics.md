@@ -1,20 +1,15 @@
 # Tag depth versus model bathymetry
 
 The temperature emission (`compute_diff`) compares the tag temperature with
-the model temperature at the tag depth. When the tag goes deeper than the model
-seabed, two things can happen:
+the model temperature at the tag depth. Where the tag goes deeper than the model
+seabed, the comparison uses the deepest model level and the contradiction is not
+used: `compute_diff` does not remove cells because of the tag depth (its
+`relative_depth_threshold` argument is ignored).
 
-- with `relative_depth_threshold = 0` (default in the demos), the comparison
-  uses the deepest model level, and the contradiction is ignored;
-- with `relative_depth_threshold = r > 0`, a cell is removed at a time step
-  when its bathymetry (`H0 + XE`) is lower than `r` times the maximum tag depth
-  of that time step.
-
-The second option is useful when the model bathymetry is accurate, because it
-removes cells where the fish cannot be. It is harmful when the model grid is too
-coarse for the area. In estuaries and narrow channels, a 2–3 km model cell
-holds both a deep channel and shallow flats, so the model depth is much
-lower than the depth the fish actually reaches.
+This is harmful when the model grid is too coarse for the area. In estuaries and
+narrow channels, a 2–3 km model cell holds both a deep channel and shallow
+flats, so the model depth is much lower than the depth the fish actually
+reaches. The diagnostic below shows where this happens.
 
 ## Diagnostic
 
@@ -54,10 +49,12 @@ Variables (along `time`):
 - `n_valid_cells` / `reference_n_valid_cells`: cells inside `mask` where the
   model (reference) depth is defined;
 - `model_too_shallow` / `reference_too_shallow`: share of these valid cells
-  whose depth is lower than `relative_depth_threshold * tag_max_depth`;
+  whose depth is lower than `relative_depth_threshold * tag_max_depth` (the
+  argument only sets what is reported here, it does not change `compute_diff`);
 - `model_only_too_shallow`: share of the cells valid in both bathymetries that
   are too shallow in the model but deep enough in the reference, i.e. the cells
-  a threshold would remove because of the model bathymetry only;
+  such a threshold would count as too shallow because of the model bathymetry
+  only;
 - `model_max_depth` / `reference_max_depth`: deepest valid cell.
 
 The model time steps come from one source only: the `time` coordinate of
@@ -70,14 +67,15 @@ shallow in the model.
 ## When to use what
 
 - `model_too_shallow` low and close to `reference_too_shallow`: the model
-  bathymetry is consistent with GEBCO, and `relative_depth_threshold` (e.g.
-  0.8) is a cheap way to use the depth information.
+  bathymetry is consistent with GEBCO, the tag depths are compatible with the
+  model grid.
 - `model_too_shallow` close to 1 in the area where the fish is expected, while
   `reference_too_shallow` is clearly lower (large `model_only_too_shallow`):
-  the model is too coarse there. Keep `relative_depth_threshold = 0` and add
-  the bathymetry evidence of `pangeo_fish.bathy`
-  (`compute_healpix_histogram_region_bin_size` and `batch_compute_pdf_bathy`),
-  which uses the GEBCO depth distribution inside each HEALPix cell.
+  the model is too coarse there. `compute_diff` then compares the tag with the
+  deepest model level, which is the best it can do; use the bathymetry evidence
+  of `pangeo_fish.bathy` (`compute_healpix_histogram_region_bin_size` and
+  `batch_compute_pdf_bathy`), which uses the GEBCO depth distribution inside
+  each HEALPix cell.
 - Both close to 1: check the tag depths first, e.g. the pressure unit and offset
   (see [pangeo-fish#67](https://github.com/pangeo-fish/pangeo-fish/issues/67)).
 

@@ -207,13 +207,14 @@ def diagnose_depth_vs_bathymetry(
     For each model time step, the maximum tag depth is compared with the
     bathymetry of every valid cell. A cell is "too shallow" when its
     bathymetry is lower than ``relative_depth_threshold`` times the maximum tag
-    depth, which is the rule used by :py:func:`pangeo_fish.helpers.compute_diff`
-    to drop cells when ``relative_depth_threshold != 0``. If the model
-    bathymetry is too shallow almost everywhere while an independent
-    bathymetry (e.g. GEBCO, sampled with
-    :py:func:`pangeo_fish.bathy.sample_max_depth`) is deep enough, the model
-    grid is too coarse for the area: do not use ``relative_depth_threshold``
-    and use the GEBCO bathymetry evidence (:py:mod:`pangeo_fish.bathy`) instead.
+    depth. This is a report only: :py:func:`pangeo_fish.helpers.compute_diff`
+    does not remove cells because of the tag depth. Where the tag is deeper
+    than the model bathymetry, it compares the tag temperature with the deepest
+    model level, and the contradiction is not used. If the model bathymetry is
+    too shallow almost everywhere while an independent bathymetry (e.g. GEBCO,
+    sampled with :py:func:`pangeo_fish.bathy.sample_max_depth`) is deep enough,
+    the model grid is too coarse for the area, and the GEBCO bathymetry
+    evidence (:py:mod:`pangeo_fish.bathy`) is the way to use the tag depth.
 
     Parameters
     ----------
@@ -239,8 +240,10 @@ def diagnose_depth_vs_bathymetry(
         :py:func:`pangeo_fish.bathy.sample_max_depth`.
     relative_depth_threshold : float, default: 1.0
         A cell is too shallow when ``bathymetry < relative_depth_threshold *
-        tag_max_depth``. Use ``1`` for the physical comparison, or the value
-        passed to ``compute_diff`` to see which cells it removes.
+        tag_max_depth``. Use ``1`` for the physical comparison, or a smaller
+        value to count only the cells that are clearly too shallow. It only
+        sets what this diagnostic reports: it does not change
+        ``compute_diff``.
     warn : bool, default: True
         Whether to emit a :py:class:`UserWarning` when, at some time steps, no
         valid cell of the model is deep enough.
@@ -255,7 +258,7 @@ def diagnose_depth_vs_bathymetry(
         ``reference_max_depth``, ``reference_too_shallow`` and
         ``model_only_too_shallow`` (share of the cells valid in both
         bathymetries that are too shallow in the model but not in the
-        reference: the cells a threshold would remove wrongly).
+        reference: the cells wrongly counted as too shallow).
     """
     if "time" in bathymetry.dims:
         if time is not None:
@@ -300,7 +303,7 @@ def diagnose_depth_vs_bathymetry(
         )
         variables |= reference_vars
         variables["reference_n_valid_cells"] = reference_n
-        # cells removed by the threshold although the reference is deep enough
+        # cells too shallow in the model although the reference is deep enough
         both = model_valid & reference_valid
         contradicted = model_shallow & ~reference_shallow & both
         variables["model_only_too_shallow"] = (
@@ -336,10 +339,9 @@ def diagnose_depth_vs_bathymetry(
                 " these time steps."
             )
         message += (
-            " compute_diff with relative_depth_threshold="
-            f"{relative_depth_threshold:g} would remove all these cells at these"
-            " time steps. If the tag depths are right, the model bathymetry is"
-            " too coarse here: consider relative_depth_threshold=0 and the GEBCO"
+            " compute_diff does not remove these cells: it compares the tag"
+            " with the deepest model level there. If the tag depths are right,"
+            " the model bathymetry is too coarse here: consider the GEBCO"
             " bathymetry evidence of pangeo_fish.bathy."
         )
         warnings.warn(message, UserWarning, stacklevel=2)
