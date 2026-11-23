@@ -17,6 +17,8 @@ dependencies = [
   # Modern BinGrouper and Zarr-Python 3 integration; exercised in container CI.
   "xarray>=2025.7.1,<2027",
   "pandas",
+  # row-group ``filters`` of the ETN parquet readers
+  "pyarrow",
   "numpy",
   "scipy",
   "numba",

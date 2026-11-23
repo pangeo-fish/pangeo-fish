@@ -3,7 +3,7 @@ import json
 import fsspec
 import pytest
 
-from pangeo_fish.io import open_tag
+from pangeo_fish.io import open_tag, write_tag
 
 
 @pytest.fixture
@@ -51,3 +51,29 @@ def test_open_tag(dummy_mapper):
     assert tag["/"].attrs.get("dummy_key") == "dummy_value"
     assert tag["dst/temperature"].sel(time="2022-06-13T00:00:00").item() == 20.0
     assert tag["dst/temperature"].sel(time="2022-06-13T01:00:00").item() == 21.0
+
+
+@pytest.mark.parametrize("remote", [False, True])
+def test_write_tag_roundtrip(dummy_mapper, tmp_path, remote):
+    """
+    Test that write_tag writes all the nodes read by open_tag
+    """
+
+    tag = open_tag(dummy_mapper, "tag_dummy")
+    if remote:
+        root = f"memory://written-{tmp_path.name}"
+    else:
+        root = str(tmp_path / "tags")
+    write_tag(tag, root, "tag_copy")
+
+    reopened = open_tag(root, "tag_copy")
+    assert set(reopened.children) == set(tag.children)
+    for node in ["dst", "tagging_events", "stations", "acoustic"]:
+        expected = tag[node].to_dataset()
+        actual = reopened[node].to_dataset()[list(expected.data_vars)]
+        assert actual.identical(expected), node
+    assert reopened.attrs == tag.attrs
+
+    mapper = fsspec.get_mapper(root)
+    stations = mapper["stations.csv"].decode().splitlines()
+    assert stations[1].startswith("28689,station_1,2022-06-12T12:00:00Z")
