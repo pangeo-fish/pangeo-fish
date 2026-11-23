@@ -494,11 +494,11 @@ def viterbi_healpix(emission, sigmas, truncate=4.0, ellipsoid="sphere", level=No
     pdf = emission["pdf"].transpose("time", "cells").values
     initial = emission["initial"].transpose("cells").values
     ocean = np.asarray(emission["mask"].transpose("cells").values, dtype=bool)
-    sig_idx = np.asarray(emission["predictor_index"].values, dtype=int)
+    sig_idx = np.asarray(emission["predictor_index"].values[:-1], dtype=int)
 
     T, n = pdf.shape
     print(f"T={T},n={n}")
-    if sig_idx.min() < 0 or sig_idx.max() >= len(sigmas):
+    if np.any((sig_idx < 0) | (sig_idx >= len(sigmas))):
         raise ValueError("predictor_index is out of range of the sigma list")
 
     # emissions in log space; the first step uses the initial distribution
@@ -509,19 +509,13 @@ def viterbi_healpix(emission, sigmas, truncate=4.0, ellipsoid="sphere", level=No
     # sigmas arrondis pour éviter les doublons dus au flottant
     sigmas_r = np.array([float(f"{s:.10g}") for s in sigmas])
 
-    # sigmas réellement utilisés par predictor_index, sans doublons
-    used = np.unique(sig_idx)
-    unique_vals, inverse = np.unique(sigmas_r[used], return_inverse=True)
-
-    # nouvel index de chaque pas, dans la liste réduite
-    remap = np.full(len(sigmas), -1, dtype=int)
-    remap[used] = inverse
-    sig_idx_u = remap[sig_idx]
+    # Only build tables for sigmas used by outgoing transitions.
+    unique_vals, sig_idx_u = np.unique(sigmas_r[sig_idx], return_inverse=True)
     print(f"nombre de sigmas demandés : {len(sigmas)}")
     print(f"sigmas uniques utilisés   : {len(unique_vals)}")
     print(f"valeurs                   : {unique_vals}")
     print(
-        f"pas par sigma            : {np.bincount(sig_idx_u, minlength=len(unique_vals))}"
+        f"transitions par sigma    : {np.bincount(sig_idx_u, minlength=len(unique_vals))}"
     )
     print(f"n={n}, T={T}, level={level}")
     neighbors, logT = build_transitions(

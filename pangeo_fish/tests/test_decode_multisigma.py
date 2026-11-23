@@ -6,6 +6,7 @@ import pytest
 import xarray as xr
 import xdggs  # noqa: F401
 
+from pangeo_fish.hmm import decode
 from pangeo_fish.hmm.decode import build_transitions, viterbi_healpix
 
 
@@ -81,3 +82,33 @@ def test_multisigma_transitions_and_exact_viterbi(dtype):
     actual = viterbi_healpix(emission, sigmas)
     np.testing.assert_array_equal(actual.cell_ids, cells[list(best_path)])
     xr.testing.assert_identical(actual.time, emission.time)
+
+
+@pytest.mark.parametrize("indices, expected_sigmas", [([1], []), ([0, 1], [0.02])])
+def test_viterbi_skips_sigma_used_only_at_final_step(
+    monkeypatch, indices, expected_sigmas
+):
+    level = 2
+    cells = np.arange(12 * 4**level, dtype=np.uint64)
+    initial = np.zeros(len(cells))
+    initial[5] = 1
+    emission = xr.Dataset(
+        {
+            "pdf": (("time", "cells"), np.ones((len(indices), len(cells)))),
+            "initial": ("cells", initial),
+            "mask": ("cells", np.ones(len(cells), dtype=bool)),
+            "predictor_index": ("time", indices),
+        },
+        coords={"cell_ids": ("cells", cells), "time": np.arange(len(indices))},
+    )
+    built_sigmas = []
+
+    def record_transitions(cell_ids, level, sigmas, **kwargs):
+        built_sigmas.extend(sigmas)
+        return build_transitions(cell_ids, level, sigmas, **kwargs)
+
+    monkeypatch.setattr(decode, "build_transitions", record_transitions)
+    actual = viterbi_healpix(emission, [0.02, 0.15], level=level)
+
+    assert built_sigmas == expected_sigmas
+    np.testing.assert_array_equal(actual.cell_ids, [5] * len(indices))
