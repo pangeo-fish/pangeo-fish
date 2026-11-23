@@ -60,5 +60,6 @@ termcolor==3.3.0
 torch==2.15.0
 triton==3.9.0
 umap-learn==0.6.0
-xdggs==0.6.0
+# The Notebook image runs Python 3.13: pyproject.toml requires xdggs 0.7 there.
+xdggs==0.7.0
 xhealpixify==2025.3.3
