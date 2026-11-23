@@ -58,7 +58,8 @@ def main(name):
     settings, parameters = demo_settings(
         notebook, os.environ.get("DEMO_TAG_NAME", "A19124")
     )
-    tag_source = tag_source_parameters(os.environ.get("DEMO_TAG_SOURCE", "data-taos"))
+    # An empty DEMO_TAG_SOURCE means the default of ci/demo_configuration.py.
+    tag_source = tag_source_parameters(os.environ.get("DEMO_TAG_SOURCE"))
     settings, parameters = settings | tag_source, parameters | tag_source
     if settings["tag_name"] == "A18828" and name != "base":
         raise ValueError("A18828 trials are restricted to base-demo")

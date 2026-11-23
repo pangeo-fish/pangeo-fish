@@ -5,7 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from ci.demo_configuration import TAG_SOURCES, demo_settings, tag_source_parameters
+from ci.demo_configuration import (
+    DEFAULT_TAG_SOURCE,
+    TAG_SOURCES,
+    demo_settings,
+    tag_source_parameters,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -75,6 +80,12 @@ def test_tag_sources_only_override_tag_parameters(name, source):
     overrides = tag_source_parameters(source)
     assert set(overrides) <= {"tag_root", "tag_storage_options"}
     assert set(overrides) <= set(defaults)
+
+
+def test_default_tag_source_is_used_when_none_is_given():
+    assert DEFAULT_TAG_SOURCE in TAG_SOURCES
+    assert tag_source_parameters() == tag_source_parameters(DEFAULT_TAG_SOURCE)
+    assert tag_source_parameters("") == tag_source_parameters(DEFAULT_TAG_SOURCE)
 
 
 def test_unknown_tag_source_is_rejected():
