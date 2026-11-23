@@ -49,7 +49,10 @@ def _reference(cell_ids, ellipsoid, n_time=3):
 @pytest.mark.parametrize("ellipsoid", ["sphere", "WGS84"])
 def test_histogram_grid_and_cell_centres(ellipsoid):
     hist = compute_healpix_histogram_region_bin_size(
-        _bathymetry(), nside=2**LEVEL, max_depth_m=200, depth_bin_size=16,
+        _bathymetry(),
+        nside=2**LEVEL,
+        max_depth_m=200,
+        depth_bin_size=16,
         ellipsoid=ellipsoid,
     )
     assert grid_attrs(hist) == {
@@ -67,7 +70,10 @@ def test_histogram_grid_and_cell_centres(ellipsoid):
 
 def test_bathy_pdf_store_decodes(tmp_path):
     hist = compute_healpix_histogram_region_bin_size(
-        _bathymetry(), nside=2**LEVEL, max_depth_m=200, depth_bin_size=16,
+        _bathymetry(),
+        nside=2**LEVEL,
+        max_depth_m=200,
+        depth_bin_size=16,
         ellipsoid="WGS84",
     )
     reference = _reference(hist.cell_ids.values, "WGS84")
@@ -87,7 +93,10 @@ def test_bathy_pdf_store_decodes(tmp_path):
 
 def test_histogram_on_another_grid_is_refused(tmp_path):
     hist = compute_healpix_histogram_region_bin_size(
-        _bathymetry(), nside=2**LEVEL, max_depth_m=200, depth_bin_size=16,
+        _bathymetry(),
+        nside=2**LEVEL,
+        max_depth_m=200,
+        depth_bin_size=16,
         ellipsoid="sphere",
     )
     write_healpix_zarr(

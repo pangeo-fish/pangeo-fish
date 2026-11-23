@@ -51,7 +51,9 @@ def test_name_case_and_nameless_parameters():
     assert canonical_ellipsoid("wgs84") == "WGS84"
     assert canonical_ellipsoid({"name": "wgs84"}) == "WGS84"
     assert canonical_ellipsoid(dict(WGS84)) == "WGS84"
-    assert canonical_ellipsoid(_EllipsoidObject(dict(WGS84) | {"name": None})) == "WGS84"
+    assert (
+        canonical_ellipsoid(_EllipsoidObject(dict(WGS84) | {"name": None})) == "WGS84"
+    )
 
 
 def test_sphere_forms():

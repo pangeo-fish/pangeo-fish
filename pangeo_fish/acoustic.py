@@ -19,6 +19,7 @@ from pangeo_fish.healpy import (
     geographic_to_astronomic,
 )
 
+
 def _unit_vector_to_lonlat(vector, ellipsoid):
     """Station unit vector -> (lon, lat) in degrees, for any grid ellipsoid.
 

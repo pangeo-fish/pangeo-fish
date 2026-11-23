@@ -219,7 +219,10 @@ def test_reception_mask_is_centred_on_the_station(ellipsoid):
         )
     )
     stations = xr.Dataset(
-        {"deploy_longitude": ("deployment_id", [-4.5]), "deploy_latitude": ("deployment_id", [48.0])},
+        {
+            "deploy_longitude": ("deployment_id", [-4.5]),
+            "deploy_latitude": ("deployment_id", [48.0]),
+        },
         coords={"deployment_id": ["r1"]},
     )
     mask = deployment_reception_masks(
