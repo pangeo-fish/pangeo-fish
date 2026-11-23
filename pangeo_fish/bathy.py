@@ -260,7 +260,14 @@ def batch_compute_pdf_bathy(ds_lr, reshaped_tag, target_root: str, batch_size=50
     reference = open_healpix_zarr(f"{target_root}/diff-regridded.zarr")
     reference_grid = grid_attrs(reference)
     histogram_grid = grid_attrs(ds_lr)
-    if histogram_grid is not None and histogram_grid != reference_grid:
+    if reference_grid is None:
+        raise ValueError("diff-regridded.zarr has no HEALPix grid (cell_ids level)")
+    if histogram_grid is None:
+        raise ValueError(
+            "the bathymetry histogram has no HEALPix grid attributes; recompute it"
+            " with compute_healpix_histogram_region_bin_size"
+        )
+    if histogram_grid != reference_grid:
         raise ValueError(
             "the bathymetry histogram and diff-regridded.zarr use different grids: "
             f"{histogram_grid} != {reference_grid}"

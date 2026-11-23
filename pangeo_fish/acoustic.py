@@ -12,11 +12,6 @@ from xhealpixify.conversions import geographic_to_cartesian
 from pangeo_fish import utils
 from pangeo_fish.cf import bounds_to_bins
 from pangeo_fish.dggs import canonical_ellipsoid, grid_ellipsoid
-from pangeo_fish.healpy import (
-    astronomic_to_cartesian,
-    astronomic_to_cell_ids,
-    geographic_to_astronomic,
-)
 
 
 def _unit_vector_to_lonlat(vector, ellipsoid):
@@ -94,7 +89,7 @@ def deployment_reception_masks(
     stations,
     grid,
     buffer_size,
-    method="recompute",
+    method="keep",
     dims=["cells"],
     ellipsoid=None,
 ):
@@ -106,18 +101,11 @@ def deployment_reception_masks(
         "lon": grid["cell_ids"].attrs.get("lon", 0),
     }
     if method == "recompute":
-        phi, theta = geographic_to_astronomic(
-            lon=grid["longitude"], lat=grid["latitude"], rot=rot
+        # Builds the cell ids on an x/y grid and the station vectors with a
+        # reversed longitude; never used by the workflow, which keeps the ids.
+        raise NotImplementedError(
+            "method='recompute' is not supported on HEALPix cells; use method='keep'"
         )
-
-        cell_ids = astronomic_to_cell_ids(
-            nside=grid.attrs["nside"], theta=theta, phi=phi
-        ).assign_attrs(grid["cell_ids"].attrs)
-
-        phi, theta = geographic_to_astronomic(
-            lon=stations["deploy_longitude"], lat=stations["deploy_latitude"], rot=rot
-        )
-        positions = astronomic_to_cartesian(theta=theta, phi=phi, dim="deployment_id")
     elif method == "keep":
         cell_ids = grid["cell_ids"]
 
@@ -127,6 +115,8 @@ def deployment_reception_masks(
             rot=rot,
             dim="deployment_id",
         )
+    else:
+        raise ValueError(f"unknown method {method!r}: use 'keep'")
 
     if dims == ["cells"]:
         masks = buffer_points_cells(
@@ -279,14 +269,10 @@ def emission_probability(
 
         - "mask": set the buffer around stations without detections to ``0``.
         - "ignore": all valid pixels are equally probable.
-    cell_ids : {"recompute", "keep"}, default: "keep"
-        How to deal with model cell ids for the computation of reception masks.
-
-    cell_ids : {"recompute", "keep"}, default: "recompute"
+    cell_ids : {"keep"}, default: "keep"
         How to deal with model cell ids for the computation of reception masks:
-
-        - "keep": use the cell ids given by the model. This is the more correct method.
-        - "recompute": recompute the cell ids based on the rotated lat / lon coords.
+        "keep" uses the cell ids of the model grid. "recompute" is not supported
+        on HEALPix cells and raises ``NotImplementedError``.
 
     dims : list of str, default: None
         Dimensions to use: either ["x", "y"] or ["cells"]

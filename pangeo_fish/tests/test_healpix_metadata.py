@@ -216,3 +216,12 @@ def test_plots_with_cell_centre_coordinates(ellipsoid):
     ds["pdf"] = ds["pdf"].isel(time=0)
     ds.healpix.plot("pdf")
     helpers.multiplot_healpix([(ds, ["pdf"])])
+
+
+def test_maps_with_synced_time_sliders():
+    pytest.importorskip("lonboard")
+
+    ds = _maps(ellipsoid="WGS84").set_coords(["latitude", "longitude"])
+    maps = helpers.multiplot_healpix([(ds, ["pdf"]), (ds, ["pdf"])])
+    box = helpers.multi_map_with_synced_sliders(maps)
+    assert len(box.children) == 2

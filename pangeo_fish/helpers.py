@@ -92,6 +92,7 @@ __all__ = [
     "compute_emission_pdf",
     "compute_acoustic_pdf",
     "combine_pdfs",
+    "merge_on_cells",
     "normalize_pdf",
     "stamp_parameter_indices",
     "stamp_parameter_indices_from_mask",
@@ -135,6 +136,56 @@ def _plot_in_figure(ds: xr.Dataset, **plot_kwargs) -> Figure:
     fig, ax = plt.subplots()
     ds.plot(**(plot_kwargs | {"ax": ax}))
     return fig
+
+
+def merge_on_cells(total, other):
+    """Merge the variables of ``other`` into ``total``, matching the cells by id.
+
+    The cells of ``other`` are matched to those of ``total`` by their
+    ``cell_ids`` values, not by position. Cells of ``total`` that ``other`` does
+    not cover get NaN; cells of ``other`` outside ``total`` are dropped. The time
+    steps are matched by label in the same way. The result keeps the cells,
+    coordinates and attributes of ``total``.
+
+    Parameters
+    ----------
+    total : xarray.Dataset
+        The combined emission, e.g. ``total_pdf.zarr``.
+    other : xarray.Dataset or xarray.DataArray
+        The variables to add, e.g. the acoustic or bathymetry pdf, on the same
+        HEALPix grid.
+
+    Returns
+    -------
+    xarray.Dataset
+    """
+    if isinstance(other, xr.DataArray):
+        other = other.to_dataset()
+    if "time" in other.dims and "time" in total.indexes:
+        # same time steps as ``total``; missing steps get NaN
+        other = other.reindex(time=total.indexes["time"])
+    total_grid, other_grid = grid_attrs(total), grid_attrs(other)
+    if other_grid is not None and other_grid != total_grid:
+        raise ValueError(f"different HEALPix grids: {other_grid} != {total_grid}")
+
+    ids = np.asarray(total["cell_ids"].values)
+    other_ids = np.asarray(other["cell_ids"].values)
+    if np.unique(other_ids).size != other_ids.size:
+        raise ValueError("the cell_ids of `other` are not unique")
+    position = pd.Index(other_ids).get_indexer(ids)
+    found = position >= 0
+
+    variables = {}
+    for name, var in other.data_vars.items():
+        if "cells" not in var.dims:
+            variables[name] = var.variable
+            continue
+        taken = var.variable[{"cells": np.where(found, position, 0)}]
+        if not found.all():
+            mask = xr.Variable("cells", found)
+            taken = taken.where(mask) if taken.dtype.kind != "b" else taken & mask
+        variables[name] = taken
+    return total.assign(variables)
 
 
 def _save_zarr(ds: xr.Dataset, path: str, storage_options=None):
@@ -3084,7 +3135,8 @@ def multi_map_with_synced_sliders(maps, width="300px", height="400px"):
     Parameters
     ----------
     maps : list
-        List of map objects (must have .map, .sliders['time'], .layout)
+        Maps returned by ``obj.dggs.explore()`` (e.g. from
+        :py:func:`multiplot_healpix`), all with a ``time`` dimension.
     width, height : dimensions applied to each map
 
     Example
@@ -3099,18 +3151,19 @@ def multi_map_with_synced_sliders(maps, width="300px", height="400px"):
         m.layout.width = width
         m.layout.height = height
 
-    # 2. Synchronize all 'time' sliders with each other (each one linked to the first)
-    ref_slider = maps[0].sliders["time"]
-    for m in maps[1:]:
-        ipw.jslink((ref_slider, "value"), (m.sliders["time"], "value"))
+    if all(hasattr(m, "sliders") for m in maps):
+        # xdggs 0.6: one slider widget per dimension
+        ref_slider = maps[0].sliders["time"]
+        for m in maps[1:]:
+            ipw.jslink((ref_slider, "value"), (m.sliders["time"], "value"))
+        return ipw.HBox([ipw.VBox([m.map, m.sliders["time"]]) for m in maps])
 
-    # 3. Build each block (map + slider below it)
-    def map_with_slider_below(m):
-        return ipw.VBox([m.map, m.sliders["time"]])
-
-    blocks = [map_with_slider_below(m) for m in maps]
-
-    return ipw.HBox(blocks)
+    # xdggs 0.7: one widget for all the sliders, inside the map's control panel;
+    # its ``dimension_values`` hold the position of every slider.
+    sliders = [m.control.dimension_sliders for m in maps]
+    for other in sliders[1:]:
+        ipw.jslink((sliders[0], "dimension_values"), (other, "dimension_values"))
+    return ipw.HBox(list(maps))
 
 
 def _find_time_intervals(df: pd.DataFrame, min_time: pd.Timedelta, min_dist: float):

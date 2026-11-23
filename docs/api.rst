@@ -22,6 +22,7 @@ High-level Functions
    compute_emission_pdf
    compute_acoustic_pdf
    combine_pdfs
+   merge_on_cells
    normalize_pdf
    optimize_pdf
    predict_positions

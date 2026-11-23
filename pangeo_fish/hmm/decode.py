@@ -318,6 +318,11 @@ def _angular_distances(cell_ids, disk, level, ellipsoid="sphere"):
     """
     Angular distances (radians) between each cell centre and its neighbourhood.
 
+    The angles are measured on the HEALPix sphere for every ellipsoid. A HEALPix
+    grid on an ellipsoid is the same grid on its authalic sphere, and the forward
+    model (the predictors) applies sigma as an angle on that sphere, so the
+    Viterbi transitions use the same distances.
+
     Parameters
     ----------
     cell_ids : numpy.ndarray of uint64, shape (n,)
@@ -327,43 +332,15 @@ def _angular_distances(cell_ids, disk, level, ellipsoid="sphere"):
         Entries equal to -1 are padding.
     level : int
         HEALPix depth of the cells.
-    ellipsoid : str, default "sphere"
-        Reference ellipsoid.
+    ellipsoid : str or dict, default "sphere"
+        Reference ellipsoid of the grid; it does not change the angles.
 
     Returns
     -------
     numpy.ndarray of float, shape (n, M)
         Distances in radians, NaN where `disk` is padding.
     """
-    valid = disk >= 0
-
-    if ellipsoid == "sphere":
-        return np.asarray(hgn.angular_distances(cell_ids, disk, level))
-
-    # Ellipsoid case: geocentric angle between the centre vectors.
-    # This is not the geodesic distance on the ellipsoid; the difference is
-    # small but grows at high latitude.
-    ids = np.where(valid, disk, 0).astype(np.uint64)
-
-    depth = int(level)
-
-    # centre vectors of the sources, shape (n, 3)
-    pc = np.stack(
-        hgn.healpix_to_cartesian(cell_ids, depth, ellipsoid=ellipsoid), axis=-1
-    )
-    # centre vectors of the neighbours, shape (n, M, 3)
-    pd = np.stack(
-        hgn.healpix_to_cartesian(ids.ravel(), depth, ellipsoid=ellipsoid), axis=-1
-    ).reshape(ids.shape + (3,))
-
-    nc = np.linalg.norm(pc, axis=-1)  # (n,)
-    nd = np.linalg.norm(pd, axis=-1)  # (n, M)
-    dot = np.einsum("nmk,nk->nm", pd, pc)
-
-    cosang = dot / (nd * nc[:, None])
-    d = np.arccos(np.clip(cosang, -1.0, 1.0))
-
-    return np.where(valid, d, np.nan)
+    return np.asarray(hgn.angular_distances(cell_ids, disk, level))
 
 
 def build_transitions(cell_ids, level, sigmas, truncate=4.0, ellipsoid="sphere"):
