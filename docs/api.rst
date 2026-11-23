@@ -65,6 +65,13 @@ I/O
 ETN Archival Data
 -----------------
 
+.. currentmodule:: pangeo_fish.etn_archival
+.. autosummary::
+   :toctree: generated
+
+   open_etn_archival
+   read_etn_animals
+
 
 ETN Acoustic Detections
 -----------------------
@@ -74,17 +81,6 @@ ETN Acoustic Detections
    :toctree: generated
 
    find_etn_acoustic_detections
-
-
-DGGS Zarr Output
-----------------
-
-.. currentmodule:: pangeo_fish.etn_archival
-.. autosummary::
-   :toctree: generated
-
-   open_etn_archival
-   read_etn_animals
 
 
 Grid Manipulation
@@ -172,8 +168,6 @@ Tag Record Preprocessing
    track_bounds.detect_start_of_track
    track_bounds.detect_end_of_track
    track_bounds.flag_records
-
-
    pressure_offset.estimate_pressure_offset
    pressure_offset.correct_pressure_offset
 
@@ -289,13 +283,3 @@ Dry Cells
    mask_dry_cells
    DryCellWarning
 
-
-ETN Acoustic Detections
------------------------
-
-.. currentmodule:: pangeo_fish.etn_acoustic
-.. autosummary::
-   :toctree: generated
-
-   find_etn_acoustic_detections
-   ETNAcousticDetections
