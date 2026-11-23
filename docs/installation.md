@@ -36,7 +36,7 @@ And then just activate the environment
 conda/micromamba activate pangeo-fish
 ```
 
-This will create your environment with all the required libraries to make `pangeo-fish` work.
+This will create your environment with all the required libraries to make `pangeo-fish` work, including the CPU-only build of PyTorch (`pytorch-cpu`).
 
 Finally, install the package itself from either its repository:
 
@@ -49,6 +49,23 @@ pip install -e .
 ```console
 pip install pangeo-fish
 ```
+
+## PyTorch: CPU or GPU
+
+`pangeo-fish` depends on PyTorch, and runs it on the CPU by default (`device="cpu"`).
+On Linux, `pip` takes the CUDA build of PyTorch from PyPI, which adds the `nvidia-*` and `triton` packages (about 3 GB).
+If you are not using a GPU, install the CPU-only build **before** `pangeo-fish`; `pip` then sees that PyTorch is already installed and does not replace it:
+
+```console
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+```
+
+The conda environment above already contains the CPU-only build (`pytorch-cpu` from conda-forge).
+
+If you want to run on a GPU, install the CUDA build instead:
+`pip install torch` (the default build on Linux; see the [PyTorch selector](https://pytorch.org/get-started/locally/) for the build that matches your CUDA version), or, with conda, replace `pytorch-cpu` by `pytorch-gpu` in `docs/environment.yaml`.
+
+Note that the helper functions (`optimize_pdf`, `compute_states`) and the demo notebooks currently run on the CPU even when a GPU is available: only the predictor classes of `pangeo_fish.hmm.prediction` (`UpDownGaussian1DHealpix`, `FFTGaussian1DHealpix`) accept `device="cuda"`.
 
 ## For HPC use
 

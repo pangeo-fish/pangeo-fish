@@ -292,3 +292,116 @@ def batch_compute_pdf_bathy(ds_lr, reshaped_tag, target_root: str, batch_size=50
     pdf_da_func = pdf_da_func.rename_vars({"cells": "cell_ids"})
 
     return pdf_da_func
+
+
+def sample_max_depth(elevation, latitude, longitude, *, window=None):
+    """Sample a bathymetry (e.g. GEBCO) at given positions, as positive depth.
+
+    Parameters
+    ----------
+    elevation : xarray.DataArray
+        Elevation on a regular ``lat`` / ``lon`` grid, in meters, negative
+        below sea level (GEBCO convention). The coordinates can be named
+        ``lat``/``lon`` or ``latitude``/``longitude``.
+    latitude, longitude : array-like or xarray.DataArray
+        Positions where the depth is needed, e.g. the cell centers of the model
+        grid (``diff_ds["latitude"]``, ``diff_ds["longitude"]``).
+    window : float, optional
+        Width (in degrees) of the box centred on each position. The deepest
+        bathymetry value within the box is returned, which is the relevant
+        value to decide whether a fish can reach a given depth somewhere in a
+        model cell. Use the model resolution (e.g. ``1 / 36`` for a 1/36°
+        grid). If ``None``, the nearest bathymetry value is returned.
+
+    Returns
+    -------
+    depth : xarray.DataArray
+        Depth in meters (positive downwards; land is negative), with the shape
+        (and, for :py:class:`xarray.DataArray` positions, the dimensions and
+        coordinates) of ``latitude``. ``NaN`` where the position is ``NaN``.
+
+    Raises
+    ------
+    ValueError
+        If a position lies outside the extent of the bathymetry grid.
+
+    Notes
+    -----
+    The requested longitudes are wrapped to the convention of the grid
+    (``0..360`` or ``-180..180``), so cell longitudes in either convention work.
+
+    :py:func:`compute_healpix_histogram_region_bin_size` also describes the
+    depths inside each cell, but its deepest non-empty bin is not a usable
+    maximum depth: the histogram is smoothed over two bins on each side, its
+    output drops the last 10 bins (it keeps ``nb_depth_bins`` columns, of
+    which the first 10 are a buffer) and it only works on HEALPix cells.
+    """
+    names = {"latitude": "lat", "longitude": "lon"}
+    elevation = elevation.rename(
+        {k: v for k, v in names.items() if k in elevation.dims}
+    )
+    # ascending coordinates, so that the area of interest can be sliced
+    for dim in ("lat", "lon"):
+        if elevation[dim].values[0] > elevation[dim].values[-1]:
+            elevation = elevation.isel({dim: slice(None, None, -1)})
+
+    lat = xr.DataArray(latitude).astype("float64")
+    lon = xr.DataArray(longitude).astype("float64")
+    finite = lat.notnull() & lon.notnull()
+    if not finite.any():
+        return xr.full_like(lat, np.nan).rename("depth").assign_attrs(units="m")
+
+    half = 0.0 if window is None else float(window) / 2
+    dlat = float(np.abs(elevation["lat"].diff("lat")[0]))
+    dlon = float(np.abs(elevation["lon"].diff("lon")[0]))
+
+    # longitudes in the convention of the grid (0..360 or -180..180), and
+    # positions outside the extent of the grid are an error
+    lon_min = float(elevation["lon"].min()) - dlon / 2
+    lon_max = float(elevation["lon"].max()) + dlon / 2
+    lat_min = float(elevation["lat"].min()) - dlat / 2
+    lat_max = float(elevation["lat"].max()) + dlat / 2
+    lat_b, lon_b = xr.broadcast(lat.where(finite), lon.where(finite))
+    lon_values = lon_b.values
+    lat_values = lat_b.values
+    finite_values = finite.broadcast_like(lon_b).transpose(*lon_b.dims).values
+    with np.errstate(invalid="ignore"):
+        candidates = [lon_values, lon_values % 360, (lon_values + 180) % 360 - 180]
+        wrapped = np.full(lon_values.shape, np.nan)
+        for candidate in reversed(candidates):
+            inside = (candidate >= lon_min) & (candidate <= lon_max)
+            wrapped = np.where(inside, candidate, wrapped)
+        outside = finite_values & (
+            np.isnan(wrapped) | (lat_values < lat_min) | (lat_values > lat_max)
+        )
+    if outside.any():
+        raise ValueError(
+            f"{int(outside.sum())} requested position(s) lie outside the extent"
+            f" of the bathymetry grid (latitude {lat_min:.4g} to {lat_max:.4g},"
+            f" longitude {lon_min:.4g} to {lon_max:.4g}), e.g. latitude"
+            f" {float(lat_values[outside][0]):.4g}, longitude"
+            f" {float(lon_values[outside][0]):.4g}"
+        )
+    lon = lon_b.copy(data=wrapped)
+
+    margin_lat = half + 2 * dlat
+    margin_lon = half + 2 * dlon
+    depth = -elevation.sel(
+        lat=slice(float(lat.min()) - margin_lat, float(lat.max()) + margin_lat),
+        lon=slice(float(lon.min()) - margin_lon, float(lon.max()) + margin_lon),
+    )
+    if window is not None:
+        size = {
+            "lat": 2 * int(np.ceil(half / dlat)) + 1,
+            "lon": 2 * int(np.ceil(half / dlon)) + 1,
+        }
+        depth = depth.rolling(size, center=True, min_periods=1).max()
+
+    # NaN positions cannot be looked up: use any finite position, then mask
+    sampled = depth.sel(
+        lat=lat.where(finite, float(lat.where(finite).max())),
+        lon=lon.where(finite, float(lon.where(finite).max())),
+        method="nearest",
+    )
+    sampled = sampled.drop_vars(["lat", "lon"]).where(finite)
+    return sampled.rename("depth").assign_attrs(units="m")

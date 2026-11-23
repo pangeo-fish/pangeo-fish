@@ -9,6 +9,7 @@ Welcome to pangeo-fish's documentation!
     format
     copernicus-models
     choosing-conv-method
+    depth-diagnostics
     notebook
     tide
     api

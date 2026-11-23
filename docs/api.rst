@@ -19,6 +19,7 @@ High-level Functions
    compute_diff
    open_diff_dataset
    regrid_dataset
+   estimate_refinement_costs
    compute_emission_pdf
    compute_acoustic_pdf
    combine_pdfs
@@ -32,6 +33,16 @@ High-level Functions
    render_distributions
 
 
+Diagnostics
+-----------
+
+.. currentmodule:: pangeo_fish.diagnostics
+.. autosummary::
+   :toctree: generated
+
+   check_event_position
+   diagnose_depth_vs_bathymetry
+
 
 I/O
 ---
@@ -41,6 +52,7 @@ I/O
    :toctree: generated
 
    open_tag
+   write_tag
    open_copernicus_catalog
    open_copernicus_zarr
    prepare_dataset
@@ -48,6 +60,27 @@ I/O
    read_trajectories
    save_html_hvplot
    tz_convert
+
+
+ETN Archival Data
+-----------------
+
+.. currentmodule:: pangeo_fish.etn_archival
+.. autosummary::
+   :toctree: generated
+
+   open_etn_archival
+   read_etn_animals
+
+
+ETN Acoustic Detections
+-----------------------
+
+.. currentmodule:: pangeo_fish.etn_acoustic
+.. autosummary::
+   :toctree: generated
+
+   find_etn_acoustic_detections
 
 
 Grid Manipulation
@@ -75,6 +108,7 @@ Emission Computations
    pdf.normal
    pdf.combine_emission_pdf
    diff.diff_z
+   bathy.sample_max_depth
 
 
 Tides on HEALPix
@@ -124,6 +158,30 @@ Tag/time Operations
    dataset_utils.broadcast_variables
 
 
+Tag Record Preprocessing
+------------------------
+
+.. currentmodule:: pangeo_fish
+.. autosummary::
+   :toctree: generated
+
+   track_bounds.detect_start_of_track
+   track_bounds.detect_end_of_track
+   track_bounds.flag_records
+   pressure_offset.estimate_pressure_offset
+   pressure_offset.correct_pressure_offset
+
+
+Tag Description
+---------------
+
+.. currentmodule:: pangeo_fish.describe
+.. autosummary::
+   :toctree: generated
+
+   describe_tag
+
+
 Visualization
 -------------
 
@@ -135,6 +193,7 @@ Visualization
    render_frame
    plot_map
    plot_trajectories
+   plot_track_bounds
    filter_by_states
 
 

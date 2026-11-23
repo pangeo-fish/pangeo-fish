@@ -20,11 +20,14 @@
 
 ## 🚀 Quick Start
 
-Install directly from PyPI:
+Install directly from PyPI. On Linux, `pip` would otherwise download the CUDA build of PyTorch (about 3 GB of extra packages), so install the CPU-only build first. `pangeo-fish` runs on the CPU by default:
 
 ```bash
+pip install torch --index-url https://download.pytorch.org/whl/cpu
 pip install pangeo-fish
 ```
+
+If you have a GPU, skip the first line and install the CUDA build of PyTorch instead; see the [installation guide](docs/installation.md) for what runs on the GPU today.
 
 Or set up the development environment:
 
@@ -39,10 +42,11 @@ jupyter lab
 ### For first-time users
 
 If this is your first time using **Pangeo-Fish**, we recommend setting up the full development environment to ensure all dependencies (including [JupyterLab](https://jupyterlab.readthedocs.io/en/stable/)) are correctly installed.
-Once JupyterLab has started, open the notebook
-[notebooks/pangeo-fish.ipynb](https://github.com/pangeo-fish/pangeo-fish/blob/main/notebooks/pangeo-fish.ipynb)
-
+Once JupyterLab has started, open the
+[Base demo notebook](https://github.com/pangeo-fish/pangeo-fish/blob/main/notebooks/pangeo-fish-base-demo.ipynb)
 to follow the step-by-step tutorial. This is the recommended starting point for new users.
+The [Complete demo](https://github.com/pangeo-fish/pangeo-fish/blob/main/notebooks/pangeo-fish-complete-demo.ipynb)
+adds bathymetry, tide evidence and multiple movement parameters.
 
 ## 📖 Documentation
 
