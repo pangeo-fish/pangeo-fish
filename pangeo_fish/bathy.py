@@ -37,6 +37,7 @@ def compute_healpix_histogram_region_bin_size(
     depth_offset=0,
     depth_bin_size=1,
     ellipsoid="sphere",
+    default_stdev_m=_DEFAULT_STDEV_M,
 ):
     """Probability that the seabed of each HEALPix cell is at least ``d`` deep.
 
@@ -62,6 +63,10 @@ def compute_healpix_histogram_region_bin_size(
         Bin width in metres.
     ellipsoid : str or dict
         Ellipsoid of the HEALPix grid (the one of ``diff-regridded.zarr``).
+    default_stdev_m : float, default 1
+        Vertical uncertainty (m) of the GEBCO depths where ``ds`` has no
+        ``stdev``. A larger value tolerates more errors, e.g. the tide that the
+        daily mean sea surface height ``XE`` leaves out.
 
     Returns
     -------
@@ -123,9 +128,9 @@ def compute_healpix_histogram_region_bin_size(
             continue
         if "stdev" in ds:
             stdev = ds.stdev[i:j, :].load().values.flatten()[valid]
-            stdev = np.nan_to_num(stdev, nan=_DEFAULT_STDEV_M)
+            stdev = np.nan_to_num(stdev, nan=default_stdev_m)
         else:
-            stdev = np.full(int(valid.sum()), _DEFAULT_STDEV_M)
+            stdev = np.full(int(valid.sum()), float(default_stdev_m))
         stdev = np.maximum(stdev, 1e-3)
 
         lat_v = np.repeat(lats[i:j], nlon)[valid]
@@ -137,8 +142,9 @@ def compute_healpix_histogram_region_bin_size(
         reachable = -elev[valid] - depth_offset
         center = np.floor((reachable - edges[0]) / bin_size).astype(np.int64)
         # mass of N(reachable, stdev) in each bin, from the normal CDF at the bin
-        # edges; the tails beyond +-radius go to the outermost bins of the window
-        radius = int(min(np.ceil(4 * stdev.max() / bin_size), 50))
+        # edges; the tails beyond +-4 stdev (or the whole grid) go to the
+        # outermost bins of the window
+        radius = int(min(np.ceil(4 * stdev.max() / bin_size), n_bins))
         for offset in range(-radius, radius + 1):
             low = edges[0] + (center + offset) * bin_size
             cdf_low = ndtr((low - reachable) / stdev) if offset > -radius else 0.0
@@ -289,6 +295,11 @@ def compute_pdf_bathy_batch_numba(ds_chunk, reshaped_tag, copernicus_chunk):
         deepest = np.nanmax(pressure, axis=-1)
     if deepest.ndim == 1:
         deepest = np.broadcast_to(deepest[:, None], XE.shape)
+    elif deepest.shape != XE.shape:
+        raise ValueError(
+            "pressure must be on (time, obs), or (time, cells, obs) with the cells"
+            f" of this batch; got {pressure.shape} for {XE.shape[1]} cells"
+        )
     result = compute_pdf_bathy_numba_like_numpy(
         hist, np.ascontiguousarray(deepest[..., None]), XE, depth_bins
     )
@@ -331,6 +342,11 @@ def _nearest_histogram_cells(cell_ids, histogram_ids, grid, sea):
     """
     from scipy.spatial import cKDTree
 
+    if histogram_ids.size == 0:
+        raise ValueError(
+            "the bathymetry histogram has no cell: no GEBCO water point in the"
+            " area (check the bounding box and its longitude convention)"
+        )
     order = np.argsort(histogram_ids)
     sorted_ids = histogram_ids[order]
     position = np.clip(np.searchsorted(sorted_ids, cell_ids), 0, sorted_ids.size - 1)

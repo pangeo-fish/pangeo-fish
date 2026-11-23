@@ -364,3 +364,60 @@ def test_land_cells_without_gebco_are_not_reported(tmp_path):
         warnings.simplefilter("error", UserWarning)
         pdf = batch_compute_pdf_bathy(hist.drop_isel(cells=[0]), tag, str(tmp_path))
     assert pdf.pdf_bathy.isel(cells=0).isnull().all()
+
+
+def test_wide_stdev_is_not_cut():
+    from scipy.stats import norm
+
+    hist = compute_healpix_histogram_region_bin_size(
+        _flat_seabed(300.0, stdev=100.0),
+        nside=2**8,
+        max_depth_m=800,
+        depth_bin_size=1,
+    )
+    for depth in [249.0, 351.0, 450.0]:
+        assert _likelihood(hist, depth) == pytest.approx(
+            norm.sf(depth, loc=300.0, scale=100.0), abs=0.01
+        )
+
+
+def test_default_stdev_is_a_parameter():
+    narrow = compute_healpix_histogram_region_bin_size(
+        _flat_seabed(50.0), nside=2**8, max_depth_m=200, depth_bin_size=1
+    )
+    wide = compute_healpix_histogram_region_bin_size(
+        _flat_seabed(50.0),
+        nside=2**8,
+        max_depth_m=200,
+        depth_bin_size=1,
+        default_stdev_m=3.0,
+    )
+    # 53 m on a 50 m seabed: impossible with 1 m, one standard deviation with 3 m
+    assert _likelihood(narrow, 53.0) < 0.01
+    assert _likelihood(wide, 53.0) == pytest.approx(0.16, abs=0.02)
+
+
+def test_histogram_without_cells_is_refused(tmp_path):
+    hist, reference, tag = _pdf_inputs(tmp_path)
+    write_healpix_zarr(reference, str(tmp_path / "diff-regridded.zarr"))
+    with pytest.raises(ValueError, match="no GEBCO water point"):
+        batch_compute_pdf_bathy(hist.isel(cells=slice(0, 0)), tag, str(tmp_path))
+
+
+def test_pressure_on_other_cells_is_refused():
+    from pangeo_fish.bathy import compute_pdf_bathy_batch_numba
+
+    hist = compute_healpix_histogram_region_bin_size(
+        _flat_seabed(50.0), nside=2**8, max_depth_m=100, depth_bin_size=4
+    )
+    chunk = hist.isel(cells=slice(0, 2))
+    times = pd.date_range("2024-01-01", periods=2)
+    model = xr.Dataset(
+        {"XE": (("time", "cells"), np.zeros((2, 2)))}, coords={"time": times}
+    )
+    tag = xr.Dataset(
+        {"pressure": (("time", "cells", "obs"), np.full((2, 5, 3), 10.0))},
+        coords={"time": times},
+    )
+    with pytest.raises(ValueError, match="cells of this batch"):
+        compute_pdf_bathy_batch_numba(chunk, tag, model)
