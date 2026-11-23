@@ -258,10 +258,13 @@ def test_optimize_and_compute_states_on_the_device(
     assert isinstance(values, np.ndarray)
     assert values.shape == emission["pdf"].shape
 
-    # same results as on the CPU
     params_cpu, states_cpu = run(tmp_path / "cpu", "cpu")
     np.testing.assert_allclose(params["sigma"], params_cpu["sigma"], rtol=1e-3)
-    expected = states_cpu["states"].values
+
+    # The estimator encodes exact zeros as NaN. CPU and CUDA rounding can leave
+    # a tiny positive probability in the same cell, so compare probability mass.
+    expected = states_cpu["states"].fillna(0).to_numpy()
+    actual = states["states"].fillna(0).to_numpy()
     np.testing.assert_allclose(
-        values, expected, rtol=1e-3, atol=1e-6 * np.abs(expected).max()
+        actual, expected, rtol=1e-3, atol=1e-6 * np.abs(expected).max()
     )
