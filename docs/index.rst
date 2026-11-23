@@ -8,6 +8,7 @@ Welcome to pangeo-fish's documentation!
     pangeo-notebook
     format
     copernicus-models
+    choosing-conv-method
     notebook
     tide
     api

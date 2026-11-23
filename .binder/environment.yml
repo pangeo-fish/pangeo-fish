@@ -58,4 +58,4 @@ dependencies:
       - dask-hpcconfig
       - pangeo-fish
       - jupyterhub==4.1.6
-      - git+https://github.com/GRID4EARTH/healpix-analyse.git
+      - healpix-analyse>=2026.11.1
