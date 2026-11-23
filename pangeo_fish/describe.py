@@ -226,8 +226,9 @@ def describe_tag(
         start, or ``None`` without sensor ranges);
         ``tagging_events`` (times and positions); ``suggested_start`` and
         ``suggested_end`` (outputs of :py:mod:`pangeo_fish.track_bounds`; the end is
-        the last record before the tag leaves the water, ``None`` if it stays in
-        the water until the last record);
+        the last record before the tag leaves the water, ``None`` if nothing
+        shows that it leaves the water; a pressure back at the in-air reading is
+        only reported, in its ``evidence`` and ``warning``);
         ``comparison`` (differences in days between the tagging events and the
         suggestions); ``pressure_offset`` (estimated from the pre-release period,
         checked on the suggested track); ``tide``.

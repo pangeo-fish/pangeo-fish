@@ -134,15 +134,16 @@ class TestDescribeTag:
             (fish_death - end) / pd.Timedelta(1, "D")
         )
 
-    def test_tag_kept_in_a_fridge(self):
+    def test_tag_kept_in_a_fridge_is_reported(self):
         description = describe_tag(synthetic_tag(end="fridge"), tide=False)
         suggested = description["suggested_end"]
 
-        assert abs(suggested["end"] - END) <= pd.Timedelta(1, "h")
-        assert suggested["likely_cause"] == "pressure_at_air_level"
-        # the in-air days are not part of the track, and the events are compared
-        assert description["ranges"]["track"]["temperature"]["min"] > 10
-        assert "fish_death_minus_suggested_end_days" in description["comparison"]
+        # the pressure back at the in-air reading does not end the track: it is
+        # reported, for the data owner to check against the recovery of the tag
+        assert suggested["end"] is None
+        reported = suggested["evidence"]["pressure_at_air_level_from"]
+        assert abs(reported - END) <= pd.Timedelta(1, "h")
+        assert "in-air reading" in suggested["warning"]
 
     def test_end_uses_the_pre_release_level(self, monkeypatch):
         import pangeo_fish.describe as describe_module
@@ -165,8 +166,10 @@ class TestDescribeTag:
             synthetic_tag(end="fridge"), tide=False, end_kwargs={"air_level": 10.0}
         )
 
-        assert description["suggested_end"]["parameters"]["air_level"] == 10.0
-        assert description["suggested_end"]["end"] is None
+        suggested = description["suggested_end"]
+        assert suggested["parameters"]["air_level"] == 10.0
+        assert suggested["evidence"]["pressure_at_air_level_from"] is None
+        assert suggested["warning"] is None
 
     def test_pressure_offset_uses_the_pre_release_period(self):
         tag = synthetic_tag()

@@ -14,9 +14,9 @@ shows the sensor noise (and the slow tide for a tag on the seabed). The start is
 the first sustained activity. The end is the last record before the tag leaves the
 water, found among the periods without activity. The activity
 is the mean absolute deviation of the pressure from its running median (the
-``activity`` variable of :py:func:`flag_records`). Values outside the sensor range,
-temperatures outside the plausible water range and a pressure back at the in-air
-reading of the tag are also used.
+``activity`` variable of :py:func:`flag_records`). Values outside the sensor range
+and temperatures outside the plausible water range are also used. A pressure back
+at the in-air reading of the tag is only reported: it does not end the track.
 
 :py:func:`pangeo_fish.visualization.plot_track_bounds` shows the records with the
 suggestions.
@@ -449,10 +449,10 @@ def _water_exit(flags, pressure, temperature, first, last, *, last_record, param
     cause)`` of the earliest hard evidence: records outside the sensor range or
     with a temperature outside the water range (in a run lasting at least
     ``min_duration`` or reaching the last record), or the diurnal temperature
-    cycle; a tie goes to the sensor range. ``air`` is the onset of the first such
-    run without vertical movement at the in-air pressure reading: weak evidence,
-    since a tag floating at the surface or lying in very shallow water looks
-    the same.
+    cycle; a tie goes to the sensor range. ``air`` is the onset of the first run
+    (lasting ``min_duration`` or reaching the last record) without vertical
+    movement at the in-air pressure reading: it is only reported, since a tag
+    floating at the surface or lying in very shallow water looks the same.
     """
     max_gap = parameters["max_gap"]
     min_duration = parameters["min_duration"]
@@ -512,6 +512,7 @@ def detect_end_of_track(
     window=DEFAULTS["window"],
     activity_threshold=DEFAULTS["activity_threshold"],
     min_duration="12h",
+    min_active_duration=DEFAULTS["min_active_duration"],
     max_gap=DEFAULTS["max_gap"],
     level_change_threshold=0.5,
     air_level=None,
@@ -533,27 +534,19 @@ def detect_end_of_track(
 
     The periods that do not look like a swimming fish (no vertical activity,
     values outside the sensor range or temperature outside the plausible water
-    range, see :py:func:`flag_records`), after ``start`` and lasting at least
-    ``min_duration`` (or reaching the last record), are examined. The temperature
-    and the sensor range are used only inside these periods, so an active fish
-    crossing a thermocline is not flagged. Inside a period, the tag leaves the
-    water at the first of:
+    range, see :py:func:`flag_records`), lasting at least ``min_duration`` (or
+    reaching the last record), are examined from the first sustained activity in
+    the water after ``start`` (at least ``min_active_duration``): the periods
+    before it (tag in the air or on the deck before the release) are not. The
+    temperature and the sensor range are used only inside these periods, so an
+    active fish crossing a thermocline is not flagged. Inside a period, the tag
+    leaves the water at the first of:
 
     - records outside the sensor range (for at least ``min_duration``);
     - temperatures outside the plausible water range (for at least
       ``min_duration``);
     - a diurnal temperature cycle (a daily range of at least
       ``air_temperature_daily_range``, kept for the next days).
-
-    If a period has none of these, a weaker evidence is used: no vertical
-    movement with the pressure within ``air_level_tolerance`` of the in-air
-    reading ``air_level`` (for at least ``min_duration``), as for a tag kept
-    indoors or in a fridge after its recovery, where the temperature looks like
-    water. It is used only after a sustained activity in the water (so not for
-    the pre-release period), and only if the tag does not move again for
-    ``min_duration`` afterwards. A tag floating at the surface or lying in very
-    shallow water looks the same, so such an end always comes with a
-    ``warning``.
 
     A period can hold both the death of the fish and the stranding of the tag
     (fish dead on the seabed for days, then tag on a beach): the end is the
@@ -562,6 +555,15 @@ def detect_end_of_track(
     pressure differs from the level at the onset by more than
     ``level_change_threshold``.
 
+    A pressure back at the in-air reading ``air_level`` (within
+    ``air_level_tolerance``) without vertical movement, for at least
+    ``min_duration``, does *not* end the track. A tag kept indoors or in a fridge
+    after its recovery records it (with a temperature that looks like water), but
+    a tag floating at the surface or lying in very shallow water looks the same.
+    It is only reported (``evidence["pressure_at_air_level_from"]`` and
+    ``warning``) when the tag does not move again for ``min_duration``
+    afterwards: check it against the recovery of the tag.
+
     Parameters
     ----------
     tag_log : xarray.Dataset or xarray.DataTree
@@ -569,13 +571,19 @@ def detect_end_of_track(
     start : datetime-like, optional
         Only look after this time (e.g. the release). Defaults to the start
         suggested by :py:func:`detect_start_of_track`, called with the same
-        ``window``, ``activity_threshold``, ``max_gap``, ``level_change_threshold``,
-        ``sensor_ranges``, ``sensor_range_tolerance`` and ``temperature_range``.
+        ``window``, ``activity_threshold``, ``min_active_duration``, ``max_gap``,
+        ``level_change_threshold``, ``sensor_ranges``, ``sensor_range_tolerance``
+        and ``temperature_range``.
     window, activity_threshold, sensor_ranges, sensor_range_tolerance, temperature_range
         See :py:func:`flag_records`.
     min_duration : str, default: "12h"
         Minimum duration of a period without vertical movement, and of a period
         outside the sensor or water temperature range. Shorter ones are ignored.
+    min_active_duration : str, default: "2h"
+        Minimum duration of the first active period after ``start``. The periods
+        before it are not examined; if the tag is never active that long, all
+        the periods after ``start`` are, and the in-air pressure reading is not
+        reported.
     max_gap : str, default: "30min"
         Periods separated by less than this (e.g. a short handling of the tag)
         are merged.
@@ -600,9 +608,10 @@ def detect_end_of_track(
     Returns
     -------
     suggestion : dict
-        ``end``: suggested last record before the tag leaves the water, or
-        ``None`` if the tag stays in the water until the last record (the whole
-        record after ``start`` can be used);
+        ``end``: suggested last record before the tag leaves the water (never
+        before ``start``), or ``None`` if nothing shows that the tag leaves the
+        water (the whole record after ``start`` can be used, but read the
+        ``warning``);
         ``inactive_period``: (first, last) record of the first period without
         vertical movement *in the water*, or ``None``. It does **not** end the
         track: the fish is probably dead or resting, or the tag was shed. If the
@@ -613,19 +622,17 @@ def detect_end_of_track(
           (sensor failure, or tag out of the water);
         - ``"out_of_water"``: temperatures outside the plausible water range, or
           a diurnal temperature cycle (tag in the air, e.g. stranded on a beach);
-        - ``"pressure_at_air_level"``: only the weak evidence above (tag kept
-          indoors, or a pressure-only tag; a tag floating at the surface or in
-          very shallow water looks the same);
 
-        ``evidence``: the numbers behind it (fraction of each flag, median daily
-        temperature range before and after the onset of the period examined,
-        fraction of active records after it and longest active period after it,
-        and ``pressure_at_air_level_from``: start of the weak evidence when it
-        comes before the hard one, else ``None``; empty if there is no period
-        without vertical movement);
+        ``evidence``: ``pressure_at_air_level_from`` (always present): first
+        record of a period without vertical movement at the in-air pressure
+        reading, before the ``end`` if there is one, else ``None``; and, if a
+        period without vertical movement was examined, the numbers behind the
+        suggestion (fraction of each flag, median daily temperature range before
+        and after the onset of that period, fraction of active records after it
+        and longest active period after it);
         ``warning`` (or ``None``): activity resumes after the suggested ``end``,
-        the end rests on the weak evidence only, or the weak evidence starts
-        before the hard one (the tag may have left the water earlier);
+        or the pressure is back at the in-air reading (the tag may have left the
+        water then);
         ``reason`` and ``parameters``.
 
     Warns
@@ -642,23 +649,24 @@ def detect_end_of_track(
     -----
     Known limits: the onset of a diurnal cycle inside a long period is found to
     about an hour or a few hours. A tag that leaves the water without a
-    temperature signal and whose pressure does not come back to ``air_level``
-    (for example a pressure reading that drifts in the sun, or an in-air
-    reading that changed since the release) cannot be detected; pass
-    ``air_level`` if the in-air reading is known.
+    temperature signal (a pressure-only tag, or a tag kept indoors) gets no
+    ``end``: only a pressure back at ``air_level`` is reported, and not even
+    that if the pressure reading drifts in the sun or the in-air reading changed
+    since the release (pass ``air_level`` if the in-air reading is known).
 
     Examples
     --------
     >>> tag = pangeo_fish.io.open_tag(tag_root, "A19845")
     >>> start = detect_start_of_track(tag)
     >>> end = detect_end_of_track(tag, start=start["start"])
-    >>> end["end"], end["likely_cause"]
+    >>> end["end"], end["likely_cause"], end["warning"]
     """
     df, attrs = _to_frame(tag_log)
     parameters = _parameters(
         window=window,
         activity_threshold=activity_threshold,
         min_duration=min_duration,
+        min_active_duration=min_active_duration,
         max_gap=max_gap,
         level_change_threshold=level_change_threshold,
         air_level_tolerance=air_level_tolerance,
@@ -669,7 +677,7 @@ def detect_end_of_track(
         "end": None,
         "inactive_period": None,
         "likely_cause": None,
-        "evidence": {},
+        "evidence": {"pressure_at_air_level_from": None},
         "warning": None,
         "reason": "",
         "parameters": parameters,
@@ -691,6 +699,7 @@ def detect_end_of_track(
             warnings.filterwarnings("ignore", message="track_bounds:")
             suggestion = detect_start_of_track(
                 df.to_xarray().assign_attrs(attrs),
+                min_active_duration=min_active_duration,
                 max_gap=max_gap,
                 level_change_threshold=level_change_threshold,
                 **flag_kwargs,
@@ -715,21 +724,21 @@ def detect_end_of_track(
     window_ = _timedelta(window)
     pressure = df["pressure"]
     temperature = df["temperature"] if "temperature" in df else None
+    # the periods before the fish is in the water (tag in the air or on the deck
+    # before the release) are not examined
+    in_water = _sustained_activity_start(flags, start, max_gap, min_active_duration)
     candidates = [
         (first, last)
         for first, last in _long_runs(
             flags["suspect"], max_gap, min_duration, last_record
         )
-        if first > start
+        if first > start and (in_water is None or first >= in_water)
     ]
 
-    # the in-air pressure level is only evidence after the fish was in the water
-    in_water = _sustained_activity_start(
-        flags, start, max_gap, DEFAULTS["min_active_duration"]
-    )
-
-    # the first period without movement in the water, and the exit from the water
+    # the first period without movement in the water, the first one at the in-air
+    # pressure reading, and the exit from the water
     inactive_period = None
+    air_from = None
     exit_ = None
     for first, last in candidates:
         hard, air = _water_exit(
@@ -741,22 +750,22 @@ def detect_end_of_track(
             last_record=last_record,
             parameters=parameters,
         )
+        # the in-air pressure reading is only reported after the fish was in the
+        # water, and if the tag does not move again afterwards
         if air is not None and (
             in_water is None
-            or air <= in_water
             or _longest_active_after(flags, last, max_gap) >= _timedelta(min_duration)
         ):
             air = None
-        if hard is not None:
-            onset, cause = hard
-            earlier_air = air if air is not None and air < onset else None
-        elif air is not None:
-            onset, cause = air, "pressure_at_air_level"
-            earlier_air = None
-        else:
+        if hard is None:
             if inactive_period is None:
                 inactive_period = (first, last)
+            if air_from is None:
+                air_from = air
             continue
+        onset, cause = hard
+        if air_from is None and air is not None and air < onset:
+            air_from = air
         if onset - first <= window_:
             level = float(pressure[onset : onset + window_].median())
             search = pressure[
@@ -766,13 +775,16 @@ def detect_end_of_track(
             end = moved.index[-1] if not moved.empty else onset - pd.Timedelta(1, "ns")
         else:
             end = onset - pd.Timedelta(1, "ns")
-        before = pressure.index[pressure.index <= end]
-        end = before[-1] if len(before) else pressure.index[0]
+        # the last record before the onset, but never before ``start``
+        after_start = pressure.index[pressure.index >= start]
+        before = after_start[after_start <= end]
+        end = before[-1] if len(before) else after_start[0]
         if inactive_period is None and end - first >= _timedelta(min_duration):
             inactive_period = (first, end)
-        exit_ = (first, last, onset, cause, end, earlier_air)
+        exit_ = (first, last, onset, cause, end)
         break
 
+    air_reading = f"{parameters['air_level']:.2f} ± {air_level_tolerance:g} m"
     if exit_ is None:
         result["inactive_period"] = inactive_period
         result["reason"] = (
@@ -789,13 +801,25 @@ def detect_end_of_track(
             result["evidence"] = _evidence(
                 flags, temperature, first, last, last_record, min_duration, max_gap
             )
+        result["evidence"]["pressure_at_air_level_from"] = air_from
+        if air_from is not None:
+            result[
+                "reason"
+            ] += f"; the pressure is at the in-air reading from {air_from}"
+            result["warning"] = (
+                f"the pressure is back at the in-air reading ({air_reading}) without"
+                f" vertical movement from {air_from}: the tag may have left the water"
+                " then (kept indoors or in a fridge after its recovery), or it floats"
+                " at the surface or lies in very shallow water. The end is not set"
+                " from the pressure alone: check it against the recovery of the tag"
+            )
         return result
 
-    first, last, onset, cause, end, earlier_air = exit_
+    first, last, onset, cause, end = exit_
     evidence = _evidence(
         flags, temperature, onset, last, last_record, min_duration, max_gap
     )
-    evidence["pressure_at_air_level_from"] = earlier_air
+    evidence["pressure_at_air_level_from"] = air_from
     warnings_ = []
     longest = evidence["longest_active_period_after_hours"]
     min_duration_hours = _timedelta(min_duration) / pd.Timedelta(1, "h")
@@ -808,19 +832,12 @@ def detect_end_of_track(
             f"({evidence['fraction_active_after']:.0%} of the later records are "
             f"active, longest active period {longest:.1f} h): check the end manually"
         )
-    air_reading = f"{parameters['air_level']:.2f} ± {air_level_tolerance:g} m"
-    if cause == "pressure_at_air_level":
+    if air_from is not None:
         warnings_.append(
-            f"the end rests only on the pressure staying at the in-air reading"
-            f" ({air_reading}) without vertical movement: a tag floating at the"
-            " surface or lying in very shallow water looks the same, check the"
-            " end against the recovery of the tag"
-        )
-    elif earlier_air is not None:
-        warnings_.append(
-            f"the pressure stays at the in-air reading ({air_reading}) from"
-            f" {earlier_air}, before the {cause} evidence: the tag may have left"
-            " the water then"
+            f"the pressure is back at the in-air reading ({air_reading}) without"
+            f" vertical movement from {air_from}, before the {cause} evidence: the"
+            " tag may have left the water then (or it floated at the surface or lay"
+            " in very shallow water), check the end against the recovery of the tag"
         )
     warning = "; ".join(warnings_) or None
 
