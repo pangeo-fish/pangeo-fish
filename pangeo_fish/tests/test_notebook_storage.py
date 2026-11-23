@@ -9,6 +9,7 @@ import xarray as xr
 import zarr
 from zarr.storage import LocalStore, MemoryStore
 
+from pangeo_fish.dggs import grid_attrs
 from pangeo_fish.hmm.estimator import CachedEstimator
 from pangeo_fish.storage import write_time_blocks
 
@@ -176,7 +177,9 @@ def test_cached_healpix_convolution(tmp_path):
     np.testing.assert_allclose(actual.states.sum("cells"), 1.0, atol=1e-7)
     np.testing.assert_array_equal(actual.cell_ids, ds.cell_ids)
     xr.testing.assert_identical(actual.time, ds.time)
-    assert actual.states.dggs.decode().dggs.grid_info == ds.dggs.grid_info
+    # The grid is kept; a missing ellipsoid is written out as the sphere.
+    assert grid_attrs(actual.states.to_dataset()) == grid_attrs(ds)
+    assert grid_attrs(ds)["ellipsoid"] == "sphere"
 
 
 @pytest.mark.parametrize("step", [1, 3])
