@@ -432,7 +432,9 @@ def _air_cycle_onset(temperature, window, threshold, margin=0.5):
     which the temperature keeps changing (by more than ``margin`` between one and
     three ``window`` later). A slow change of the water temperature (tide, trend)
     or a step to a steady one (front, another water mass) is not an onset.
-    Without such a record, the onset is the beginning of the bin.
+    Without such a record, the onset is the last record that only misses the
+    last condition (the air temperature is also steady near the daily extremes),
+    else the beginning of the bin.
     """
     temperature = temperature.dropna()
     if temperature.empty:
@@ -464,16 +466,19 @@ def _air_cycle_onset(temperature, window, threshold, margin=0.5):
     with np.errstate(invalid="ignore"):
         departed = (values > high + margin) | (values < low - margin)
     departed &= temperature.index < cycle + day
+    steady = None
     for time in temperature.index[departed]:
         following = temperature[time : time + day]
         if following.max() - following.min() < threshold:
             continue
         # after a step of the water temperature, the temperature is steady again
+        # (but so is the air near the daily extremes)
         soon = following[time + window : time + 3 * window]
         if len(soon) and soon.max() - soon.min() <= margin:
+            steady = time
             continue
         return time
-    return cycle
+    return steady if steady is not None else cycle
 
 
 def _water_exit(flags, temperature, first, last, *, last_record, parameters):
@@ -713,8 +718,8 @@ def detect_end_of_track(
     Known limits: the onset of a diurnal cycle is the first record that leaves
     the temperature range of the previous day by 0.5 °C and keeps changing, so
     it is found to about an hour or a few hours, later when the temperature in
-    the air changes slowly (at night, or near the daily maximum of a weak cycle:
-    up to about half a day). One found within three ``window`` of
+    the air changes slowly (at night, near the daily extremes, or with a weak
+    cycle: up to about 16 hours). One found within three ``window`` of
     the beginning of the period is moved to the beginning: a tag floating less
     than about three hours before it strands ends when it starts floating. In
     water whose temperature changes by more than 0.5 °C within hours (tide,

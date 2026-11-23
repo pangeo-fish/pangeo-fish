@@ -184,9 +184,9 @@ def tag_with_tail(*phases):
     """Active fish until STRANDED, then ``phases``: (days, pressure, temperature).
 
     ``pressure`` is a constant level (NaN: no pressure), or "swim" for an active
-    fish; ``temperature`` is a constant, "diurnal" for a tag in the air, "tide"
-    for water whose temperature changes with the tide, or (from, to) for a
-    linear change.
+    fish; ``temperature`` is a constant, "diurnal" for a tag in the air (or
+    ("diurnal", hours) to shift the cycle), "tide" for water whose temperature
+    changes with the tide, or (from, to) for a linear change.
     """
     rng = np.random.default_rng(3)
     ds = synthetic_tag(end="none")
@@ -202,8 +202,11 @@ def tag_with_tail(*phases):
             p = 10 + 4 * np.sin(2 * np.pi * hours / 0.7) + rng.normal(0, 1.5, n)
         else:
             p = pressure + rng.normal(0, 0.02, n)
-        if temperature == "diurnal":
-            t = 19.5 + 4.5 * np.sin(2 * np.pi * (hours - 6) / 24)
+        if temperature == "diurnal" or (
+            isinstance(temperature, tuple) and temperature[0] == "diurnal"
+        ):
+            shift = temperature[1] if isinstance(temperature, tuple) else 0
+            t = 19.5 + 4.5 * np.sin(2 * np.pi * (hours - 6 + shift) / 24)
         elif temperature == "tide":
             t = 16 + 0.8 * np.sin(2 * np.pi * hours / 12.42)
         elif isinstance(temperature, tuple):
@@ -551,6 +554,20 @@ class TestDetectEndOfTrack:
         stranding = STRANDED + pd.Timedelta(4, "D") + pd.Timedelta(3, "h")
         assert stranding - pd.Timedelta(5, "min") <= actual["end"]
         assert actual["end"] <= stranding + pd.Timedelta(6, "h")
+
+    @pytest.mark.parametrize("shift", [0, 10])
+    @pytest.mark.parametrize("days", [1, 2])
+    def test_seabed_then_beach_near_the_daily_maximum(self, days, shift):
+        # dead fish on the seabed, then on a beach about 2 h before the daily
+        # maximum (shift=10): the air temperature is steady at first, the end
+        # is not the death
+        ds = tag_with_tail((days, 25.0, 16.0), (3, 5.4, ("diurnal", shift)))
+        actual = track_bounds.detect_end_of_track(ds, start=RELEASE)
+
+        stranding = STRANDED + pd.Timedelta(days, "D")
+        assert stranding - pd.Timedelta(5, "min") <= actual["end"]
+        assert actual["end"] <= stranding + pd.Timedelta(16, "h")
+        assert abs(actual["inactive_period"][0] - STRANDED) <= pd.Timedelta(1, "h")
 
     def test_one_warm_day_in_shallow_water_is_not_an_end(self):
         # dead fish in 2.5 m of water, one day with a 9 °C swing: no lasting
