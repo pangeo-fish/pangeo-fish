@@ -783,7 +783,10 @@ class LargeGaussianHealpixAnalyse(Predictor):
     not mass conserving (total roughly 0.92 to 1.05) and pads with zeros at
     the edge of the domain.  Below a minimum width between 2 and 3 cells (it
     depends on the patch) there is no solution and a ValueError is raised; use
-    ``GaussianHealpixAnalyse`` for small sigma.
+    ``GaussianHealpixAnalyse`` for small sigma.  There is also a maximum width:
+    a quarter of the distance from the calibration cell to the border of the
+    calibration patch (about 31 cells at level 10 with ``patch_depth=8``, about
+    twice that with ``patch_depth=9``).  Above it a ValueError is raised.
     WGS84 only.
     """
 
@@ -820,10 +823,21 @@ class LargeGaussianHealpixAnalyse(Predictor):
             )
         except ValueError as err:
             sigma_cells = self.sigma * 2**level / np.sqrt(np.pi / 3)
+            if "too wide" in str(err):
+                advice = (
+                    'conv_method="FFTConv" is an alternative if the domain fits '
+                    "in a radius of 10 degrees."
+                )
+                if self.patch_depth < level:
+                    advice = (
+                        "patch_depth is an argument of LargeGaussianHealpixAnalyse "
+                        "(a larger value makes the first build slower). " + advice
+                    )
+            else:
+                advice = 'Use conv_method="HealpixAnalyseConv" for small sigma.'
             raise ValueError(
                 f"HealpixAnalyseLargeConv cannot build sigma={self.sigma:.3g} rad "
-                f"(about {sigma_cells:.2f} cells at level {level}): {err} "
-                'Use conv_method="HealpixAnalyseConv" for small sigma.'
+                f"(about {sigma_cells:.2f} cells at level {level}): {err}. {advice}"
             ) from err
 
     def predict(self, X, *, mask=None):

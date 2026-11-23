@@ -70,7 +70,7 @@ Use `HealpixAnalyseConv` with `land_barrier=True`. The kernel is then measured t
 
 ### Domain larger than 10 degrees radius
 
-Use `HealpixAnalyseLargeConv`. It has no domain limit, but it has a minimum sigma between 2 and 3 cells (13 to 19 km at level 10; the healpix-analyse documentation gives about 2.2 cells, and the exact limit depends on the patch). Below that it raises an error and suggests `HealpixAnalyseConv`. In the checks it failed at 1 and 2 cells and ran from 3 cells on. It runs in 0.28 to 5.5 s.
+Use `HealpixAnalyseLargeConv`. It has no domain limit, but it has a minimum sigma between 2 and 3 cells (13 to 19 km at level 10; the healpix-analyse documentation gives about 2.2 cells, and the exact limit depends on the patch). Below that it raises an error and suggests `HealpixAnalyseConv`. It also has a maximum sigma of about 31 cells at level 10 (about 200 km; the exact limit depends on the place). Above that it raises an error. A larger `patch_depth` in `LargeGaussianHealpixAnalyse` doubles this limit, but the first build is slower. In the checks it failed at 1 and 2 cells and ran from 3 cells on. It runs in 0.28 to 5.5 s.
 
 It deviates from the direct sum. At 8 cells (51 km) its cost is 36.20, against 32.82 for the direct sum, a difference of about 10 %. At 6 cells it is 35.72 against 35.21. The direct sum was not run for larger sigma, so the deviation there is not known.
 
@@ -84,8 +84,10 @@ The optimiser looks for the sigma with the lowest cost. This works only if the c
 | --------------------------------- | ----- | ----- | ----- | ----- | ----- | ----- | ------- | ------- | ------- | ------- |
 | `FFTConv`                         | 26.89 | 28.55 | 30.19 | 31.90 | 35.25 | 32.56 | 28.06   | 24.96   | 22.77   | 22.99   |
 | `HealpixAnalyseConv` (direct sum) | 26.87 | 28.33 | 30.03 | 31.78 | 35.21 | 32.82 | not run | not run | not run | not run |
-| `HealpixAnalyseLargeConv`         | error | error | 32.12 | 33.05 | 35.72 | 36.20 | 29.94   | 25.21   | 21.52   | 20.50   |
+| `HealpixAnalyseLargeConv`         | error | error | 32.12 | 33.05 | 35.72 | 36.20 | 29.94   | 25.21   | 21.52   | error   |
 | `LargeHealpixConv`                | 74.57 | 36.34 | 32.09 | 33.01 | 35.92 | 35.04 | 29.00   | 24.53   | 21.11   | 21.17   |
+
+The `HealpixAnalyseLargeConv` row was measured before healpix-analyse 2026.11.1. Since that version, 32 cells is above its maximum sigma and gives an error (it gave 20.50 before). The other values of the row were not measured again.
 
 Prefer `FFTConv` when the optimiser must find sigma.
 

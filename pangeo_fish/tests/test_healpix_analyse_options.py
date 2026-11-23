@@ -125,6 +125,23 @@ def test_large_conv_mass_mask_and_minimum_sigma(cells):
         )
 
 
+@pytest.mark.parametrize(
+    ["patch_depth", "expected"],
+    [(8, "FFTConv"), (6, "patch_depth=7"), (6, "LargeGaussianHealpixAnalyse")],
+)
+def test_large_conv_too_wide_sigma_gives_its_own_advice(cells, patch_depth, expected):
+    with pytest.raises(ValueError, match="too wide") as err:
+        LargeGaussianHealpixAnalyse(
+            cell_ids=cells,
+            grid_info=_grid(),
+            sigma=40 * CELL_RAD,
+            patch_depth=patch_depth,
+        )
+    message = str(err.value)
+    assert expected in message
+    assert "HealpixAnalyseConv" not in message
+
+
 _FFT_MASS = {}
 
 
