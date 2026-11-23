@@ -19,6 +19,8 @@ import warnings
 import fsspec
 import numpy as np
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 import xarray as xr
 
 ETN_PARQUET_ROOT = "https://www.lifewatch.be/etn/parquet"
@@ -50,10 +52,28 @@ def _storage_options(path, storage_options):
     return {}
 
 
-def _read_parquet(path, storage_options=None, **kwargs):
+def _read_parquet(path, storage_options=None, *, string_column=None, **kwargs):
     # through fsspec, so that only the byte ranges needed are read from remote files
     with fsspec.open(path, "rb", **_storage_options(path, storage_options)) as f:
+        if string_column is not None:
+            schema = pq.ParquetFile(f).schema_arrow
+            if string_column not in schema.names:
+                raise ValueError(f"column {string_column!r} not found in {path}")
+            found = schema.field(string_column).type
+            if pa.types.is_dictionary(found):
+                found = found.value_type
+            if not (pa.types.is_string(found) or pa.types.is_large_string(found)):
+                raise ValueError(
+                    f"column {string_column!r} of {path} has type {found},"
+                    " expected a string type"
+                )
+            f.seek(0)
         return pd.read_parquet(f, **kwargs)
+
+
+def _label(values):
+    """Strings from a series, with ``"NA"`` for null values."""
+    return values.map(lambda v: "NA" if pd.isna(v) else str(v))
 
 
 def _archival_data_url(project, root=ETN_PARQUET_ROOT):
@@ -94,7 +114,7 @@ def _read_sensor_ranges(tag_id, root=ETN_PARQUET_ROOT, storage_options=None):
             "sensor_range_max",
         ],
     )
-    tags = tags[tags["tag_serial_number"] == tag_id]
+    tags = tags[tags["tag_serial_number"].astype(str) == str(tag_id)]
     ranges = {}
     for row in tags.itertuples():
         sensor = _MEASUREMENT_NAMES.get(str(row.sensor_type).lower())
@@ -135,11 +155,13 @@ def _read_records(project, tag_id, root=ETN_PARQUET_ROOT, storage_options=None):
         depth); a warning is emitted if values labelled ``Pa`` are too large to
         be dbar, or if the label is not a known unit.
     """
+    tag_id = str(tag_id)
     source = _archival_data_url(project, root)
     # the files are sorted by tag: the filter only reads the row groups of `tag_id`
     records = _read_parquet(
         source,
         storage_options,
+        string_column="tag_id",
         columns=[
             "tag_id",
             "timestamp_utc",
@@ -155,7 +177,7 @@ def _read_records(project, tag_id, root=ETN_PARQUET_ROOT, storage_options=None):
     units = (
         records[["measurement_type", "measurement_unit"]]
         .drop_duplicates()
-        .astype(str)
+        .apply(_label)
         .agg(": ".join, axis=1)
     )
     stats = {"etn_records": len(records), "etn_units": sorted(units)}
@@ -184,9 +206,9 @@ def _read_records(project, tag_id, root=ETN_PARQUET_ROOT, storage_options=None):
         raise ValueError(f"tag {tag_id!r} has no {sorted(missing)} records")
 
     pressure_units = sorted(
-        records.loc[records["measurement_type"] == "pressure", "measurement_unit"]
-        .astype(str)
-        .unique()
+        _label(
+            records.loc[records["measurement_type"] == "pressure", "measurement_unit"]
+        ).unique()
     )
     if len(pressure_units) > 1:
         raise ValueError(
@@ -288,11 +310,12 @@ def open_etn_archival(
         Tree with the metadata as attributes of the root node and the nodes
         ``dst`` and ``tagging_events``.
     """
+    tag_id = str(tag_id)
     if animals is None:
         animals = read_etn_animals(root, storage_options)
     matches = animals[
         (animals["animal_project_code"] == project)
-        & (animals["tag_serial_number"] == tag_id)
+        & (animals["tag_serial_number"].astype(str) == tag_id)
     ]
     if matches.empty:
         raise ValueError(

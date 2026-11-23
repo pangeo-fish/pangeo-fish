@@ -232,3 +232,99 @@ def test_write_tag_roundtrip(etn_root, tmp_path):
         reopened["tagging_events/time"].values, tag["tagging_events/time"].values
     )
     assert reopened.attrs["sensor_ranges"] == tag.attrs["sensor_ranges"]
+
+
+def _numeric_root(tmp_path, tag_column):
+    """ETN export whose tag ids are integers, with a null measurement unit."""
+    times = pd.date_range("2023-05-03T08:00", periods=3, freq="h")
+    records = pd.DataFrame(
+        {
+            "tag_id": tag_column(len(times) * 2),
+            "timestamp_utc": list(times) * 2,
+            "measurement_type": ["Temperature"] * 3 + ["Pressure"] * 3,
+            "measurement_value": [10.0, 11.0, 12.0, 1.0, 2.0, 3.0],
+            "measurement_unit": ["C"] * 3 + [None] * 3,
+        }
+    )
+    path = tmp_path / "archival" / "archival_det" / PROJECT
+    path.mkdir(parents=True)
+    records.to_parquet(path / "part-0.parquet", index=False)
+
+    animals = pd.DataFrame(
+        {
+            "animal_id": [1],
+            "animal_project_code": [PROJECT],
+            "tag_serial_number": [1],
+            "release_date_time": [pd.Timestamp("2023-05-03T09:00", tz="UTC")],
+            "release_latitude": [51.1],
+            "release_longitude": [4.1],
+            "recapture_date_time": [pd.NaT],
+        }
+    )
+    path = tmp_path / "acoustic" / "animals"
+    path.mkdir(parents=True)
+    animals.to_parquet(path / "part-0.parquet", index=False)
+
+    tags = pd.DataFrame(
+        {
+            "tag_serial_number": [1, 1],
+            "sensor_type": ["temperature", "pressure"],
+            "sensor_range_min": ["2", "0"],
+            "sensor_range_max": ["34", "300"],
+        }
+    )
+    path = tmp_path / "archival" / "tags"
+    path.mkdir(parents=True)
+    tags.to_parquet(path / "part-0.parquet", index=False)
+    return str(tmp_path)
+
+
+def test_read_records_null_unit(tmp_path):
+    root = _numeric_root(tmp_path, lambda n: ["1"] * n)
+
+    with pytest.warns(UserWarning, match="unknown pressure unit 'NA'"):
+        dst, stats = _read_records(PROJECT, "1", root=root)
+
+    assert len(dst) == 3
+    assert stats["etn_units"] == ["Pressure: NA", "Temperature: C"]
+
+
+def test_integer_tag_ids(etn_root, tmp_path):
+    # the tag is looked up as a string in the animals table and the sensor ranges
+    tag = open_etn_archival(PROJECT, "A1", root=etn_root)
+    assert tag.attrs["pit_tag_id"] == "A1"
+
+    (tmp_path / "numeric").mkdir()
+    root = _numeric_root(tmp_path / "numeric", lambda n: ["1"] * n)
+    with pytest.warns(UserWarning, match="unknown pressure unit"):
+        tag = open_etn_archival(PROJECT, 1, root=root)
+    assert tag.attrs["pit_tag_id"] == "1"
+    assert tag.attrs["sensor_ranges"] == {
+        "temperature": [2.0, 34.0],
+        "pressure": [0.0, 300.0],
+    }
+
+
+def test_read_sensor_ranges_integer_id(tmp_path):
+    from pangeo_fish.etn_archival import _read_sensor_ranges
+
+    root = _numeric_root(tmp_path, lambda n: ["1"] * n)
+
+    assert _read_sensor_ranges("1", root=root)["pressure"] == [0.0, 300.0]
+    assert _read_sensor_ranges(1, root=root)["pressure"] == [0.0, 300.0]
+
+
+def test_non_string_tag_id_column(tmp_path):
+    root = _numeric_root(tmp_path, lambda n: [1] * n)
+
+    with pytest.raises(ValueError, match=r"column 'tag_id'.*int64"):
+        _read_records(PROJECT, "1", root=root)
+
+
+def test_missing_tag_id_column(tmp_path):
+    root = _numeric_root(tmp_path, lambda n: ["1"] * n)
+    path = tmp_path / "archival" / "archival_det" / PROJECT / "part-0.parquet"
+    pd.read_parquet(path).rename(columns={"tag_id": "tag"}).to_parquet(path)
+
+    with pytest.raises(ValueError, match="column 'tag_id' not found"):
+        _read_records(PROJECT, "1", root=root)
