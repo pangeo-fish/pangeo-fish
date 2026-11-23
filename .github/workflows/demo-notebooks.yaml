@@ -154,3 +154,5 @@ jobs:
           path: demo-results/${{ matrix.notebook }}/work/test
           retention-days: 7
           if-no-files-found: ignore
+          # Zarr v2 metadata (.zgroup, .zarray, .zattrs, .zmetadata) are dot files
+          include-hidden-files: true
