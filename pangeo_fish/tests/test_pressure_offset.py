@@ -201,6 +201,24 @@ class TestCorrectPressureOffset:
         with pytest.raises(ValueError, match="already corrected"):
             correct_pressure_offset(corrected, 1.8)
 
+    def test_time_varying_offset_outside_its_span(self):
+        ds = synthetic_tag()
+        first_part = ds.sel(time=slice(None, "2023-05-05"))
+        linear = estimate_pressure_offset(
+            first_part, in_air=BEFORE_RELEASE, combine="linear"
+        )
+        assert isinstance(linear["offset"], xr.DataArray)
+
+        with pytest.warns(UserWarning, match=r"\d+ of \d+ records lie outside"):
+            corrected = correct_pressure_offset(ds, linear)
+
+        assert corrected["pressure"].notnull().all()
+        np.testing.assert_allclose(
+            corrected["pressure"].sel(time=slice("2023-05-05 00:01", None)),
+            ds["pressure"].sel(time=slice("2023-05-05 00:01", None))
+            - float(linear["offset"][-1]),
+        )
+
     def test_datatree(self):
         ds = synthetic_tag()
         tree = xr.DataTree.from_dict(

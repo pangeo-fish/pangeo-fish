@@ -14,6 +14,8 @@ it as ``slice(*pre_release_period)``), from the tagging events, or by looking at
 records.
 """
 
+import warnings
+
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -271,7 +273,9 @@ def correct_pressure_offset(tag_log, offset, *, variable="pressure"):
     offset : float, xarray.DataArray or dict
         The offset (m) to subtract, or the dict returned by
         :py:func:`estimate_pressure_offset`. A DataArray is interpolated on the
-        times of ``tag_log``.
+        times of ``tag_log``; outside its time span, the first or last value is
+        held and a :py:class:`UserWarning` gives the number of records
+        concerned.
     variable : str, default: "pressure"
         The pressure variable.
 
@@ -301,9 +305,24 @@ def correct_pressure_offset(tag_log, offset, *, variable="pressure"):
         )
 
     if isinstance(offset, xr.DataArray):
-        offset_ = offset.interp(time=ds["time"]).drop_vars(
-            [name for name in offset.coords if name != "time"]
-        )
+        offset = offset.sortby("time")
+        start, stop = offset["time"].values[[0, -1]]
+        times = ds["time"].values
+        outside = int(((times < start) | (times > stop)).sum())
+        if outside:
+            warnings.warn(
+                f"{outside} of {times.size} records lie outside the time span of"
+                f" the offset estimation ({pd.Timestamp(start)} to"
+                f" {pd.Timestamp(stop)}): the first or last estimated offset is"
+                " held there",
+                UserWarning,
+                stacklevel=2,
+            )
+        # np.clip holds the first / last value outside the span
+        offset_ = offset.interp(time=np.clip(times, start, stop))
+        offset_ = offset_.drop_vars(
+            [name for name in offset_.coords if name != "time"]
+        ).assign_coords(time=ds["time"].values)
         attrs["pressure_offset"] = float(offset_.mean())
         attrs["pressure_offset_method"] = (
             "time-varying offset interpolated between in-air periods"
