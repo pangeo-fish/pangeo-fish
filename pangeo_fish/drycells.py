@@ -27,8 +27,8 @@ __all__ = [
 class DryCellWarning(UserWarning):
     """Warning about dry cells (``H0 + XE <= min_water_depth``) in the model.
 
-    This is a :class:`UserWarning` (not a :class:`RuntimeWarning`) so that it is
-    not hidden by the ``RuntimeWarning`` filter set in :mod:`pangeo_fish.bathy`.
+    A :class:`UserWarning` (not a :class:`RuntimeWarning`), so that a filter on
+    numerical warnings does not hide it.
     """
 
 
