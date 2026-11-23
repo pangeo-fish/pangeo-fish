@@ -340,8 +340,9 @@ def test_model_cells_without_gebco_use_the_nearest_cell(tmp_path):
     reference["XE"][:, 0] = np.nan  # land
     write_healpix_zarr(reference, str(tmp_path / "diff-regridded.zarr"))
     full = batch_compute_pdf_bathy(hist, tag, str(tmp_path))
-    partial = hist.drop_isel(cells=[1, 2])
-    with pytest.warns(UserWarning, match="2 cell.*nearest cell"):
+    # cell 0 is land: missing it needs no fill and is not reported
+    partial = hist.drop_isel(cells=[0, 1, 2])
+    with pytest.warns(UserWarning, match="2 sea cell.*nearest cell"):
         pdf = batch_compute_pdf_bathy(partial, tag, str(tmp_path))
     np.testing.assert_array_equal(pdf.cell_ids, reference.cell_ids)
     assert pdf.pdf_bathy.isel(cells=[1, 2]).notnull().all()
@@ -350,4 +351,16 @@ def test_model_cells_without_gebco_use_the_nearest_cell(tmp_path):
         pdf.pdf_bathy.isel(cells=slice(3, None)),
         full.pdf_bathy.isel(cells=slice(3, None)),
     )
+    assert pdf.pdf_bathy.isel(cells=0).isnull().all()
+
+
+def test_land_cells_without_gebco_are_not_reported(tmp_path):
+    import warnings
+
+    hist, reference, tag = _pdf_inputs(tmp_path)
+    reference["XE"][:, 0] = np.nan  # land
+    write_healpix_zarr(reference, str(tmp_path / "diff-regridded.zarr"))
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        pdf = batch_compute_pdf_bathy(hist.drop_isel(cells=[0]), tag, str(tmp_path))
     assert pdf.pdf_bathy.isel(cells=0).isnull().all()
