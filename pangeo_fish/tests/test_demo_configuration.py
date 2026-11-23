@@ -21,7 +21,11 @@ def test_common_defaults_are_identical():
     complete, _ = demo_settings(load_demo("complete"))
     assert base.pop("scratch_root") != complete.pop("scratch_root")
     assert complete.pop("tide_method") == "legacy"
-    assert complete.pop("tide_model_source").endswith(".nc")
+    assert complete.pop("tide_model") == "tpxo9"
+    assert complete.pop("tide_model_source") is None
+    assert complete.pop("tide_constants_store") is None
+    assert complete.pop("tide_s3_endpoint") is None
+    assert complete.pop("tide_constituents") is None
     assert complete.pop("tide_sigma_m") == 2.0
     assert complete.pop("tide_min_samples") == 6
     assert base == complete
