@@ -94,6 +94,9 @@ def test_bathy_pdf_store_decodes(tmp_path):
     )
     pdf = batch_compute_pdf_bathy(hist, tag, str(tmp_path), batch_size=7)
     assert grid_attrs(pdf) == grid_attrs(reference)
+    # the complete demo merges it into total_pdf after dropping this index
+    assert "cell_ids" in pdf.indexes
+    pdf.drop_indexes(["cell_ids"])
 
     path = str(tmp_path / "bathy_pdf.zarr")
     write_healpix_zarr((pdf / pdf.sum("cells")).compute(), path)

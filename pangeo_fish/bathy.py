@@ -460,10 +460,10 @@ def batch_compute_pdf_bathy(
         )
     pdf = xr.concat(pdf_chunks, dim="cells")
 
-    result = pdf.drop_vars("cells").to_dataset(name="pdf_bathy")
-    result = result.assign_coords(
-        cell_ids=("cells", reference_ids, dict(reference["cell_ids"].attrs))
-    )
+    # as before: ``cell_ids`` is the indexed coordinate of the ``cells`` dimension
+    # (the complete demo drops that index before merging into total_pdf)
+    result = pdf.to_dataset(name="pdf_bathy").rename_vars({"cells": "cell_ids"})
+    result["cell_ids"].attrs = dict(reference["cell_ids"].attrs)
     result["pdf_bathy"].attrs = {
         "long_name": "probability that the seabed is deeper than the fish",
         "units": "1",
