@@ -713,8 +713,8 @@ def _check_temperature_coverage(model, dataset_id):
     extent = f"lat {lat.min():.2f} to {lat.max():.2f}, lon {lon.min():.2f} to {lon.max():.2f}"
     warnings.warn(
         f"Copernicus dataset {dataset_id!r} has no temperature in {n_missing} of"
-        f" {n_sea} sea cells of the requested area; temperature is only available"
-        f" in {extent}. The 3D product may not cover the whole area.",
+        f" {n_sea} sea cells of the requested area; the cells with temperature lie"
+        f" within {extent}. The 3D product may not cover the whole area.",
         category=UserWarning,
     )
 
