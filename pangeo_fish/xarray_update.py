@@ -1,6 +1,6 @@
 import xarray as xr
 
-from pangeo_fish.dggs import canonical_ellipsoid
+from pangeo_fish.dggs import canonical_ellipsoid, for_explore
 
 
 @xr.register_dataset_accessor("healpix")
@@ -52,6 +52,7 @@ class Accessor:
                     "ellipsoid": ellipsoid,
                 }
             )
+            .pipe(for_explore)
             .dggs.explore(alpha=alpha, cmap="viridis")
         )
         return plot

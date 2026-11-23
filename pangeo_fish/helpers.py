@@ -40,6 +40,7 @@ from pangeo_fish.acoustic import emission_probability
 from pangeo_fish.cf import bounds_to_bins
 from pangeo_fish.dggs import (
     canonical_ellipsoid,
+    for_explore,
     grid_attrs,
     grid_ellipsoid,
     with_cf_attrs,
@@ -3069,6 +3070,7 @@ def multiplot_healpix(
                 .compute()
                 .drop_indexes("cell_ids", errors="ignore")
                 .dggs.decode(grid)
+                .pipe(for_explore)
                 .dggs.explore(alpha=alpha)
             )
             plots.append(plot)

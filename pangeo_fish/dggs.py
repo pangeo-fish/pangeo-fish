@@ -216,6 +216,16 @@ def with_grid_attrs(ds):
     return ds
 
 
+def for_explore(obj):
+    """Prepare a decoded HEALPix object for ``obj.dggs.explore()``.
+
+    xdggs 0.7 reads ``obj.variables`` for the ``latitude``/``longitude``
+    coordinates, which a DataArray does not have. Without them, xdggs computes the
+    cell centres from the grid (and its ellipsoid) itself.
+    """
+    return obj.drop_vars(["latitude", "longitude"], errors="ignore")
+
+
 def with_cf_attrs(ds):
     """Return ``ds`` with the CF attributes of :py:data:`CF_ATTRS` where missing.
 

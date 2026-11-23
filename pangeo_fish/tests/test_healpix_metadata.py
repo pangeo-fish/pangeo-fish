@@ -204,3 +204,15 @@ def test_write_keeps_only_grid_attrs_on_cell_ids(tmp_path):
     }
     assert xr.open_zarr(path).dggs.decode().dggs.grid_info.level == 2
     assert source["cell_ids"].attrs["lat"] == 0  # input unchanged
+
+
+@pytest.mark.parametrize("ellipsoid", ["sphere", "WGS84"])
+def test_plots_with_cell_centre_coordinates(ellipsoid):
+    """xdggs 0.7 ``explore`` fails on a DataArray with latitude/longitude coords."""
+    pytest.importorskip("lonboard")
+    import pangeo_fish.xarray_update  # noqa: F401  (registers ``.healpix``)
+
+    ds = _maps(ellipsoid=ellipsoid).set_coords(["latitude", "longitude"])
+    ds["pdf"] = ds["pdf"].isel(time=0)
+    ds.healpix.plot("pdf")
+    helpers.multiplot_healpix([(ds, ["pdf"])])
