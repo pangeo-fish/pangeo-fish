@@ -126,6 +126,13 @@ def _plot_in_figure(ds: xr.Dataset, **plot_kwargs) -> Figure:
     return fig
 
 
+def _rechunk_existing(ds: xr.Dataset, chunks: dict | None) -> xr.Dataset:
+    """Rechunk ``ds`` along the dimensions of ``chunks`` that it has."""
+    return ds.chunk(
+        {dim: size for dim, size in (chunks or {}).items() if dim in ds.dims}
+    )
+
+
 def _save_zarr(ds: xr.Dataset, path: str, storage_options=None):
     """Helper for saving a .zarr array and warning in case of failure."""
     try:
@@ -1147,6 +1154,31 @@ def regrid_dataset_hpresample(
     mask_threshold=0.5,
     **kwargs,
 ):
+    """Regrid a model dataset to HEALPix cells with healpix-resample.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        Dataset on the model grid, with ``longitude``, ``latitude`` and
+        ``ocean_mask`` (1 or True for sea, 0 or False for land).
+    refinement_level : int
+        HEALPix refinement level of the output.
+    mask_threshold : float, default: 0.5
+        Land/sea separation on the HEALPix grid. The ocean mask is interpolated
+        to each HEALPix cell, which gives a value between 0 and 1 near the coast
+        (roughly the share of sea around the cell). A cell is kept as sea when
+        this value is at least ``mask_threshold``; the other cells are land and
+        get no data. ``0`` keeps every cell that touches the sea at all, ``0.5``
+        the cells that are at least about half sea, ``1`` only the cells
+        surrounded by sea points. A cell with no sea around it is always land.
+
+    Returns
+    -------
+    regridded : xarray.Dataset
+        The dataset on the HEALPix cells, with its ``ocean_mask``.
+    resampling_info : dict
+        Metadata of the regridding.
+    """
     nside = 2**refinement_level
 
     lon = ds.longitude.values.ravel().astype("float64")
@@ -1172,7 +1204,9 @@ def regrid_dataset_hpresample(
     order = np.argsort(cell_ids)
     ref_cell_ids = cell_ids[order].astype("int64")
     ocean_mask_final = mask_regridded.cell_data[order]
-    is_ocean = ocean_mask_final >= mask_threshold
+    # A cell with no ocean contribution at all is land whatever the threshold:
+    # with ``mask_threshold=0`` the comparison alone would keep every cell.
+    is_ocean = (ocean_mask_final >= mask_threshold) & (ocean_mask_final > 0)
 
     # ------------------------------------------------------------------
     # Part 2 : Clough-Tocher construct only on ocean cells
@@ -2950,24 +2984,31 @@ def open_distributions(
     ellipsoid = resampling_info["ellipsoid"]
     refinement_level = resampling_info["refinement_level"]
 
+    # Read whole storage chunks, then rechunk: a storage chunk can hold several
+    # time steps, and asking xarray for smaller chunks would read it repeatedly.
     emission = (
         xr.open_dataset(
             f"{target_root}/combined.zarr",
             engine="zarr",
-            chunks=chunks,
+            chunks={},
             inline_array=True,
             storage_options=storage_options,
         )
+        .pipe(_rechunk_existing, chunks)
         .rename_vars({"pdf": "emission"})
         .drop_vars(["final", "initial"], errors="ignore")
     )
-    states = xr.open_dataset(
-        f"{target_root}/states.zarr",
-        engine="zarr",
-        chunks=chunks,
-        inline_array=True,
-        storage_options=storage_options,
-    ).where(emission["mask"])
+    states = (
+        xr.open_dataset(
+            f"{target_root}/states.zarr",
+            engine="zarr",
+            chunks={},
+            inline_array=True,
+            storage_options=storage_options,
+        )
+        .pipe(_rechunk_existing, chunks)
+        .where(emission["mask"])
+    )
 
     data_hp = xr.merge([states, emission.drop_vars(["mask"])])
 
