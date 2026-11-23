@@ -200,3 +200,34 @@ def test_docstring_does_not_claim_cell_removal():
     assert "to drop cells" not in doc
     assert "to see which cells it removes" not in doc
     assert "do not use ``relative_depth_threshold``" not in doc
+
+
+def _gebco_west():
+    lat = np.arange(49.0, 51.0, 0.1)
+    lon = np.arange(-10.0, 0.0, 0.1)
+    elevation = np.full((lat.size, lon.size), -10.0)
+    elevation[10, 50] = -80.0  # a deep hole at (50.0, -5.0)
+    return xr.DataArray(elevation, dims=("lat", "lon"), coords={"lat": lat, "lon": lon})
+
+
+class TestSampleMaxDepthLongitudes:
+    def test_longitudes_in_0_360_with_signed_grid(self):
+        depth = sample_max_depth(
+            _gebco_west(), xr.DataArray([50.0, 50.0]), xr.DataArray([355.0, -5.0])
+        )
+
+        np.testing.assert_allclose(depth, [80, 80])
+
+    def test_signed_longitudes_with_0_360_grid(self):
+        gebco = _gebco_west().assign_coords(lon=_gebco_west()["lon"] % 360)
+        gebco = gebco.sortby("lon")
+
+        depth = sample_max_depth(gebco, [50.0], [-5.0])
+
+        np.testing.assert_allclose(depth, [80])
+
+    def test_outside_the_grid_raises(self):
+        with pytest.raises(ValueError, match="outside the extent"):
+            sample_max_depth(_gebco_west(), [50.0, 50.0], [355.0, 20.0])
+        with pytest.raises(ValueError, match="outside the extent"):
+            sample_max_depth(_gebco_west(), [60.0], [355.0])

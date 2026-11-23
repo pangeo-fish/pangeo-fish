@@ -320,8 +320,16 @@ def sample_max_depth(elevation, latitude, longitude, *, window=None):
         (and, for :py:class:`xarray.DataArray` positions, the dimensions and
         coordinates) of ``latitude``. ``NaN`` where the position is ``NaN``.
 
+    Raises
+    ------
+    ValueError
+        If a position lies outside the extent of the bathymetry grid.
+
     Notes
     -----
+    The requested longitudes are wrapped to the convention of the grid
+    (``0..360`` or ``-180..180``), so cell longitudes in either convention work.
+
     :py:func:`compute_healpix_histogram_region_bin_size` also describes the
     depths inside each cell, but its deepest non-empty bin is not a usable
     maximum depth: the histogram is smoothed over two bins on each side, its
@@ -346,6 +354,36 @@ def sample_max_depth(elevation, latitude, longitude, *, window=None):
     half = 0.0 if window is None else float(window) / 2
     dlat = float(np.abs(elevation["lat"].diff("lat")[0]))
     dlon = float(np.abs(elevation["lon"].diff("lon")[0]))
+
+    # longitudes in the convention of the grid (0..360 or -180..180), and
+    # positions outside the extent of the grid are an error
+    lon_min = float(elevation["lon"].min()) - dlon / 2
+    lon_max = float(elevation["lon"].max()) + dlon / 2
+    lat_min = float(elevation["lat"].min()) - dlat / 2
+    lat_max = float(elevation["lat"].max()) + dlat / 2
+    lat_b, lon_b = xr.broadcast(lat.where(finite), lon.where(finite))
+    lon_values = lon_b.values
+    lat_values = lat_b.values
+    finite_values = finite.broadcast_like(lon_b).transpose(*lon_b.dims).values
+    with np.errstate(invalid="ignore"):
+        candidates = [lon_values, lon_values % 360, (lon_values + 180) % 360 - 180]
+        wrapped = np.full(lon_values.shape, np.nan)
+        for candidate in reversed(candidates):
+            inside = (candidate >= lon_min) & (candidate <= lon_max)
+            wrapped = np.where(inside, candidate, wrapped)
+        outside = finite_values & (
+            np.isnan(wrapped) | (lat_values < lat_min) | (lat_values > lat_max)
+        )
+    if outside.any():
+        raise ValueError(
+            f"{int(outside.sum())} requested position(s) lie outside the extent"
+            f" of the bathymetry grid (latitude {lat_min:.4g} to {lat_max:.4g},"
+            f" longitude {lon_min:.4g} to {lon_max:.4g}), e.g. latitude"
+            f" {float(lat_values[outside][0]):.4g}, longitude"
+            f" {float(lon_values[outside][0]):.4g}"
+        )
+    lon = lon_b.copy(data=wrapped)
+
     margin_lat = half + 2 * dlat
     margin_lon = half + 2 * dlon
     depth = -elevation.sel(
