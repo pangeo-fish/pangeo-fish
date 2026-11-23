@@ -43,6 +43,23 @@ Use this unless you have a reason not to. Why:
 
 Limit: the domain must fit in a radius of 10 degrees (one tangent plane). A larger domain stops with this error: "FFTConv cannot handle this domain: its radius is X degrees, above the limit of 10 degrees". The Japan box in the checks needs 15.5 degrees and stops this way.
 
+### Known limitation: the `FFTConv` kernel is not exactly symmetric
+
+The operator that `FFTConv` builds is not exactly symmetric. The weight from cell A to cell B is not always equal to the weight from B to A. On a patch of 4096 cells at level 10, the largest difference between the two is 12 % of the largest weight at sigma = 1 cell, and 20 % at sigma = 3 cells. Both projections give the same numbers. The difference is a ripple from cell to cell, not a drift: the centre of the kernel moves by less than 0.01 cells.
+
+This matters for the smoothed states. The backward pass (`pangeo_fish.hmm.filter.backward`) applies the same operator as the forward pass. In theory it needs the transpose of that operator. For a symmetric kernel the two are the same. For `FFTConv` they are not.
+
+The effect was measured on the demo tag A19124 (level 10, 11 time steps, `projection="conservative"`, sigma = 3, 8 and 24 cells). The smoothed states were computed twice: with the operator in the backward pass, as the code does, and with its transpose.
+
+- The two results differ by about 2 % of the probability mass (1.6 to 2.0 % on average over the time steps, at most 2.5 %).
+- The mean position differs by at most 0.61 km. One cell is 6.37 km.
+- The most probable cell is the same at every time step for sigma = 3 cells. For 8 and 24 cells it is the same at more than half of the time steps. The largest move is 29.8 km at one time step (8 cells) and 5.4 km (24 cells).
+- For comparison, a change of sigma by 10 % changes 4 to 9 % of the mass on average, and moves the mean position by 1.8 to 17 km on average.
+
+So on this tag the effect is several times smaller than the effect of a 10 % change of sigma.
+
+Not checked: longer time series, other tags, other levels, `projection="average"` in the smoother, and the decoded tracks. The symmetry of the other methods was not measured. The cause of the ripple is not known yet.
+
 ### Fish that move little per step
 
 `HealpixAnalyseConv` computes the direct sum. It is exact, but its cost grows fast with sigma. Measured (default `normalization`, no barrier):
