@@ -20,11 +20,14 @@
 
 ## 🚀 Quick Start
 
-Install directly from PyPI:
+Install directly from PyPI. On Linux, `pip` would otherwise download the CUDA build of PyTorch (about 3 GB of extra packages), so install the CPU-only build first. `pangeo-fish` runs on the CPU by default:
 
 ```bash
+pip install torch --index-url https://download.pytorch.org/whl/cpu
 pip install pangeo-fish
 ```
+
+If you have a GPU, skip the first line and install the CUDA build of PyTorch instead; see the [installation guide](docs/installation.md) for what runs on the GPU today.
 
 Or set up the development environment:
 
