@@ -76,7 +76,7 @@ def test_save_zarr_writes_dggs_attrs(tmp_path):
     attrs = dict(group["cell_ids"].attrs)
     assert group.attrs["dggs"]["coordinate"] == "cell_ids"
     assert group.attrs["dggs"]["refinement_level"] == 2
-    assert group["pdf"].chunks == (1, 192)
+    assert group["pdf"].chunks == (3, 192)
     assert attrs["grid_name"] == "healpix"
     assert attrs["level"] == 2
     assert attrs["indexing_scheme"] == "nested"
@@ -97,7 +97,7 @@ def test_save_zarr_without_dggs_index(tmp_path):
     attrs = dict(group["cell_ids"].attrs)
     assert group.attrs["dggs"]["coordinate"] == "cell_ids"
     assert group.attrs["dggs"]["refinement_level"] == 2
-    assert group["pdf"].chunks == (1, 192)
+    assert group["pdf"].chunks == (3, 192)
     assert attrs["grid_name"] == "healpix"
     assert attrs["ellipsoid"] == "sphere"
 
@@ -155,3 +155,44 @@ def test_compute_acoustic_pdf_writes_dggs_attrs():
     assert attrs["level"] == 1
     assert attrs["indexing_scheme"] == "nested"
     _assert_wgs84(attrs["ellipsoid"])
+
+
+def test_compute_emission_pdf_from_store_split_along_cells(tmp_path):
+    """A store whose cells span several chunks must not break the emission pdf."""
+    from pangeo_fish.storage import prepare_dggs_zarr
+
+    ds = _healpix_dataset(level=2, ellipsoid="sphere")
+    rng = np.random.default_rng(0)
+    diff = rng.normal(size=ds["pdf"].shape)
+    diff[0, :5] = np.nan
+    ds = ds.drop_vars("pdf").assign(
+        diff=(("time", "cells"), diff),
+        ocean_mask=("cells", np.ones(ds.sizes["cells"], dtype=bool)),
+        latitude=("cells", np.zeros(ds.sizes["cells"])),
+        longitude=("cells", np.zeros(ds.sizes["cells"])),
+    )
+    path = str(tmp_path / "diff-regridded.zarr")
+    prepare_dggs_zarr(ds, cell_chunk_size=50).to_zarr(path, zarr_format=2)
+    reopened = xr.open_dataset(path, engine="zarr", chunks={})
+    assert len(reopened["diff"].chunks[1]) > 1
+
+    events = xr.Dataset(
+        {
+            "longitude": ("event_name", [10.0, np.nan]),
+            "latitude": ("event_name", [10.0, np.nan]),
+        },
+        coords={"event_name": ["release", "fish_death"]},
+    )
+    emission, _ = helpers.compute_emission_pdf(
+        diff_ds=reopened,
+        events_ds=events,
+        differences_std=0.5,
+        initial_std=1e-3,
+        recapture_std=1e-3,
+        chunk_time=1,
+    )
+
+    expected = np.exp(-0.5 * (diff / 0.5) ** 2) / (0.5 * np.sqrt(2 * np.pi))
+    assert emission["pdf"].dims == ("time", "cells")
+    np.testing.assert_allclose(emission["pdf"].values, expected)
+    assert emission["pdf"].chunks[1] == (ds.sizes["cells"],)

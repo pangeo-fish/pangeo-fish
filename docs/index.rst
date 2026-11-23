@@ -10,6 +10,7 @@ Welcome to pangeo-fish's documentation!
     dggs-output
     copernicus-models
     choosing-conv-method
+    resolution-and-memory
     notebook
     tide
     api

@@ -72,13 +72,64 @@ _DGGS_CONVENTION = {
 }
 
 
-def prepare_dggs_zarr(ds, *, cell_chunk_size=4096):
+DEFAULT_TARGET_CHUNK_BYTES = 64 * 2**20
+"""Default upper bound (64 MiB) for one storage chunk of a HEALPix store."""
+
+
+def _storage_chunks(ds, dim, target_chunk_bytes):
+    """Choose storage chunks of at most ``target_chunk_bytes`` (see below).
+
+    One time step of the largest variable holding ``dim`` (one "map") sets the
+    scale. When a map fits in the target, keep all cells in one chunk and
+    group as many time steps as fit. Otherwise use one time step per chunk
+    and split the cells into nearly equal chunks.
+    """
+    map_bytes = max(
+        var.dtype.itemsize
+        * int(np.prod([size for d, size in var.sizes.items() if d != "time"]))
+        for var in ds.variables.values()
+        if dim in var.dims
+    )
+    n_cells = ds.sizes[dim]
+    if map_bytes <= target_chunk_bytes:
+        chunks = {dim: n_cells}
+        if "time" in ds.dims:
+            n_steps = target_chunk_bytes // map_bytes
+            chunks["time"] = max(1, min(ds.sizes["time"], n_steps))
+    else:
+        bytes_per_cell = map_bytes / n_cells
+        max_cells = max(1, int(target_chunk_bytes // bytes_per_cell))
+        n_chunks = -(-n_cells // max_cells)
+        chunks = {dim: -(-n_cells // n_chunks)}
+        if "time" in ds.dims:
+            chunks["time"] = 1
+    return chunks
+
+
+def prepare_dggs_zarr(
+    ds, *, cell_chunk_size=None, target_chunk_bytes=DEFAULT_TARGET_CHUNK_BYTES
+):
     """Prepare a HEALPix dataset for a new Zarr store without adding cells.
 
     Write the DGGS v1 group metadata alongside the xdggs coordinate
-    attributes. Use one time step per chunk and bounded spatial chunks, with
-    cells last, so HTTP readers can fetch a single map. Sparse cells retain
-    their order; these chunks need not coincide with HEALPix parent cells.
+    attributes, with cells last. Sparse cells retain their order.
+
+    By default the chunks are sized from the data, up to ``target_chunk_bytes``
+    per chunk. One time step of the largest variable with cells (one map) sets
+    the scale:
+
+    * when a map fits in the target, all the cells stay in one chunk and as
+      many time steps as fit are grouped. This is the common case: one map of
+      a coastal box at level 12 is about 1 MB, of the Mediterranean at
+      level 12 about 20 MB;
+    * when a single map is larger than the target (e.g. a basin-scale domain
+      at level 12), each chunk holds one time step and the cells are split
+      into the fewest chunks of (nearly) equal size that fit; only the last
+      chunk can be slightly smaller. Sparse chunks need not coincide with
+      HEALPix parent cells.
+
+    Pass ``cell_chunk_size`` to force one time step per chunk and at most
+    ``cell_chunk_size`` cells per chunk instead.
     The input dataset and its encodings are not modified.
     """
     import healpix_geo.ellipsoid
@@ -86,8 +137,12 @@ def prepare_dggs_zarr(ds, *, cell_chunk_size=4096):
 
     if isinstance(ds, xr.DataArray):
         ds = ds.to_dataset()
-    if not isinstance(cell_chunk_size, Integral) or cell_chunk_size <= 0:
-        raise ValueError("cell_chunk_size must be a positive integer")
+    if cell_chunk_size is not None and (
+        not isinstance(cell_chunk_size, Integral) or cell_chunk_size <= 0
+    ):
+        raise ValueError("cell_chunk_size must be None or a positive integer")
+    if not isinstance(target_chunk_bytes, Integral) or target_chunk_bytes <= 0:
+        raise ValueError("target_chunk_bytes must be a positive integer")
     ds = _with_dggs_attrs(ds).copy(deep=False)
     if "cell_ids" not in ds.coords or ds.cell_ids.ndim != 1:
         raise ValueError("a one-dimensional cell_ids coordinate is required")
@@ -140,9 +195,12 @@ def prepare_dggs_zarr(ds, *, cell_chunk_size=4096):
     for name in ds.variables:
         ds[name].encoding = {}
     ds = ds.transpose(..., dim)
-    chunks = {dim: int(cell_chunk_size)}
-    if "time" in ds.dims:
-        chunks["time"] = 1
+    if cell_chunk_size is None:
+        chunks = _storage_chunks(ds, dim, int(target_chunk_bytes))
+    else:
+        chunks = {dim: int(cell_chunk_size)}
+        if "time" in ds.dims:
+            chunks["time"] = 1
     return ds.chunk(chunks)
 
 
