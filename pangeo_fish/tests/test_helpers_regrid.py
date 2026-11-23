@@ -153,6 +153,21 @@ def test_regrid_mask_threshold_zero_does_not_turn_land_into_ocean():
     assert np.isnan(zero.temperature.values[:, inland]).all()
     np.testing.assert_array_equal(ocean, tiny.ocean_mask.values.astype(bool))
 
+    # the sea stays sea, for the strictest threshold too (rounding errors of the
+    # interpolation must not drop cells of the open sea)
+    strict, _ = helpers.regrid_dataset_hpresample(
+        ds=source, refinement_level=8, mask_threshold=1.0
+    )
+    latitude = zero.latitude.values
+    open_sea = (
+        (longitude > -7.5) & (longitude < -6.0) & (latitude > 47.5) & (latitude < 50.5)
+    )
+    assert open_sea.any()
+    assert ocean[open_sea].all()
+    assert strict.ocean_mask.values.astype(bool)[open_sea].all()
+    # and the strictest threshold keeps fewer coastal cells than the widest one
+    assert strict.ocean_mask.values.sum() < ocean.sum()
+
 
 def test_regrid_keeps_negative_values_of_signed_fields():
     """``diff`` is signed: regridding must not clip negative values to zero."""

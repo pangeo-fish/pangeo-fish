@@ -1166,11 +1166,12 @@ def regrid_dataset_hpresample(
     mask_threshold : float, default: 0.5
         Land/sea separation on the HEALPix grid. The ocean mask is interpolated
         to each HEALPix cell, which gives a value between 0 and 1 near the coast
-        (roughly the share of sea around the cell). A cell is kept as sea when
-        this value is at least ``mask_threshold``; the other cells are land and
-        get no data. ``0`` keeps every cell that touches the sea at all, ``0.5``
-        the cells that are at least about half sea, ``1`` only the cells
-        surrounded by sea points. A cell with no sea around it is always land.
+        (the weight of the sea points around the cell: close to the share of
+        sea, but not an exact area). A cell is kept as sea when this value is at
+        least ``mask_threshold``; the other cells are land and get no data.
+        ``0`` keeps every cell that touches the sea at all, ``0.5`` roughly
+        follows the model coastline, ``1`` keeps only the cells surrounded by
+        sea points. A cell with no sea around it is always land.
 
     Returns
     -------
@@ -1206,7 +1207,9 @@ def regrid_dataset_hpresample(
     ocean_mask_final = mask_regridded.cell_data[order]
     # A cell with no ocean contribution at all is land whatever the threshold:
     # with ``mask_threshold=0`` the comparison alone would keep every cell.
-    is_ocean = (ocean_mask_final >= mask_threshold) & (ocean_mask_final > 0)
+    # The interpolation leaves rounding errors of about 1e-16: without the small
+    # tolerance, ``mask_threshold=1`` would drop some cells of the open sea.
+    is_ocean = (ocean_mask_final >= mask_threshold - 1e-9) & (ocean_mask_final > 0)
 
     # ------------------------------------------------------------------
     # Part 2 : Clough-Tocher construct only on ocean cells
