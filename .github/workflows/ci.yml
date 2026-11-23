@@ -78,6 +78,8 @@ jobs:
 
       - name: Install pangeo-fish
         run: |
+          # CPU-only torch first: pip would otherwise download the CUDA build (~3 GB)
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu ${{ matrix.constraints }}
           python -m pip install -e . ${{ matrix.constraints }}
           python -m pip check
 

@@ -7,6 +7,8 @@ dependencies:
   - pip
   - jupyterlab
   - ffmpeg
+  # CPU-only PyTorch (pip would otherwise download the CUDA build on Linux)
+  - pytorch-cpu
   - python-dotenv
   - docutils<0.21
   - sphinx>=9.0
