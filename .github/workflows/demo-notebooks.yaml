@@ -145,3 +145,12 @@ jobs:
             demo-results/${{ matrix.notebook }}/after.json
             demo-results/${{ matrix.notebook }}/comparison.json
             demo-results/${{ matrix.notebook }}/executed.ipynb
+      # What the demo wrote (Zarr stores, trajectories, HTML, video), to check the
+      # maps that the notebook only shows as interactive widgets.
+      - uses: actions/upload-artifact@v6
+        if: always() && steps.credentials.outputs.available == 'true'
+        with:
+          name: demo-${{ matrix.notebook }}-outputs
+          path: demo-results/${{ matrix.notebook }}/work/test
+          retention-days: 7
+          if-no-files-found: ignore
