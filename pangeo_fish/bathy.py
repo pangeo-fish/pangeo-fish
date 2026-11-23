@@ -305,8 +305,12 @@ def compute_pdf_bathy_batch_numba(ds_chunk, reshaped_tag, copernicus_chunk):
     )
 
 
-def _nearest_histogram_cells(cell_ids, histogram_ids, grid):
-    """Index in ``histogram_ids`` of each cell, or of its nearest histogram cell."""
+def _nearest_histogram_cells(cell_ids, histogram_ids, grid, sea):
+    """Index in ``histogram_ids`` of each cell, or of its nearest histogram cell.
+
+    Only the sea cells (``sea``) without histogram are filled; land cells keep
+    an arbitrary index, their likelihood is NaN anyway.
+    """
     from scipy.spatial import cKDTree
 
     order = np.argsort(histogram_ids)
@@ -314,8 +318,9 @@ def _nearest_histogram_cells(cell_ids, histogram_ids, grid):
     position = np.clip(np.searchsorted(sorted_ids, cell_ids), 0, sorted_ids.size - 1)
     found = sorted_ids[position] == cell_ids
     index = order[position]
-    result = {"n_filled": int((~found).sum()), "max_distance_km": 0.0}
-    if found.all():
+    fill = ~found & sea
+    result = {"n_filled": int(fill.sum()), "max_distance_km": 0.0}
+    if not fill.any():
         result["index"] = index
         return result
 
@@ -329,9 +334,9 @@ def _nearest_histogram_cells(cell_ids, histogram_ids, grid):
         )
 
     distance, nearest = cKDTree(unit_vectors(histogram_ids)).query(
-        unit_vectors(cell_ids[~found])
+        unit_vectors(cell_ids[fill])
     )
-    index[~found] = nearest
+    index[fill] = nearest
     result["index"] = index
     result["max_distance_km"] = float(2 * np.arcsin(np.max(distance) / 2) * 6371.0)
     return result
@@ -401,11 +406,15 @@ def batch_compute_pdf_bathy(
     histogram_ids = ds_lr["cell_ids"].values
     # Each model cell uses its own histogram, or the one of the nearest cell
     # when it holds no GEBCO water point (fine levels, cells mostly on land).
-    source = _nearest_histogram_cells(reference_ids, histogram_ids, reference_grid)
+    xe = reference["XE"]
+    if "depth" in xe.dims:
+        xe = xe.isel(depth=0)
+    sea = np.asarray(xe.notnull().any("time").values)
+    source = _nearest_histogram_cells(reference_ids, histogram_ids, reference_grid, sea)
     n_filled, max_km = source["n_filled"], source["max_distance_km"]
     if n_filled:
         warnings.warn(
-            f"{n_filled} cell(s) of the model grid have no GEBCO water point: they"
+            f"{n_filled} sea cell(s) of the model grid have no GEBCO water point: they"
             f" use the histogram of the nearest cell (up to {max_km:.1f} km away)",
             UserWarning,
             stacklevel=2,
