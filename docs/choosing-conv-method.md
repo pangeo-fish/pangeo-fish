@@ -43,6 +43,10 @@ Use this unless you have a reason not to. Why:
 
 Limit: the domain must fit in a radius of 10 degrees (one tangent plane). A larger domain stops with this error: "FFTConv cannot handle this domain: its radius is X degrees, above the limit of 10 degrees". The Japan box in the checks needs 15.5 degrees and stops this way.
 
+### Known limitation: the kernel is not exactly symmetric
+
+The `FFTConv` operator is not exactly symmetric, and the backward pass of the smoother uses it where theory needs its transpose. On the demo tag A19124 (level 10, 11 time steps) this changes about 2 % of the probability mass and moves the mean position by less than 1 km (one cell is 6.37 km). A 10 % change of sigma has a larger effect. Longer time series and decoded tracks were not checked.
+
 ### Fish that move little per step
 
 `HealpixAnalyseConv` computes the direct sum. It is exact, but its cost grows fast with sigma. Measured (default `normalization`, no barrier):
