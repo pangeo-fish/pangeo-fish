@@ -468,8 +468,9 @@ def viterbi_healpix(emission, sigmas, truncate=4.0, ellipsoid="sphere", level=No
     emission : xarray.Dataset
         Dimensions (time, cells) for 'pdf'; 'initial' on cells;
         'mask' on cells (True = ocean); 'predictor_index' on time
-        (index into `sigmas` used for the transition into each step);
-        and 'cell_ids'.
+        (index into `sigmas`; as in the HMM filter, the transition from
+        step ``t`` to step ``t + 1`` uses the index of step ``t``, so the
+        index of the last step is not used); and 'cell_ids'.
     sigmas : sequence of float
         Standard deviations in radians.
     truncate : float, default 4.0
@@ -535,7 +536,9 @@ def viterbi_healpix(emission, sigmas, truncate=4.0, ellipsoid="sphere", level=No
     bufs = [np.empty(nb.shape, dtype=np.float64) for nb in neighbors]
 
     for t in range(1, T):
-        s = sig_idx_u[t]
+        # same convention as hmm.filter: the transition t - 1 -> t uses the
+        # index of the step it starts from
+        s = sig_idx_u[t - 1]
         nbr, lt, buf = neighbors[s], logT[s], bufs[s]
 
         np.take(M, nbr, out=buf, mode="clip")  # buf = M[nbr], sans allocation
