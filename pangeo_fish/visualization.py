@@ -256,7 +256,9 @@ def plot_track_bounds(
     Static (matplotlib) figure of the pressure and temperature records, with the
     records without vertical activity shaded, the tagging events and the start /
     end suggested by :py:func:`pangeo_fish.track_bounds.detect_start_of_track` and
-    :py:func:`pangeo_fish.track_bounds.detect_end_of_track`.
+    :py:func:`pangeo_fish.track_bounds.detect_end_of_track`. The suggested end is
+    where the tag leaves the water, not where the fish stops moving: shaded
+    records before it are a fish probably dead or resting, or a tag shed.
 
     Parameters
     ----------
@@ -339,7 +341,7 @@ def plot_track_bounds(
             track_bounds._timestamp(end),
             color="tab:purple",
             ls="--",
-            label="suggested end",
+            label="suggested end (tag leaves the water)",
         )
     ax.legend(loc="lower left", fontsize=8)
     return fig

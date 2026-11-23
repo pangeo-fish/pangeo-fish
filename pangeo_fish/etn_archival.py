@@ -285,6 +285,11 @@ def open_etn_archival(
     A tag attached to several animals of ``project`` raises an error: pass
     ``animals`` restricted to the right animal.
 
+    The sensor records carry only the tag number, not the animal: for a tag used on
+    several animals, the records of all of them are returned. To do: select the
+    records of one animal from its release time to the release time of the next
+    animal.
+
     Use :func:`pangeo_fish.io.write_tag` to write the tag to the tag folder format.
 
     Parameters

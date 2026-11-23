@@ -149,12 +149,16 @@ class TestDescribeTag:
             == expected["fraction_negative_after_correction"]
         )
 
-    def test_tide_after_the_end(self):
+    def test_tide_on_the_seabed_after_the_death(self):
+        # a dead fish on the seabed does not end the track: no end, and the tide
+        # recorded after the death is part of the track
         description = describe_tag(synthetic_tag("seabed"))
         tide = description["tide"]
 
+        assert description["suggested_end"]["end"] is None
         assert tide["available"]
-        assert tide["fraction_after_end"] > 0.5
+        assert "fraction_after_end" not in tide
+        assert tide["fraction_last_3_days"] > 0.5
 
     def test_tide_not_computed(self):
         description = describe_tag(synthetic_tag(), tide=False)

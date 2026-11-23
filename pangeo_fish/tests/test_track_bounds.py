@@ -117,6 +117,38 @@ def sensor_failure_tree():
     )
 
 
+def tag_with_phases(*, rest_days, final):
+    """Active fish, ``rest_days`` days at constant depth in the water, then ``final``.
+
+    ``final`` is "air" (diurnal temperature cycle), "sensor" (pressure out of the
+    sensor range, plausible temperature) or "water" (3 more days in the water).
+    The fish dies at STRANDED; the tag leaves the water ``rest_days`` later.
+    """
+    rng = np.random.default_rng(0)
+    active = synthetic_tag(end="none")
+    active = active.sel(time=active["time"] < np.datetime64(STRANDED))
+    rest_end = STRANDED + pd.Timedelta(rest_days, "D")
+    time = pd.date_range(STRANDED, rest_end + pd.Timedelta(3, "D"), freq="1min")
+    n = len(time)
+    pressure = np.full(n, 25.0) + rng.normal(0, 0.02, n)
+    temperature = 16 + rng.normal(0, 0.05, n)
+    after = time >= rest_end
+    hours = ((time[after] - rest_end) / pd.Timedelta(1, "h")).to_numpy()
+    if final == "air":
+        pressure[after] = 5.4 + rng.normal(0, 0.02, after.sum())
+        temperature[after] = 19.5 + 4.5 * np.sin(2 * np.pi * (hours - 6) / 24)
+    elif final == "sensor":
+        pressure[after] = 245.81
+    tail = xr.Dataset(
+        {
+            "pressure": ("time", quantize(pressure)),
+            "temperature": ("time", temperature),
+        },
+        coords={"time": time.to_numpy()},
+    )
+    return xr.concat([active, tail], dim="time")
+
+
 class TestDetectEndOfTrack:
     @pytest.mark.parametrize(
         ["make_tag", "start", "tolerance", "expected_cause"],
@@ -127,13 +159,6 @@ class TestDetectEndOfTrack:
                 pd.Timedelta(5, "min"),
                 "out_of_water",
                 id="stranded",
-            ),
-            pytest.param(
-                lambda: synthetic_tag(end="seabed"),
-                RELEASE,
-                pd.Timedelta(1, "h"),
-                "no_vertical_movement",
-                id="seabed",
             ),
             pytest.param(
                 sensor_failure_tree,
@@ -165,7 +190,66 @@ class TestDetectEndOfTrack:
 
         assert actual["end"] is None
         assert actual["likely_cause"] is None
-        assert "active until the last record" in actual["reason"]
+        assert actual["inactive_period"] is None
+        assert "stays in the water until the last record" in actual["reason"]
+
+    def test_active_then_out_of_water(self):
+        ds = tag_with_phases(rest_days=0, final="air")
+        actual = track_bounds.detect_end_of_track(ds)
+
+        assert abs(actual["end"] - STRANDED) <= pd.Timedelta(5, "min")
+        assert actual["likely_cause"] == "out_of_water"
+        assert actual["inactive_period"] is None
+
+    def test_death_then_out_of_water_ends_at_the_exit(self):
+        ds = tag_with_phases(rest_days=5, final="air")
+        actual = track_bounds.detect_end_of_track(ds, start=RELEASE)
+
+        exit_time = STRANDED + pd.Timedelta(5, "D")
+        assert abs(actual["end"] - exit_time) <= pd.Timedelta(1, "h")
+        assert actual["likely_cause"] == "out_of_water"
+        # the death does not end the track, it starts the inactive period
+        first, last = actual["inactive_period"]
+        assert abs(first - STRANDED) <= pd.Timedelta(1, "h")
+        assert last <= actual["end"]
+        assert last - first >= pd.Timedelta(4, "D")
+
+    def test_death_in_water_until_the_last_record(self):
+        ds = tag_with_phases(rest_days=5, final="water")
+        actual = track_bounds.detect_end_of_track(ds, start=RELEASE)
+
+        assert actual["end"] is None
+        assert actual["likely_cause"] is None
+        first, last = actual["inactive_period"]
+        assert abs(first - STRANDED) <= pd.Timedelta(1, "h")
+        assert last == ds["time"].values[-1]
+        assert "stays in the water" in actual["reason"]
+
+    def test_seabed_tag_is_not_an_end(self):
+        ds = synthetic_tag(end="seabed")
+        actual = track_bounds.detect_end_of_track(ds, start=RELEASE)
+
+        assert actual["end"] is None
+        assert abs(actual["inactive_period"][0] - STRANDED) <= pd.Timedelta(1, "h")
+
+    def test_out_of_sensor_range(self):
+        ds = tag_with_phases(rest_days=0, final="sensor")
+        # the temperature stays plausible: only the pressure is out of range
+        ds.attrs["sensor_ranges"] = {"pressure": [0, 200], "temperature": [2, 34]}
+        actual = track_bounds.detect_end_of_track(ds)
+
+        assert abs(actual["end"] - STRANDED) <= pd.Timedelta(5, "min")
+        assert actual["likely_cause"] == "out_of_sensor_range"
+
+    def test_rest_then_activity_is_not_an_end(self):
+        ds = synthetic_tag(end="none")
+        rest = slice(STRANDED, STRANDED + pd.Timedelta(2, "D"))
+        ds["pressure"].loc[{"time": rest}] = 25.0
+        actual = track_bounds.detect_end_of_track(ds, start=RELEASE)
+
+        assert actual["end"] is None
+        first, last = actual["inactive_period"]
+        assert last - first >= pd.Timedelta(1, "D")
 
     def test_short_rest_is_ignored(self):
         ds = synthetic_tag(end="none")
@@ -177,7 +261,7 @@ class TestDetectEndOfTrack:
         assert actual["end"] is None
 
     def test_resumed_activity_warning(self):
-        ds = synthetic_tag(end="seabed")
+        ds = synthetic_tag(end="stranded")
         # active again for a day after the end
         revival = slice(
             STRANDED + pd.Timedelta(1, "D"), STRANDED + pd.Timedelta(2, "D")

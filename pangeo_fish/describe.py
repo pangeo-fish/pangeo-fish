@@ -202,11 +202,11 @@ def describe_tag(
         Steps longer than ``gap_factor`` times the sampling interval are gaps.
     tide : bool, default: True
         Run :py:func:`pangeo_fish.tide.detect_tide` on the suggested track (and
-        ``tide_after_end`` after its end). It takes a few seconds per month of
-        records.
+        ``tide_after_end`` after its end, if there is one). It takes a few
+        seconds per month of records.
     tide_after_end : str, default: "3D"
-        Also look for the tide this long after the suggested end (a dead fish or
-        a lost tag on the seabed records the tide).
+        Also look for the tide this long after the suggested end, i.e. after the
+        tag leaves the water (a tag in the air or stranded records no tide).
     start_kwargs, end_kwargs : dict, optional
         Parameters of :py:func:`pangeo_fish.track_bounds.detect_start_of_track` and
         :py:func:`pangeo_fish.track_bounds.detect_end_of_track`. They cannot
@@ -225,7 +225,9 @@ def describe_tag(
         sensor ranges used, number, fraction and first one after the suggested
         start, or ``None`` without sensor ranges);
         ``tagging_events`` (times and positions); ``suggested_start`` and
-        ``suggested_end`` (outputs of :py:mod:`pangeo_fish.track_bounds`);
+        ``suggested_end`` (outputs of :py:mod:`pangeo_fish.track_bounds`; the end is
+        the last record before the tag leaves the water, ``None`` if it stays in
+        the water until the last record);
         ``comparison`` (differences in days between the tagging events and the
         suggestions); ``pressure_offset`` (estimated from the pre-release period,
         checked on the suggested track); ``tide``.
