@@ -9,6 +9,7 @@ import xarray as xr
 import zarr
 from zarr.storage import LocalStore, MemoryStore
 
+from pangeo_fish.dggs import grid_attrs
 from pangeo_fish.hmm.estimator import CachedEstimator
 from pangeo_fish.storage import write_time_blocks
 
@@ -36,7 +37,14 @@ def test_hand_sigma_copy_rechunked_multisigma_data(tmp_path, emissions):
     assert params["sigma"] == [0.03]
     assert params["sigma_indices"] == [[0, 1, 2]]
     with xr.open_zarr(tmp_path / "manual/combined.zarr") as actual:
-        xr.testing.assert_identical(actual.load(), source)
+        # same data; the store also carries the CF and DGGS metadata
+        xr.testing.assert_equal(actual.load(), source)
+        assert actual.attrs["Conventions"].startswith("CF-")
+        # no attribute of the source is lost or changed
+        for name, variable in source.variables.items():
+            assert variable.attrs.items() <= actual[name].attrs.items(), name
+        # plain xdggs reads the grid from the written store
+        assert actual.dggs.decode().dggs.grid_info.level == 0
 
 
 class MatrixPredictor:
@@ -174,7 +182,12 @@ def test_cached_healpix_convolution(tmp_path):
     np.testing.assert_allclose(actual.states.sum("cells"), 1.0, atol=1e-7)
     np.testing.assert_array_equal(actual.cell_ids, ds.cell_ids)
     xr.testing.assert_identical(actual.time, ds.time)
-    assert actual.states.dggs.decode().dggs.grid_info == ds.dggs.grid_info
+    # The grid is kept; a missing ellipsoid is written out as the sphere.
+    assert grid_attrs(actual.states.to_dataset()) == grid_attrs(ds)
+    # and the cached states decode with plain xdggs
+    decoded = actual.states.dggs.decode().dggs.grid_info
+    assert decoded.level == ds.dggs.grid_info.level
+    assert grid_attrs(ds)["ellipsoid"] == "sphere"
 
 
 @pytest.mark.parametrize("step", [1, 3])

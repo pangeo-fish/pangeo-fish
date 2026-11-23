@@ -17,6 +17,11 @@ IBI_HOURLY_STATIC = "cmems_mod_ibi_phy_anfc_0.027deg-3D_static"
 NWS_HOURLY = "cmems_mod_nws_phy-tem_anfc_1.5km-3D_PT1H-i"
 NWS_HOURLY_SSH = "cmems_mod_nws_phy-ssh_anfc_1.5km-2D_PT1H-i"
 NWS_HOURLY_STATIC = "cmems_mod_nws_phy_anfc_1.5km_static"
+GLO_6H = "cmems_mod_glo_phy-thetao_anfc_0.083deg_PT6H-i"
+GLO_6H_SSH = "cmems_mod_glo_phy_anfc_0.083deg_PT1H-m"
+GLO_DAILY = "cmems_mod_glo_phy-thetao_anfc_0.083deg_P1D-m"
+GLO_DAILY_SSH = "cmems_mod_glo_phy_anfc_0.083deg_P1D-m"
+GLO_STATIC = "cmems_mod_glo_phy_anfc_0.083deg_static"
 BBOX = {"latitude": [48, 49], "longitude": [-5, -4], "max_depth": 20}
 PERIOD = slice("2021-06-01", "2021-06-03")
 
@@ -72,6 +77,8 @@ def client(monkeypatch, fields):
         (GLOBAL, (GLOBAL, GLOBAL, "cmems_mod_glo_phy_my_0.083deg_static", None)),
         (IBI_HOURLY, (IBI_HOURLY, IBI_HOURLY_SSH, IBI_HOURLY_STATIC, "bathy")),
         (NWS_HOURLY, (NWS_HOURLY, NWS_HOURLY_SSH, NWS_HOURLY_STATIC, "bathy")),
+        (GLO_6H, (GLO_6H, GLO_6H_SSH, GLO_STATIC, "bathy")),
+        (GLO_DAILY, (GLO_DAILY, GLO_DAILY_SSH, GLO_STATIC, "bathy")),
         # Do not invent companions for other temperature products.
         (
             "other-temp_P1D-m",
@@ -90,7 +97,9 @@ def open_model(dataset=IBI, **kwargs):
 def test_ibi_requests_and_preparation(client, fields):
     mock, _ = client
     actual = open_model(Username="test-user", Password="test-password")
-    expected = prepare_dataset(fields.rename(latitude="lat", longitude="lon"))
+    expected = helpers._set_dynamic_depth(
+        prepare_dataset(fields.rename(latitude="lat", longitude="lon")), "zstar"
+    )
     xr.testing.assert_identical(actual, expected)
     calls = [c.kwargs for c in mock.call_args_list]
     assert [(c["dataset_id"], c["variables"]) for c in calls] == [
@@ -151,7 +160,10 @@ def test_roundoff_only(client, fields, dataset, coordinate):
         {coordinate: ds[coordinate].astype("float32").astype("float64")}
     )
     xr.testing.assert_identical(
-        open_model(), prepare_dataset(fields.rename(latitude="lat", longitude="lon"))
+        open_model(),
+        helpers._set_dynamic_depth(
+            prepare_dataset(fields.rename(latitude="lat", longitude="lon")), "zstar"
+        ),
     )
 
 
@@ -202,6 +214,7 @@ def test_tag_time_fallback(client, fields):
 
 @pytest.mark.parametrize("dataset", [IBI, GLOBAL])
 def test_load_model_and_compute_diff(client, fields, dataset):
+    mock, _ = client
     tag = xr.Dataset(
         {
             "temperature": ("time", [13.0, 13.0, 13.0]),
@@ -216,8 +229,9 @@ def test_load_model_and_compute_diff(client, fields, dataset):
         bbox=BBOX,
         chunk_time=1,
         remote_options={},
-        copernicus_model_name=dataset,
+        **({"copernicus_model_name": dataset} if dataset == IBI else {}),
     )
+    assert mock.call_args_list[0].kwargs["dataset_id"] == dataset
     assert set(model.data_vars) == {
         "TEMP",
         "XE",
@@ -229,9 +243,12 @@ def test_load_model_and_compute_diff(client, fields, dataset):
     assert model.sizes == {"time": 3, "depth": 2, "lat": 2, "lon": 2}
     assert model.chunks["time"] == (1, 1, 1)
     assert model.latitude.dims == model.longitude.dims == ("lat", "lon")
+    expected = helpers._set_dynamic_depth(
+        model.assign(dynamic_depth=model.depth + model.XE),
+        helpers._vertical_coordinate(dataset),
+    ).dynamic_depth
     xr.testing.assert_allclose(
-        model.dynamic_depth,
-        (model.depth + model.XE).transpose(*model.dynamic_depth.dims),
+        model.dynamic_depth, expected.transpose(*model.dynamic_depth.dims)
     )
     diff, _ = helpers.compute_diff(
         reference_model=model, tag_log=tag, relative_depth_threshold=0, chunk_time=1
@@ -262,7 +279,11 @@ def test_hourly_requests_use_hourly_bounds(client, fields, temperature, ssh, sta
     )
 
     xr.testing.assert_identical(
-        actual, prepare_dataset(hourly.rename(latitude="lat", longitude="lon"))
+        actual,
+        helpers._set_dynamic_depth(
+            prepare_dataset(hourly.rename(latitude="lat", longitude="lon")),
+            helpers._vertical_coordinate(temperature),
+        ),
     )
     calls = [c.kwargs for c in mock.call_args_list]
     assert [c["dataset_id"] for c in calls] == [temperature, ssh, static]
@@ -366,3 +387,181 @@ def test_daily_time_bounds_unchanged():
     )
     with pytest.raises(ValueError, match="time_slice"):
         helpers._copernicus_time_bounds(IBI, None, None)
+
+
+@pytest.mark.parametrize(
+    "dataset, expected",
+    [
+        (IBI, False),
+        (GLOBAL, False),
+        (GLO_DAILY, False),
+        (IBI_HOURLY, True),
+        (NWS_HOURLY, True),
+        (GLO_6H, True),
+        ("cmems_mod_glo_phy_anfc_0.083deg_P1M-m", False),
+        ("cmems_mod_glo_phy_anfc_0.083deg_PT15M-i", True),
+    ],
+)
+def test_subdaily_detection(dataset, expected):
+    assert helpers._copernicus_is_subdaily(dataset) is expected
+
+
+def test_six_hourly_time_bounds():
+    assert helpers._copernicus_time_bounds(GLO_6H, PERIOD, None) == (
+        "2021-06-01T00:00:00",
+        "2021-06-03T23:59:59",
+    )
+
+
+def six_hourly_fields(fields):
+    hours = np.arange("2021-06-01T00", "2021-06-04T00", dtype="datetime64[h]").astype(
+        "datetime64[ns]"
+    )
+    hourly = fields.isel(time=[0] * hours.size).assign_coords(time=hours)
+    hourly["zos"] = hourly["zos"] + xr.DataArray(
+        np.arange(hours.size) / 100, dims="time"
+    )
+    return hourly.isel(time=slice(None, None, 6)), hourly
+
+
+@pytest.fixture
+def six_hourly_client(client, fields):
+    mock, datasets = client
+    six_hourly, hourly = six_hourly_fields(fields)
+    datasets[GLO_6H] = six_hourly[["thetao"]]
+    # as in the real product, ``zos`` carries a single surface depth level
+    datasets[GLO_6H_SSH] = hourly[["zos"]].expand_dims(depth=[0.494025])
+    datasets[GLO_STATIC] = fields[["deptho", "mask"]]
+    return mock, datasets, six_hourly
+
+
+def test_six_hourly_temperature_samples_hourly_ssh(six_hourly_client):
+    mock, _, six_hourly = six_hourly_client
+
+    actual = helpers._open_copernicus_model(GLO_6H, BBOX, PERIOD)
+
+    xr.testing.assert_identical(
+        actual, prepare_dataset(six_hourly.rename(latitude="lat", longitude="lon"))
+    )
+    assert actual.time.size == 12
+    calls = [c.kwargs for c in mock.call_args_list]
+    assert [(c["dataset_id"], c["variables"]) for c in calls] == [
+        (GLO_6H, ["thetao"]),
+        (GLO_6H_SSH, ["zos"]),
+        (GLO_STATIC, ["deptho", "mask"]),
+    ]
+    assert calls[2]["dataset_part"] == "bathy"
+    assert calls[0]["end_datetime"] == "2021-06-03T23:59:59"
+    assert (calls[1]["start_datetime"], calls[1]["end_datetime"]) == (
+        "2021-06-01T00:00:00",
+        "2021-06-03T18:00:00",
+    )
+
+
+def test_load_model_six_hourly_includes_the_entire_last_day(six_hourly_client):
+    _, _, six_hourly = six_hourly_client
+
+    model = helpers.load_model(
+        uri=None,
+        tag_log=None,
+        time_slice=PERIOD,
+        bbox=BBOX,
+        copernicus_model_name=GLO_6H,
+    )
+
+    xr.testing.assert_identical(model.time, six_hourly.time)
+
+
+def test_six_hourly_warns_and_clips_when_ssh_ends_early(six_hourly_client):
+    _, datasets, six_hourly = six_hourly_client
+    ssh = datasets[GLO_6H_SSH]
+    datasets[GLO_6H_SSH] = ssh.sel(time=slice(None, "2021-06-03T11:00"))
+
+    with pytest.warns(
+        UserWarning,
+        match="only overlap from 2021-06-01T00:00:00 to 2021-06-03T06:00:00",
+    ):
+        model = helpers._open_copernicus_model(GLO_6H, BBOX, PERIOD)
+
+    expected = six_hourly.sel(time=slice(None, "2021-06-03T06:00"))
+    xr.testing.assert_identical(model.time, expected.time)
+    np.testing.assert_allclose(model.XE.values, expected.zos.values)
+
+
+def test_six_hourly_rejects_ssh_without_matching_times(six_hourly_client):
+    _, datasets, _ = six_hourly_client
+    ssh = datasets[GLO_6H_SSH]
+    # hourly means stamped at half past the hour never match 6-hourly times
+    datasets[GLO_6H_SSH] = ssh.assign_coords(time=ssh.time + np.timedelta64(30, "m"))
+    with pytest.raises(ValueError, match="do not include all temperature times"):
+        helpers._open_copernicus_model(GLO_6H, BBOX, PERIOD)
+
+
+def test_six_hourly_rejects_an_interior_ssh_gap(six_hourly_client):
+    _, datasets, _ = six_hourly_client
+    datasets[GLO_6H_SSH] = datasets[GLO_6H_SSH].drop_sel(
+        time=np.datetime64("2021-06-02T12:00")
+    )
+    with pytest.raises(ValueError, match="do not include all temperature times"):
+        helpers._open_copernicus_model(GLO_6H, BBOX, PERIOD)
+
+
+def test_six_hourly_rejects_non_overlapping_ssh(six_hourly_client):
+    _, datasets, _ = six_hourly_client
+    datasets[GLO_6H_SSH] = datasets[GLO_6H_SSH].isel(time=slice(0, 0))
+    with pytest.raises(ValueError, match="no overlapping temperature and SSH times"):
+        helpers._open_copernicus_model(GLO_6H, BBOX, PERIOD)
+
+
+def _vertical_model():
+    return xr.Dataset(
+        {
+            "XE": (("time", "lat"), [[-1.0, 0.5]]),
+            "H0": (("lat",), [10.0, np.nan]),
+        },
+        coords={"time": [0], "depth": [0.0, 3.0, 5.0], "lat": [0.0, 1.0]},
+    ).pipe(lambda ds: ds.assign(dynamic_depth=ds.depth + ds.XE))
+
+
+@pytest.mark.parametrize(
+    ("dataset_id", "expected"),
+    [
+        (IBI, "zstar"),
+        (IBI_HOURLY, "zstar"),
+        (NWS_HOURLY, "nws"),
+        (GLOBAL, "geopotential"),
+        ("cmems_mod_glo_phy-thetao_anfc_0.083deg_PT6H-i", "geopotential"),
+    ],
+)
+def test_vertical_coordinate(dataset_id, expected):
+    assert helpers._vertical_coordinate(dataset_id) == expected
+
+
+def test_set_dynamic_depth():
+    model = _vertical_model()
+    zstar = helpers._set_dynamic_depth(model, "zstar")
+    # depth * (H0 + XE) / H0 with H0 = 10, XE = -1: levels shrink by 10 %
+    np.testing.assert_allclose(
+        zstar.dynamic_depth.sel(lat=0.0).squeeze(), [0.0, 2.7, 4.5]
+    )
+    assert zstar.attrs["vertical_coordinate"] == "zstar"
+    nws = helpers._set_dynamic_depth(model, "nws")
+    np.testing.assert_allclose(
+        nws.dynamic_depth.sel(lat=0.0).squeeze(), [0.0, 2.0, 4.0]
+    )
+    assert nws.dynamic_depth.sel(lat=1.0).isnull().all()
+    xr.testing.assert_identical(
+        helpers._set_dynamic_depth(model, "geopotential"), model
+    )
+
+
+def test_set_dynamic_depth_zstar_without_water_column():
+    model = xr.Dataset(
+        {"XE": (("time", "lat"), [[-2.0, 0.0]]), "H0": (("lat",), [1.0, 0.0])},
+        coords={"time": [0], "depth": [0.0, 3.0], "lat": [0.0, 1.0]},
+    ).pipe(lambda ds: ds.assign(dynamic_depth=ds.depth + ds.XE))
+    dynamic = helpers._set_dynamic_depth(model, "zstar").dynamic_depth
+    # negative water column: every level at the surface; H0 = 0: undefined
+    np.testing.assert_array_equal(dynamic.sel(lat=0.0).squeeze(), [0.0, 0.0])
+    assert dynamic.sel(lat=1.0).isnull().all()
+    assert np.isfinite(dynamic.sel(lat=0.0)).all()

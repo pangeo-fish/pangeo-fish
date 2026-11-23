@@ -38,14 +38,25 @@ from xhealpixify import HealpyGridInfo, HealpyRegridder
 import pangeo_fish.distributions as distrib
 from pangeo_fish.acoustic import emission_probability
 from pangeo_fish.cf import bounds_to_bins
+from pangeo_fish.dggs import (
+    canonical_ellipsoid,
+    for_explore,
+    grid_attrs,
+    grid_ellipsoid,
+    with_cf_attrs,
+    with_grid_attrs,
+)
 from pangeo_fish.diff import diff_z
+from pangeo_fish.drycells import _apply_min_water_depth
 from pangeo_fish.grid import center_longitude
 from pangeo_fish.hmm.estimator import EagerEstimator
 from pangeo_fish.hmm.optimize import EagerBoundsSearch
 from pangeo_fish.hmm.optimize.scipy import group_sigma_indices
 from pangeo_fish.hmm.prediction import (
-    Foscat1DHealpix,
+    FFTGaussian1DHealpix,
     Gaussian1DHealpix,
+    GaussianHealpixAnalyse,
+    LargeGaussianHealpixAnalyse,
     UpDownGaussian1DHealpix,
 )
 from pangeo_fish.io import (
@@ -58,7 +69,10 @@ from pangeo_fish.io import (
     save_trajectories,
 )
 from pangeo_fish.pdf import combine_emission_pdf, normal
-from pangeo_fish.storage import _with_dggs_attrs, prepare_dggs_zarr
+from pangeo_fish.storage import (
+    open_healpix_zarr,
+    write_healpix_zarr,
+)
 from pangeo_fish.tags import adapt_model_time, reshape_by_bins, to_time_slice
 from pangeo_fish.utils import haversine_distance, temporal_resolution
 from pangeo_fish.visualization import filter_by_states, plot_map, render_frame
@@ -78,6 +92,7 @@ __all__ = [
     "compute_emission_pdf",
     "compute_acoustic_pdf",
     "combine_pdfs",
+    "merge_on_cells",
     "normalize_pdf",
     "stamp_parameter_indices",
     "stamp_parameter_indices_from_mask",
@@ -123,20 +138,92 @@ def _plot_in_figure(ds: xr.Dataset, **plot_kwargs) -> Figure:
     return fig
 
 
+def _lonlat_shape(ds):
+    """``[n_lon, n_lat]`` of the source grid, as used by :py:func:`open_distributions`.
+
+    Read from the dimensions of the ``longitude``/``latitude`` coordinates (1D, or
+    2D ``(y, x)``), not from the order of ``ds.sizes``, which also holds ``time``.
+    """
+    lon, lat = ds["longitude"], ds["latitude"]
+    if lon.ndim == 2:
+        lat_dim, lon_dim = lon.dims
+    else:
+        lat_dim, lon_dim = lat.dims[0], lon.dims[0]
+    return [int(ds.sizes[lon_dim]), int(ds.sizes[lat_dim])]
+
+
+def merge_on_cells(total, other):
+    """Merge the variables of ``other`` into ``total``, matching the cells by id.
+
+    The cells of ``other`` are matched to those of ``total`` by their
+    ``cell_ids`` values, not by position. Cells of ``total`` that ``other`` does
+    not cover get NaN; cells of ``other`` outside ``total`` are dropped. The time
+    steps are matched by label in the same way. The result keeps the cells,
+    coordinates and attributes of ``total``.
+
+    Parameters
+    ----------
+    total : xarray.Dataset
+        The combined emission, e.g. ``total_pdf.zarr``.
+    other : xarray.Dataset or xarray.DataArray
+        The variables to add, e.g. the acoustic or bathymetry pdf, on the same
+        HEALPix grid.
+
+    Returns
+    -------
+    xarray.Dataset
+    """
+    if isinstance(other, xr.DataArray):
+        other = other.to_dataset()
+    if "time" in other.dims and "time" in total.indexes:
+        # same time steps as ``total``; missing steps get NaN
+        other = other.reindex(time=total.indexes["time"])
+    total_grid, other_grid = grid_attrs(total), grid_attrs(other)
+    if other_grid is not None and other_grid != total_grid:
+        raise ValueError(f"different HEALPix grids: {other_grid} != {total_grid}")
+
+    ids = np.asarray(total["cell_ids"].values)
+    other_ids = np.asarray(other["cell_ids"].values)
+    if np.unique(other_ids).size != other_ids.size:
+        raise ValueError("the cell_ids of `other` are not unique")
+    position = pd.Index(other_ids).get_indexer(ids)
+    found = position >= 0
+
+    variables = {}
+    for name, var in other.data_vars.items():
+        if "cells" not in var.dims:
+            variables[name] = var.variable
+            continue
+        taken = var.variable[{"cells": np.where(found, position, 0)}]
+        if not found.all():
+            mask = xr.Variable("cells", found)
+            taken = taken.where(mask) if taken.dtype.kind != "b" else taken & mask
+        variables[name] = taken
+    return total.assign(variables)
+
+
 def _save_zarr(ds: xr.Dataset, path: str, storage_options=None):
-    """Helper for saving a .zarr array and warning in case of failure."""
-    try:
-        path_to_zarr = path + ".zarr" if not path.endswith(".zarr") else path
-        if "cell_ids" in ds.coords:
-            ds = prepare_dggs_zarr(ds)
-        ds.to_zarr(
-            path_to_zarr, mode="w", storage_options=storage_options, zarr_format=2
-        )
-    except Exception:
-        warnings.warn(
-            f'An error occurred when saving a .zarr array to "{path_to_zarr}")',
-            RuntimeWarning,
-        )
+    """Save ``ds`` to ``path`` (``.zarr`` is appended when missing).
+
+    HEALPix datasets go through :py:func:`pangeo_fish.storage.write_healpix_zarr`
+    (grid, CF and DGGS metadata, chunk policy). Other datasets get the CF
+    attributes and are written as Zarr format 2. Errors are raised, not hidden:
+    a missing store would otherwise only show up in a later step.
+    """
+    path_to_zarr = path if path.endswith(".zarr") else path + ".zarr"
+    if "cell_ids" in ds.coords:
+        write_healpix_zarr(ds, path_to_zarr, storage_options=storage_options)
+        return
+    # Source stores can carry encodings Zarr format 2 cannot write (Zarr 3
+    # serializers, foreign chunks): let xarray encode the values afresh.
+    ds = with_cf_attrs(ds).drop_encoding()
+    ds.to_zarr(
+        path_to_zarr,
+        mode="w",
+        storage_options=storage_options,
+        zarr_format=2,
+        consolidated=True,
+    )
 
 
 def _inspect_curry_obj(curried_obj):
@@ -182,7 +269,9 @@ def _update_params_dict(factory, params: dict):
     """
 
     kwargs = {
-        k: str(v) for k, v in _inspect_curry_obj(factory).items() if k != "cell_ids"
+        k: str(v)
+        for k, v in _inspect_curry_obj(factory).items()
+        if k not in ("cell_ids", "blocked_cells")
     }
 
     return params | {"predictor_factory": {"class": str(factory), "kwargs": kwargs}}
@@ -191,19 +280,12 @@ def _update_params_dict(factory, params: dict):
 def to_healpix(ds: xr.Dataset) -> xr.Dataset:
     """Helper that loads a Dataset as a HEALPix grid (indexed by ``"cell_ids"``)."""
 
-    attrs_to_keep = ["level", "indexing_scheme", "ellipsoid"]
-    cell_ids_attrs = ds["cell_ids"].attrs
-
-    attrs = {
-        k: v
-        for (k, v) in cell_ids_attrs.items()
-        if k in attrs_to_keep and v is not None
-    }
-
-    if "indexing_scheme" not in attrs.keys():
-        attrs["indexing_scheme"] = "nested"
-        attrs["grid_name"] = "healpix"
-    decoded = ds.dggs.decode({"grid_name": "healpix"} | attrs)
+    attrs = grid_attrs(ds)
+    if attrs is None:
+        raise ValueError("cell_ids must carry the HEALPix grid attributes (level)")
+    decoded = ds.dggs.decode(attrs)
+    # xdggs moves the grid into its index and empties the attributes: keep them
+    # in canonical form, so that the grid survives any later write.
     decoded["cell_ids"].attrs.update(attrs)
     return decoded
 
@@ -480,6 +562,8 @@ def _open_intake_catalog(yaml_url: str, chunks: dict = None):
     return model
 
 
+_COPERNICUS_GLOBAL_6H = "cmems_mod_glo_phy-thetao_anfc_0.083deg_PT6H-i"
+
 # Products whose temperature, SSH and static fields live in separate Copernicus
 # Marine datasets. Key: temperature ``dataset_id``; value: (SSH ``dataset_id``,
 # static ``dataset_id``, static ``dataset_part``). All of them expose
@@ -503,7 +587,64 @@ _COPERNICUS_SPLIT_PRODUCTS = {
         "cmems_mod_nws_phy_anfc_1.5km_static",
         "bathy",
     ),
+    # Global analysis/forecast (1/12 deg, from 2022-06-01), daily mean 3D.
+    "cmems_mod_glo_phy-thetao_anfc_0.083deg_P1D-m": (
+        "cmems_mod_glo_phy_anfc_0.083deg_P1D-m",
+        "cmems_mod_glo_phy_anfc_0.083deg_static",
+        "bathy",
+    ),
+    # Global analysis/forecast, 6-hourly instantaneous 3D. There is no 6-hourly
+    # ``zos``: SSH comes from the hourly-mean 2D dataset (surface ``thetao``
+    # only), stamped on the hour, and is sampled at the temperature times.
+    _COPERNICUS_GLOBAL_6H: (
+        "cmems_mod_glo_phy_anfc_0.083deg_PT1H-m",
+        "cmems_mod_glo_phy_anfc_0.083deg_static",
+        "bathy",
+    ),
 }
+
+
+def _vertical_coordinate(dataset_id: str) -> str:
+    """Vertical coordinate of a Copernicus Marine physics product.
+
+    - ``"zstar"``: IBI (reanalysis and analysis/forecast). The levels stretch
+      with the sea surface (IBI QUIDs: z* levels; the IBI PUM says
+      "geopotential levels"), so a level never lies above the surface.
+    - ``"nws"``: North-West Shelf. The first level (``depth = 0``) is the
+      model's surface layer; the deeper levels are interpolated to fixed
+      depths below mean sea level (NWS PUM 3.0).
+    - ``"geopotential"``: all other products (fixed depths below mean sea level).
+    """
+    if "_ibi_" in dataset_id:
+        return "zstar"
+    if "_nws_" in dataset_id:
+        return "nws"
+    return "geopotential"
+
+
+def _set_dynamic_depth(model: xr.Dataset, vertical_coordinate: str) -> xr.Dataset:
+    """Depth of each model level below the instantaneous surface.
+
+    ``"geopotential"`` keeps ``depth + XE``. ``"zstar"`` uses
+    ``depth * (H0 + XE) / H0``. ``"nws"`` keeps ``depth + XE`` except for the
+    surface level (``depth == 0``), which stays at 0.
+    """
+    if vertical_coordinate == "geopotential":
+        return model
+    depth, XE, H0 = model["depth"], model["XE"], model["H0"]
+    if vertical_coordinate == "zstar":
+        # stretch factor of the water column; 0 for dry cells, NaN on land
+        stretch = ((H0 + XE) / H0.where(H0 > 0)).clip(min=0)
+        dynamic = depth * stretch
+    elif vertical_coordinate == "nws":
+        dynamic = xr.where(depth == 0, 0.0, depth + XE).where(H0.notnull())
+    else:
+        raise ValueError(f"unknown vertical coordinate: {vertical_coordinate!r}")
+    dims = model["dynamic_depth"].dims
+    attrs = model["dynamic_depth"].attrs | {"vertical_coordinate": vertical_coordinate}
+    return model.assign(
+        dynamic_depth=dynamic.transpose(*dims).assign_attrs(attrs)
+    ).assign_attrs(vertical_coordinate=vertical_coordinate)
 
 
 def _resolve_copernicus_datasets(dataset_id: str):
@@ -519,24 +660,29 @@ def _resolve_copernicus_datasets(dataset_id: str):
     return dataset_id, dataset_id, dataset_id.rsplit("_", 1)[0] + "_static", None
 
 
-def _copernicus_is_hourly(dataset_id: str) -> bool:
-    """Whether the Copernicus Marine ``dataset_id`` is an hourly (``PT1H``) product."""
-    return "_PT1H" in dataset_id or "-PT1H" in dataset_id
+def _copernicus_is_subdaily(dataset_id: str) -> bool:
+    """Whether ``dataset_id`` has a sub-daily time step (``PT1H``, ``PT6H``, ...).
+
+    Copernicus Marine encodes the step as an ISO 8601 duration followed by
+    ``-m`` (mean) or ``-i`` (instantaneous), e.g. ``..._PT6H-i``.
+    """
+    return re.search(r"[_-]PT\d+[HM]-[mi]$", dataset_id) is not None
 
 
 def _copernicus_time_bounds(dataset_id, time_slice, tag_log):
     """Return ``start_datetime`` and ``end_datetime`` for ``open_dataset``.
 
-    Daily products are bounded at day resolution. Hourly products are bounded
-    at second resolution; as for ``xarray`` partial string indexing, a ``stop``
+    Daily products are bounded at day resolution. Sub-daily products (hourly,
+    6-hourly, ...) are bounded at second resolution; as for ``xarray`` partial
+    string indexing, a ``stop``
     given as a date (e.g. ``"2021-06-03"``) includes that whole day.
     """
-    hourly = _copernicus_is_hourly(dataset_id)
-    unit = "s" if hourly else "D"
+    subdaily = _copernicus_is_subdaily(dataset_id)
+    unit = "s" if subdaily else "D"
     if time_slice is not None and time_slice.start is not None:
         start = np.datetime64(time_slice.start)
         stop = np.datetime64(time_slice.stop)
-        if hourly and np.datetime_data(stop.dtype)[0] == "D":
+        if subdaily and np.datetime_data(stop.dtype)[0] == "D":
             stop = stop + np.timedelta64(1, "D") - np.timedelta64(1, "s")
     elif tag_log is not None:
         start, stop = tag_log.time.values[0], tag_log.time.values[-1]
@@ -609,6 +755,78 @@ def _warn_if_period_clipped(dataset_id, times, start_datetime, end_datetime):
         )
 
 
+def _check_temperature_coverage(model, dataset_id):
+    """Fail or warn when sea cells of the requested area have no temperature.
+
+    Some 3D products cover a smaller area than their static fields and sea
+    surface height (the IBI hourly 3D product stops near 51.5° N, 3.1° E, before
+    the Western Scheldt). The bathymetry then marks sea cells whose ``TEMP`` is
+    NaN, and every later step would silently get no data there. Coverage does
+    not change with time, so the first time step of the top level is checked.
+    """
+    if "time" not in model["TEMP"].dims or not model.sizes["time"]:
+        return
+    sea = model["H0"].notnull()
+    temp = model["TEMP"].isel(time=0, depth=0).notnull()
+    counts = xr.Dataset(
+        {
+            "sea": sea.sum(),
+            "temp": (temp & sea).sum(),
+            "missing": (sea & ~temp).sum(),
+            "lat_covered": (temp & sea).any("lon"),
+            "lon_covered": (temp & sea).any("lat"),
+        }
+    ).compute()
+    n_sea, n_temp, n_missing = (int(counts[k]) for k in ["sea", "temp", "missing"])
+    if n_sea == 0 or n_missing == 0:
+        return
+    if n_temp == 0:
+        raise ValueError(
+            f"Copernicus dataset {dataset_id!r} has no temperature in the requested"
+            f" area ({n_sea} sea cells, all NaN): the 3D product does not cover it."
+            " Choose a product that covers the area, see the Copernicus model"
+            " documentation (copernicus-models)."
+        )
+    lat = counts["lat"].values[counts["lat_covered"].values]
+    lon = counts["lon"].values[counts["lon_covered"].values]
+    extent = f"lat {lat.min():.2f} to {lat.max():.2f}, lon {lon.min():.2f} to {lon.max():.2f}"
+    warnings.warn(
+        f"Copernicus dataset {dataset_id!r} has no temperature in {n_missing} of"
+        f" {n_sea} sea cells of the requested area; the cells with temperature lie"
+        f" within {extent}. The 3D product may not cover the whole area.",
+        category=UserWarning,
+    )
+
+
+def _sample_ssh_at_times(temperature, ssh, dataset_id):
+    """Restrict both fields to their common period and match exact timestamps."""
+    index = ssh.get_index("time")
+    common = (
+        temperature.sel(time=slice(index.min(), index.max()))
+        if len(index)
+        else temperature.isel(time=slice(0, 0))
+    )
+    times = common["time"].values
+    if not len(times):
+        raise ValueError(
+            f"Copernicus dataset {dataset_id!r}: no overlapping temperature and SSH times."
+        )
+    if not index.is_unique or not pd.Index(times).isin(index).all():
+        raise ValueError(
+            f"Copernicus dataset {dataset_id!r}: SSH times do not include all "
+            "temperature times."
+        )
+    if len(times) < temperature.sizes["time"]:
+        warnings.warn(
+            f"Copernicus dataset {dataset_id!r}: temperature and SSH only overlap "
+            f"from {np.datetime_as_string(times[0], unit='s')} to "
+            f"{np.datetime_as_string(times[-1], unit='s')}; the model is "
+            "restricted to this period.",
+            UserWarning,
+        )
+    return common, ssh.sel(time=times)
+
+
 def _mask_land_depth(static):
     """Set ``deptho`` to NaN on land.
 
@@ -637,15 +855,19 @@ def _open_copernicus_model(
         Copernicus Marine ``dataset_id`` for the physics product (e.g.
         ``"cmems_mod_glo_phy_my_0.083deg_P1D-m"``). The matching static
         product is opened to retrieve ``deptho`` and ``mask``. The IBI daily
-        reanalysis and the hourly (``PT1H``) 3D IBI and North-West European
-        Shelf analysis/forecast products resolve separate temperature/SSH IDs
-        and static ``bathy`` fields internally; callers still provide just the
-        temperature ID. Hourly products are requested at hourly resolution.
+        reanalysis, the hourly (``PT1H``) 3D IBI and North-West European
+        Shelf analysis/forecast products and the global analysis/forecast
+        daily (``P1D-m``) and 6-hourly (``PT6H-i``) temperature products
+        resolve separate temperature/SSH IDs and static ``bathy`` fields
+        internally; callers still provide just the temperature ID. Sub-daily
+        products are requested at second resolution; when the SSH product has
+        a finer step (global: hourly-mean ``zos`` for 6-hourly temperature),
+        SSH is sampled at the temperature times.
     bbox : dict
         Spatial boundaries with keys ``longitude`` and ``latitude``.
     time_slice : slice
         Time slice used to bound ``start_datetime`` / ``end_datetime`` (day
-        resolution for daily products, second resolution for hourly ones). If
+        resolution for daily products, second resolution for sub-daily ones). If
         ``None``, the full extent of ``tag_log`` is used.
     tag_log : xarray.Dataset, optional
         DST data; used as fallback when ``time_slice`` is ``None``.
@@ -689,7 +911,6 @@ def _open_copernicus_model(
     temperature = open_fields(
         temperature_id, ["thetao"] if split else ["thetao", "zos"], **temporal
     )
-    datasets = [temperature]
     if split:
         if "time" not in temperature.coords:
             raise ValueError(
@@ -698,10 +919,14 @@ def _open_copernicus_model(
         # The temperature product may start later than the SSH one (and than the
         # requested period): request SSH over the temperature time range only.
         temperature_times = temperature["time"].values
+        if not len(temperature_times):
+            raise ValueError(
+                f"Copernicus dataset {temperature_id!r}: no temperature times in the requested period."
+            )
         _warn_if_period_clipped(
             temperature_id, temperature_times, start_datetime, end_datetime
         )
-        unit = "s" if _copernicus_is_hourly(temperature_id) else "D"
+        unit = "s" if _copernicus_is_subdaily(temperature_id) else "D"
         ssh_temporal = dict(
             start_datetime=np.datetime_as_string(temperature_times[0], unit=unit),
             end_datetime=np.datetime_as_string(temperature_times[-1], unit=unit),
@@ -709,7 +934,17 @@ def _open_copernicus_model(
         ssh = open_fields(ssh_id, ["zos"], **ssh_temporal)
         if "time" not in ssh.coords:
             raise ValueError(f"Copernicus dataset {ssh_id!r}: missing time coordinate.")
-        datasets.append(_align_copernicus_coordinates(temperature, ssh, ssh_id))
+        if ssh.sizes.get("depth") == 1:
+            # global PT1H-m stores the 2D ``zos`` on its single surface level
+            ssh = ssh.isel(depth=0, drop=True)
+        if temperature_id == _COPERNICUS_GLOBAL_6H:
+            temperature, ssh = _sample_ssh_at_times(temperature, ssh, ssh_id)
+        datasets = [
+            temperature,
+            _align_copernicus_coordinates(temperature, ssh, ssh_id),
+        ]
+    else:
+        datasets = [temperature]
 
     # IBI 202511 catalogue: bathy contains deptho(latitude, longitude) and
     # mask(depth, latitude, longitude), as well as unused deptho_lev.
@@ -719,7 +954,11 @@ def _open_copernicus_model(
     datasets.append(_align_copernicus_coordinates(temperature, static, static_id))
     ds_all = xr.merge(datasets, compat="no_conflicts", join="exact")
     ds_all = ds_all.rename({"latitude": "lat", "longitude": "lon"})
-    return prepare_dataset(ds_all)
+    model = _set_dynamic_depth(
+        prepare_dataset(ds_all), _vertical_coordinate(temperature_id)
+    )
+    _check_temperature_coverage(model, temperature_id)
+    return model
 
 
 def _open_parquet_model(parquet_url: str, remote_options=None):
@@ -773,7 +1012,8 @@ def load_model(
     tag_log : xarray.Dataset
         The DST data
     time_slice : slice
-        Time slice to sample the model from
+        Time slice to sample the model from. For sub-daily Copernicus products,
+        a date-only stop includes the entire day.
     bbox : dict
         Spatial boundaries indexed by their coordinates (i.e, ``longitude`` and ``latitude``) as well as the maximum depth indexed by ``max_depth``.
     chunk_time : int, default: 24
@@ -811,10 +1051,12 @@ def load_model(
             'Only intake catalogs, "parquet" data or `uri=None` (Copernicus Marine) can be loaded.'
         )
 
+    # Sub-daily Copernicus data are already bounded by the requested timestamps.
+    # Applying adapt_model_time here would cut a date-only stop back to midnight.
+    if uri is not None or not _copernicus_is_subdaily(copernicus_model_name):
+        model = model.sel(time=adapt_model_time(time_slice))
     reference_model = (
-        model.sel(time=adapt_model_time(time_slice))
-        .sel(lat=slice(*bbox["latitude"]), lon=slice(*bbox["longitude"]))
-        .pipe(
+        model.sel(lat=slice(*bbox["latitude"]), lon=slice(*bbox["longitude"])).pipe(
             lambda ds: ds.sel(
                 depth=slice(None, (bbox["max_depth"] - ds["XE"].min()).compute())
             )
@@ -829,6 +1071,7 @@ def compute_diff(
     tag_log: xr.Dataset,
     relative_depth_threshold: float,
     chunk_time=24,
+    min_water_depth: float | str | None = "auto",
     plot=False,
     save=False,
     target_root=".",
@@ -845,9 +1088,24 @@ def compute_diff(
     tag_log : xarray.Dataset
         The DST data. *Hint: given a tag model, it corresponds to ``tag["dst"].ds``*
     relative_depth_threshold : float
-        Relative (seabed's) depth threshold to deal with cases where the fish's depths are lower than the seabed's depth
+        No longer used: the seabed-depth check was removed from the temperature
+        difference. The value is only recorded in the attributes; a non-zero value
+        raises a ``FutureWarning``.
     chunk_time : int, default: 24
         Chunk size for the time dimension
+    min_water_depth : float, "auto" or None, default: "auto"
+        Water column (m) at or below which a sea cell is considered dry
+        (``H0 + XE <= min_water_depth``, on the native model grid).
+        If a number (>= 0), the ``diff`` of the dry (cell, time) pairs is set to NaN,
+        except at time steps without any wet sea cell with a valid ``diff``, and
+        ``diff.attrs["min_water_depth"]`` is set. ``0.0`` excludes dry cells only;
+        a positive value also excludes nearly dry cells.
+        If ``"auto"`` (default), dry cells (``H0 + XE <= 0``) are masked as with
+        ``0.0`` when there are any (in practice only with the North-West Shelf
+        hourly product) and a :class:`~pangeo_fish.drycells.DryCellWarning`
+        reports them; without dry cells the dataset is returned unchanged.
+        If None, the values are unchanged and a warning reports the dry pairs, if any.
+        See :doc:`dry-cells`.
     plot : bool, default: False
         Whether to return a plot of the dataset
     save : bool, default: False
@@ -877,6 +1135,13 @@ def compute_diff(
         ),
         other_dim="obs",
     ).chunk({"time": chunk_time})
+    if relative_depth_threshold:
+        warnings.warn(
+            "relative_depth_threshold is no longer used by compute_diff and is"
+            " ignored; pass 0 to silence this warning.",
+            FutureWarning,
+            stacklevel=2,
+        )
     attrs = (
         tag_log.attrs
         | _get_package_versions()
@@ -896,6 +1161,7 @@ def compute_diff(
             }
         )
     )  # type: xr.Dataset
+    diff = _apply_min_water_depth(diff, min_water_depth)
 
     if save:
         _save_zarr(diff, f"{target_root}/diff.zarr", storage_options)
@@ -959,6 +1225,31 @@ def regrid_dataset_hpresample(
     mask_threshold=0.5,
     **kwargs,
 ):
+    """Regrid a model dataset to HEALPix cells with healpix-resample.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        Dataset on the model grid, with ``longitude``, ``latitude`` and
+        ``ocean_mask`` (1 or True for sea, 0 or False for land).
+    refinement_level : int
+        HEALPix refinement level of the output.
+    mask_threshold : float, default: 0.5
+        Land/sea separation on the HEALPix grid. The ocean mask is interpolated
+        to each HEALPix cell, which gives a value between 0 and 1 near the coast
+        (roughly the share of sea around the cell). A cell is kept as sea when
+        this value is at least ``mask_threshold``; the other cells are land and
+        get no data. ``0`` keeps every cell that touches the sea at all, ``0.5``
+        the cells that are at least about half sea, ``1`` only the cells
+        surrounded by sea points. A cell with no sea around it is always land.
+
+    Returns
+    -------
+    regridded : xarray.Dataset
+        The dataset on the HEALPix cells, with its ``ocean_mask``.
+    resampling_info : dict
+        Metadata of the regridding.
+    """
     nside = 2**refinement_level
 
     lon = ds.longitude.values.ravel().astype("float64")
@@ -984,7 +1275,9 @@ def regrid_dataset_hpresample(
     order = np.argsort(cell_ids)
     ref_cell_ids = cell_ids[order].astype("int64")
     ocean_mask_final = mask_regridded.cell_data[order]
-    is_ocean = ocean_mask_final >= mask_threshold
+    # A cell with no ocean contribution at all is land whatever the threshold:
+    # with ``mask_threshold=0`` the comparison alone would keep every cell.
+    is_ocean = (ocean_mask_final >= mask_threshold) & (ocean_mask_final > 0)
 
     # ------------------------------------------------------------------
     # Part 2 : Clough-Tocher construct only on ocean cells
@@ -1101,13 +1394,16 @@ def regrid_dataset_hpresample(
     attrs = ds.attrs.copy()
     attrs.update(grid_type="healpix", level=refinement_level, nside=nside)
     new_ds.attrs.update(attrs)
+    # The dataset becomes HEALPix here: give it its grid and CF metadata once,
+    # in canonical form; later steps keep them and the writer checks them.
+    new_ds = with_cf_attrs(with_grid_attrs(new_ds))
 
     if plot:
         print("no method implemented to plot")
     if save:
         print("you can save outside of the function")
     return new_ds, {
-        "resolution_2D": list(ds.sizes.values())[0:2],
+        "resolution_2D": _lonlat_shape(ds),
         "refinement_level": refinement_level,
         "ellipsoid": ellipsoid,
     }
@@ -1180,6 +1476,9 @@ def regrid_dataset(
     reshaped = reshaped.assign_attrs(attrs)
     if "indexing_scheme" not in reshaped["cell_ids"].attrs.keys():
         reshaped["cell_ids"].attrs["indexing_scheme"] = "nested"
+    # The dataset becomes HEALPix here: give it its grid and CF metadata once,
+    # in canonical form; later steps keep them and the writer checks them.
+    reshaped = with_cf_attrs(with_grid_attrs(reshaped))
 
     if save:
         _save_zarr(reshaped, f"{target_root}/diff-regridded.zarr", storage_options)
@@ -1301,7 +1600,7 @@ def compute_emission_pdf(
     emission_pdf = emission_pdf.assign_attrs(attrs)
     if "cell_ids" in diff_ds.coords and "cell_ids" in emission_pdf.coords:
         emission_pdf["cell_ids"].attrs.update(diff_ds["cell_ids"].attrs)
-    emission_pdf = _with_dggs_attrs(emission_pdf)
+    emission_pdf = with_grid_attrs(emission_pdf)
     emission_pdf = emission_pdf.chunk({"time": chunk_time} | {d: -1 for d in dims})
 
     if save:
@@ -1369,11 +1668,11 @@ def compute_acoustic_pdf(
         The plot of ``acoustic_pdf``, or None if ``plot=False``
 
     """
-    if ellipsoid is None:
-        try:
-            ellipsoid = emission_ds.dggs.grid_info.ellipsoid
-        except ValueError:
-            ellipsoid = emission_ds["cell_ids"].attrs.get("ellipsoid")
+    ellipsoid = (
+        grid_ellipsoid(emission_ds)
+        if ellipsoid is None
+        else canonical_ellipsoid(ellipsoid)
+    )
 
     if dims == ["cells"]:
         lat = emission_ds["cell_ids"].attrs.get("lat", 0)
@@ -1400,7 +1699,7 @@ def compute_acoustic_pdf(
             "receiver_buffer": str(receiver_buffer),
         }
     )
-    acoustic_pdf = _with_dggs_attrs(acoustic_pdf.assign_attrs(attrs))
+    acoustic_pdf = with_grid_attrs(acoustic_pdf.assign_attrs(attrs))
 
     if save:
         _save_zarr(acoustic_pdf, f"{target_root}/acoustic.zarr", storage_options)
@@ -1496,7 +1795,7 @@ def combine_pdfs(
         if combined.coords.get("cell_ids", None) is not None:
             combined["cell_ids"].attrs.update(ds["cell_ids"].attrs)
     ds.attrs.update(_get_package_versions())
-    combined = _with_dggs_attrs(combined)
+    combined = with_grid_attrs(combined)
 
     figure = False
     if plot:
@@ -1592,12 +1891,20 @@ def normalize_pdf(
         for item in excluded_pdf:
             normalized = normalized.drop_vars(item)
 
-    normalized = _with_dggs_attrs(normalized.rename({"pdf_normalized": "pdf"}))
+    normalized = with_grid_attrs(normalized.rename({"pdf_normalized": "pdf"}))
     warnings.warn(
         f"you decided to normalize the pdf without: {excluded_pdf}, if you want to include them, change excluded_pdf ",
         UserWarning,
     )
     return normalized, figure
+
+
+def _blocked_cells(ds: xr.Dataset):
+    """Ids of the non-ocean cells (``mask`` is True over the ocean)."""
+    if "mask" not in ds:
+        raise ValueError('land_barrier=True needs a "mask" variable in the dataset.')
+    ocean = np.asarray(ds["mask"].values, dtype=bool)
+    return np.asarray(ds["cell_ids"].values)[~ocean]
 
 
 def _get_predictor_factory(
@@ -1607,13 +1914,18 @@ def _get_predictor_factory(
     conv_method: str,
     device: str = "cpu",
     ellipsoid=None,
+    max_sigma: float | None = None,
+    normalization: str = "full_disc",
+    land_barrier: bool = False,
+    projection: str = "conservative",
 ):
     if dims == ["x", "y"]:
         raise ValueError("dims must be ['cells'], ['x','y'] is not used anymore")
 
     elif dims == ["cells"]:
-        if ellipsoid is None:
-            ellipsoid = ds["cell_ids"].attrs.get("ellipsoid")
+        ellipsoid = (
+            grid_ellipsoid(ds) if ellipsoid is None else canonical_ellipsoid(ellipsoid)
+        )
         if conv_method == "HealpixConv":
             if truncate is None:
                 raise ValueError(
@@ -1636,16 +1948,44 @@ def _get_predictor_factory(
                 device=device,
                 ellipsoid=ellipsoid,
             )
-        elif conv_method == "FoscatConv":
+        elif conv_method == "FFTConv":
             predictor = curry(
-                Foscat1DHealpix,
+                FFTGaussian1DHealpix,
                 cell_ids=ds["cell_ids"].data,
                 grid_info=ds.dggs.grid_info,
+                device=device,
+                ellipsoid=ellipsoid,
+                max_sigma=max_sigma,
+                projection=projection,
+                **({} if truncate is None else {"truncate": truncate}),
+            )
+        elif conv_method == "HealpixAnalyseConv":
+            predictor = curry(
+                GaussianHealpixAnalyse,
+                cell_ids=ds["cell_ids"].data,
+                grid_info=ds.dggs.grid_info,
+                truncate=4.0 if truncate is None else truncate,
+                normalization=normalization,
+                land_barrier=bool(land_barrier),
+                blocked_cells=_blocked_cells(ds) if land_barrier else None,
+            )
+        elif conv_method == "HealpixAnalyseLargeConv":
+            predictor = curry(
+                LargeGaussianHealpixAnalyse,
+                cell_ids=ds["cell_ids"].data,
+                grid_info=ds.dggs.grid_info,
+                device=device,
             )
 
         else:
+            hint = (
+                " The foscat-based convolution has been removed together with the foscat dependency."
+                if "foscat" in str(conv_method).lower()
+                else ""
+            )
             raise ValueError(
-                f'Unknown helper "{conv_method}". Expected "HealpixConv", "LargeHealpixConv" or "FoscatConv".'
+                f'Unknown helper "{conv_method}". Expected "HealpixConv", "LargeHealpixConv", "FFTConv", "HealpixAnalyseConv" or "HealpixAnalyseLargeConv".'
+                + hint
             )
     else:
         raise ValueError(f'Unknown dims "{dims}".')
@@ -1689,11 +2029,7 @@ def earth_radius_from_ellipsoid(ellipsoid=None) -> pint.Quantity:
 
 def _earth_radius_from_grid(ds: xr.Dataset) -> pint.Quantity:
     """Derive the Earth radius from the DGGS grid info of ``ds``."""
-    try:
-        ellipsoid = ds.dggs.grid_info.ellipsoid
-    except Exception:
-        ellipsoid = ds["cell_ids"].attrs.get("ellipsoid")
-    return earth_radius_from_ellipsoid(ellipsoid)
+    return earth_radius_from_ellipsoid(grid_ellipsoid(ds))
 
 
 def _grid_resolution_radians(ds: xr.Dataset) -> xr.DataArray:
@@ -1758,6 +2094,41 @@ def _get_speed(
     return max_speed.pint.to("km / h")
 
 
+def _check_emission_mass(ds: xr.Dataset, variable: str = "pdf") -> None:
+    """Raise if a time step of the emission has no probability mass.
+
+    A time step whose ``pdf`` has no positive mass (NaN, 0 or negative everywhere
+    inside ``mask``, when the dataset has one) makes the HMM fail later without a clear error: the states
+    become NaN and sigma runs to its bound. Passing this check is necessary, not
+    sufficient: the movement model can still leave no reachable cell. Every
+    dimension other than ``time`` is summed over.
+    """
+    if variable not in ds or "time" not in ds[variable].dims:
+        return
+    pdf = ds[variable]
+    if "mask" in ds:
+        pdf = pdf.where(ds["mask"].astype(bool), 0)
+    spatial = [dim for dim in pdf.dims if dim != "time"]
+    mass = pdf.sum(spatial, skipna=True)  # NaN counts as 0
+    empty = ~(mass > 0)
+    if "time" in empty.dims:
+        n_empty = int(empty.sum())
+    else:
+        n_empty = int(bool(empty))
+    if n_empty == 0:
+        return
+    times = np.asarray(ds["time"].values)[np.asarray(empty.values, dtype=bool)]
+    shown = ", ".join(str(t)[:16] for t in times[:5])
+    more = ", ..." if len(times) > 5 else ""
+    raise ValueError(
+        f"The emission probability ({variable!r}) has no positive mass"
+        f"{' inside the mask' if 'mask' in ds else ''} (NaN, 0 or negative) at"
+        f" {n_empty} time step(s) ({shown}{more}). The HMM cannot run through"
+        " them. Check for gaps in the tag data, a mask that removes every cell, or"
+        " detections outside the model domain."
+    )
+
+
 def optimize_pdf(
     *,
     ds: xr.Dataset,
@@ -1767,7 +2138,7 @@ def optimize_pdf(
     tolerance: float,
     earth_radius: pint.Quantity | None = None,
     dims: list[str] = ["cells"],
-    conv_method: str = "HealpixConv",
+    conv_method: str = "FFTConv",
     ellipsoid: str = None,
     final: bool = False,
     single_behav: bool = True,
@@ -1775,6 +2146,9 @@ def optimize_pdf(
     save_parameters=False,
     storage_options: dict = None,
     target_root=".",
+    normalization: str = "full_disc",
+    land_barrier: bool = False,
+    projection: str = "conservative",
     **kwargs,
 ) -> dict:
     """Optimize a temporal probability distribution.
@@ -1797,6 +2171,21 @@ def optimize_pdf(
          of ``cell_ids``), see :py:func:`earth_radius_from_ellipsoid`.
      dims : list of str, default: ["cells"]
          The list of the dimensions. Either ``["x", "y"]`` or ``["cells"]``
+    conv_method : str, default "FFTConv"
+        Define the convolution used by the predictor. It can be:
+         -"LargeHealpixConv"=>"UpDownGaussian1DHealpix": convolution method based on working on upper cell size (Up) before going back to lower (Down),
+         -"HealpixConv"=>"Gaussian1DHealpix": Simple convolution, slow,\\
+         -"FFTConv"=>"FFTGaussian1DHealpix": Default, very fast, multiplies in fft space then comes back to real space,
+         -"HealpixAnalyseConv"=>"GaussianHealpixAnalyse": sparse operator from healpix-analyse (WGS84 only),
+         -"HealpixAnalyseLargeConv"=>"LargeGaussianHealpixAnalyse": large sigma, LargeConv.from_gaussian (WGS84 only),
+
+     normalization : {"full_disc", "source"}, default "full_disc"
+         Only for conv_method="HealpixAnalyseConv".
+     land_barrier : bool, default False
+         Only for conv_method="HealpixAnalyseConv": the non-ocean cells of ``mask``
+         are passed as blocked cells.
+     projection : {"conservative", "average"}, default "conservative"
+         Only for conv_method="FFTConv".
      final : bool, default: False
          If True, optimize sigma by matching the predicted final state to the
          observed final position (``score_final_pos``) instead of the standard
@@ -1834,6 +2223,7 @@ def optimize_pdf(
         )
 
     ds = ds.compute()
+    _check_emission_mass(ds)
 
     if "cells" in ds.dims:
         ds = to_healpix(ds)
@@ -1841,27 +2231,15 @@ def optimize_pdf(
     else:
         raise ValueError("dims must be ['cells'], ['x','y'] is not used anymore")
         as_radians = False
-    if ellipsoid is None:
-        info = getattr(ds.dggs, "grid_info", None)
-        ellipsoid = getattr(info, "ellipsoid", None) or ds["cell_ids"].attrs.get(
-            "ellipsoid"
-        )
+    ellipsoid = (
+        grid_ellipsoid(ds) if ellipsoid is None else canonical_ellipsoid(ellipsoid)
+    )
 
     max_sigma = _get_max_sigma(
         ds, earth_radius, adjustment_factor, maximum_speed, as_radians
     )
     if final:
         max_sigma = 0.01
-    predictor_factory = _get_predictor_factory(
-        ds=ds,
-        truncate=truncate,
-        dims=dims,
-        conv_method=conv_method,
-        ellipsoid=ellipsoid,
-    )
-
-    estimator = EagerEstimator(sigma=None, predictor_factory=predictor_factory)
-    # ds.attrs["max_sigma"] = max_sigma  # limitation of the helper
     if "predictor_index" in ds:
         speed_bounds_dict = ds.attrs.get("sigma_bounds", None)
         if speed_bounds_dict is None:
@@ -1878,6 +2256,25 @@ def optimize_pdf(
             print(f"dictionnaire des sigma:{sigma_bounds_dict}")
     else:
         sigma_bounds_dict = None
+
+    # The largest sigma the optimiser can try bounds the convolution kernel.
+    largest_sigma = max(
+        [max_sigma] + [upper for _, upper in (sigma_bounds_dict or {}).values()]
+    )
+    predictor_factory = _get_predictor_factory(
+        ds=ds,
+        truncate=truncate,
+        dims=dims,
+        conv_method=conv_method,
+        ellipsoid=ellipsoid,
+        max_sigma=largest_sigma,
+        normalization=normalization,
+        land_barrier=land_barrier,
+        projection=projection,
+    )
+
+    estimator = EagerEstimator(sigma=None, predictor_factory=predictor_factory)
+    # ds.attrs["max_sigma"] = max_sigma  # limitation of the helper
 
     optimizer = EagerBoundsSearch(
         estimator,
@@ -1970,17 +2367,17 @@ def _load_emission(ds, target_root, storage_options, chunks):
             raise ValueError(
                 "You must provide either `ds` or `target_root` to load the dataset."
             )
-        emission = xr.open_dataset(
+        emission = open_healpix_zarr(
             f"{target_root}/combined.zarr",
-            engine="zarr",
-            chunks={},
-            inline_array=True,
             storage_options=storage_options,
-        ).chunk(chunks)
+            chunks=chunks,
+        )
     else:
         emission = ds
 
-    return emission.compute()
+    emission = emission.compute()
+    _check_emission_mass(emission)
+    return emission
 
 
 def _compute_predictor_indices(indices: list[list[int]]):
@@ -2033,18 +2430,40 @@ def _build_estimator(emission, target_root, storage_options, ellipsoid=None):
     """
     predictor_index = "predictor_index"
 
-    if "cells" in emission.dims:
-        emission = to_healpix(emission)
-        if ellipsoid is None:
-            info = getattr(emission.dggs, "grid_info", None)
-            ellipsoid = getattr(info, "ellipsoid", None) or emission[
-                "cell_ids"
-            ].attrs.get("ellipsoid")
-
     with fsspec.open(
         f"{target_root}/parameters.json", mode="r", **(storage_options or {})
     ) as f:
         params = json.load(f)
+
+    if not isinstance(params.get("predictor_factory"), dict):
+        raise ValueError(
+            f"{target_root}/parameters.json has no predictor_factory entry; write"
+            " it with create_parameters."
+        )
+    factory_class = str(params["predictor_factory"].get("class"))
+    if "Foscat1DHealpix" in factory_class:
+        raise ValueError(
+            'The predictor "Foscat1DHealpix" (found in the parameters file) has been '
+            'removed together with the foscat dependency. Use "FFTGaussian1DHealpix" '
+            '(conv_method="FFTConv", the default) instead: set conv_method/class_name '
+            "accordingly and edit the parameters file. A sigma fitted with the removed "
+            "predictor may need to be fitted again."
+        )
+    if "OldUpDownGaussian1DHealpix" in factory_class:
+        raise ValueError(
+            'The predictor "OldUpDownGaussian1DHealpix" (found in the parameters file) '
+            "is kept as a class for comparison only and cannot be built from a "
+            'parameters file. Use "UpDownGaussian1DHealpix" (conv_method="LargeHealpixConv") '
+            'or "FFTGaussian1DHealpix" (conv_method="FFTConv") instead.'
+        )
+    # after the checks above, so that a removed predictor is reported first
+    if "cells" in emission.dims:
+        emission = to_healpix(emission)
+        ellipsoid = (
+            grid_ellipsoid(emission)
+            if ellipsoid is None
+            else canonical_ellipsoid(ellipsoid)
+        )
 
     # one sigma value: every time step uses the same predictor
     if len(params["sigma"]) == 1:
@@ -2089,9 +2508,37 @@ def _build_estimator(emission, target_root, storage_options, ellipsoid=None):
     predictor_kwargs = params["predictor_factory"].get("kwargs", {})
     truncate_raw = predictor_kwargs.get("truncate")
     truncate = float(truncate_raw) if truncate_raw is not None else None
+    max_sigma_raw = predictor_kwargs.get("max_sigma")
+    max_sigma = float(max_sigma_raw) if max_sigma_raw not in (None, "None") else None
+
+    def _as_bool(value):
+        return str(value).strip().lower() in ("true", "1")
+
+    normalization = predictor_kwargs.get("normalization") or "full_disc"
+    land_barrier = _as_bool(predictor_kwargs.get("land_barrier", False))
+    # files written before this option existed have no key: they get "conservative"
+    projection = predictor_kwargs.get("projection") or "conservative"
 
     cls_name = params["predictor_factory"]["class"]  # type: str
-    if "Gaussian2DCartesian" in cls_name:
+    if "LargeGaussianHealpixAnalyse" in cls_name:
+        predictor_factory = _get_predictor_factory(
+            emission,
+            truncate=truncate,
+            conv_method="HealpixAnalyseLargeConv",
+            dims=["cells"],
+            ellipsoid=ellipsoid,
+        )
+    elif "GaussianHealpixAnalyse" in cls_name:
+        predictor_factory = _get_predictor_factory(
+            emission,
+            truncate=truncate,
+            conv_method="HealpixAnalyseConv",
+            dims=["cells"],
+            ellipsoid=ellipsoid,
+            normalization=normalization,
+            land_barrier=land_barrier,
+        )
+    elif "Gaussian2DCartesian" in cls_name:
         predictor_factory = _get_predictor_factory(
             emission, truncate=truncate, dims=["x", "y"], ellipsoid=ellipsoid
         )
@@ -2103,19 +2550,21 @@ def _build_estimator(emission, target_root, storage_options, ellipsoid=None):
             dims=["cells"],
             ellipsoid=ellipsoid,
         )
+    elif "FFTGaussian1DHealpix" in cls_name:
+        predictor_factory = _get_predictor_factory(
+            emission,
+            truncate=truncate,
+            conv_method="FFTConv",
+            dims=["cells"],
+            ellipsoid=ellipsoid,
+            max_sigma=max_sigma,
+            projection=projection,
+        )
     elif "Gaussian1DHealpix" in cls_name:
         predictor_factory = _get_predictor_factory(
             emission,
             truncate=truncate,
             conv_method="HealpixConv",
-            dims=["cells"],
-            ellipsoid=ellipsoid,
-        )
-    elif "Foscat1DHealpix" in cls_name:
-        predictor_factory = _get_predictor_factory(
-            emission,
-            truncate=truncate,
-            conv_method="FoscatConv",
             dims=["cells"],
             ellipsoid=ellipsoid,
         )
@@ -2202,7 +2651,7 @@ def compute_states(
         sigma_var = _compute_sigma_var(sigma_indices, params["sigma"])
         states = states.assign(sigma=("time", sigma_var))
 
-    states = _with_dggs_attrs(states)
+    states = with_grid_attrs(states)
 
     if save:
         _save_zarr(states, f"{target_root}/states.zarr", storage_options)
@@ -2279,7 +2728,6 @@ def decode_trajectories(
     estimator, emission, _ = _build_estimator(
         emission, target_root, storage_options, ellipsoid
     )
-    print(emission)
     needs_states = not set(track_modes) <= {"viterbi", "viterbi_healpix"}
     print(needs_states)
     if states is None and needs_states:
@@ -2287,9 +2735,11 @@ def decode_trajectories(
             raise ValueError(
                 "You must provide either `states` or `target_root` to load the states."
             )
-        states = xr.open_zarr(
-            f"{target_root}/states.zarr", storage_options=storage_options
-        ).chunk(chunks)
+        states = open_healpix_zarr(
+            f"{target_root}/states.zarr",
+            storage_options=storage_options,
+            chunks=chunks,
+        )
 
     trajectories = estimator.decode(
         emission,
@@ -2417,22 +2867,16 @@ def open_distributions(
     refinement_level = resampling_info["refinement_level"]
 
     emission = (
-        xr.open_dataset(
+        open_healpix_zarr(
             f"{target_root}/combined.zarr",
-            engine="zarr",
-            chunks=chunks,
-            inline_array=True,
             storage_options=storage_options,
+            chunks=chunks,
         )
         .rename_vars({"pdf": "emission"})
         .drop_vars(["final", "initial"], errors="ignore")
     )
-    states = xr.open_dataset(
-        f"{target_root}/states.zarr",
-        engine="zarr",
-        chunks=chunks,
-        inline_array=True,
-        storage_options=storage_options,
+    states = open_healpix_zarr(
+        f"{target_root}/states.zarr", storage_options=storage_options, chunks=chunks
     ).where(emission["mask"])
 
     data_hp = xr.merge([states, emission.drop_vars(["mask"])])
@@ -2625,7 +3069,11 @@ def render_distributions(
     sliced_data = (
         data.isel(time=time_slice)
         .chunk({"time": 1, "x": -1, "y": -1})
-        .pipe(lambda ds: ds.merge(ds[["longitude", "latitude"]].compute()))
+        .pipe(
+            lambda ds: ds.assign_coords(
+                longitude=ds["longitude"].compute(), latitude=ds["latitude"].compute()
+            )
+        )
     ).pipe(
         filter_by_states
     )  # type: xr.Dataset
@@ -2635,11 +3083,24 @@ def render_distributions(
     )
     sliced_data = sliced_data.chunk({"time": 1, "x": -1, "y": -1})
 
+    if sliced_data.sizes["x"] == 0 or sliced_data.sizes["y"] == 0:
+        raise ValueError(
+            "no grid point with states > 0 to render: the 2D `states` are all zero"
+            f" or NaN (finite values: {int(data['states'].notnull().sum())},"
+            f" sizes {dict(data.sizes)})"
+        )
+
     path_to_frames = Path(frames_dir)
     path_to_frames.mkdir(parents=True, exist_ok=True)
 
     # see pangeo-fish.visualization.render_frame()
     render_frames(ds=sliced_data, **(kwargs | {"frames_dir": frames_dir}))
+    n_frames = len(list(path_to_frames.glob("*.png")))
+    if n_frames == 0:
+        raise RuntimeError(
+            f"no frame was rendered for {sliced_data.sizes['time']} time steps;"
+            " see the messages printed by render_frame above"
+        )
     try:
         video_fp = _render_video(
             frames_fp=[file.resolve() for file in path_to_frames.glob("*.png")],
@@ -2681,19 +3142,17 @@ def multiplot_healpix(
     """
     plots = []
     for ds, variables in datasets:
-        ellipsoid = ds["cell_ids"].attrs.get("ellipsoid")
+        # read from the attributes or, for a decoded dataset, from the xdggs index
+        grid = grid_attrs(ds)
+        if grid is None:
+            raise ValueError("the dataset has no HEALPix grid (cell_ids level)")
         for var_name in variables:
             plot = (
                 ds[var_name]
                 .compute()
-                .dggs.decode(
-                    {
-                        "grid_name": "healpix",
-                        "level": ds["cell_ids"].attrs.get("level"),
-                        "indexing_scheme": "nested",
-                        "ellipsoid": ellipsoid,
-                    }
-                )
+                .drop_indexes("cell_ids", errors="ignore")
+                .dggs.decode(grid)
+                .pipe(for_explore)
                 .dggs.explore(alpha=alpha)
             )
             plots.append(plot)
@@ -2707,7 +3166,8 @@ def multi_map_with_synced_sliders(maps, width="300px", height="400px"):
     Parameters
     ----------
     maps : list
-        List of map objects (must have .map, .sliders['time'], .layout)
+        Maps returned by ``obj.dggs.explore()`` (e.g. from
+        :py:func:`multiplot_healpix`), all with a ``time`` dimension.
     width, height : dimensions applied to each map
 
     Example
@@ -2722,18 +3182,19 @@ def multi_map_with_synced_sliders(maps, width="300px", height="400px"):
         m.layout.width = width
         m.layout.height = height
 
-    # 2. Synchronize all 'time' sliders with each other (each one linked to the first)
-    ref_slider = maps[0].sliders["time"]
-    for m in maps[1:]:
-        ipw.jslink((ref_slider, "value"), (m.sliders["time"], "value"))
+    if all(hasattr(m, "sliders") for m in maps):
+        # xdggs 0.6: one slider widget per dimension
+        ref_slider = maps[0].sliders["time"]
+        for m in maps[1:]:
+            ipw.jslink((ref_slider, "value"), (m.sliders["time"], "value"))
+        return ipw.HBox([ipw.VBox([m.map, m.sliders["time"]]) for m in maps])
 
-    # 3. Build each block (map + slider below it)
-    def map_with_slider_below(m):
-        return ipw.VBox([m.map, m.sliders["time"]])
-
-    blocks = [map_with_slider_below(m) for m in maps]
-
-    return ipw.HBox(blocks)
+    # xdggs 0.7: one widget for all the sliders, inside the map's control panel;
+    # its ``dimension_values`` hold the position of every slider.
+    sliders = [m.control.dimension_sliders for m in maps]
+    for other in sliders[1:]:
+        ipw.jslink((sliders[0], "dimension_values"), (other, "dimension_values"))
+    return ipw.HBox(list(maps))
 
 
 def _find_time_intervals(df: pd.DataFrame, min_time: pd.Timedelta, min_dist: float):
@@ -2972,7 +3433,7 @@ def create_parameters(
     single_behav=True,
     predictor_factory=None,
     predictors=None,
-    class_name="Foscat1DHealpix",
+    class_name="FFTGaussian1DHealpix",
     comment="Custom parameters",
     save_parameters=False,
     storage_options=None,
@@ -2992,6 +3453,13 @@ def create_parameters(
     predictor_indices : array-like of int, optional
         One predictor index per time step, used to build ``sigma_indices``
         when it is not provided.
+    class_name : str, default "FFTGaussian1DHealpix"
+        Define the convolution used by the predictor. It can be:
+        "UpDownGaussian1DHealpix",
+        "Gaussian1DHealpix",
+        "FFTGaussian1DHealpix",
+        "GaussianHealpixAnalyse",
+        "LargeGaussianHealpixAnalyse"
     single_behav : bool, default=True
         Only used when ``sigma_indices`` is None. If False, one list of time
         indices per continuous segment. If True, one list per predictor value.
@@ -3013,13 +3481,26 @@ def create_parameters(
     dict
         Parameters dictionary.
     """
+    if class_name == "Foscat1DHealpix":
+        raise ValueError(
+            'class_name "Foscat1DHealpix" has been removed together with the foscat '
+            'dependency. Use "FFTGaussian1DHealpix" (the default) instead.'
+        )
+    if class_name == "OldUpDownGaussian1DHealpix":
+        raise ValueError(
+            'class_name "OldUpDownGaussian1DHealpix" is kept as a class for comparison '
+            "only and cannot be built from a parameters file. Use "
+            '"UpDownGaussian1DHealpix" or "FFTGaussian1DHealpix" instead.'
+        )
     if class_name not in [
-        "Foscat1DHealpix",
         "UpDownGaussian1DHealpix",
         "Gaussian1DHealpix",
+        "FFTGaussian1DHealpix",
+        "GaussianHealpixAnalyse",
+        "LargeGaussianHealpixAnalyse",
     ]:
         raise ValueError(
-            f'Unknown class_name "{class_name}". Expected "Gaussian1DHealpix", "Foscat1DHealpix" or "UpDownGaussian1DHealpix".'
+            f'Unknown class_name "{class_name}". Expected "Gaussian1DHealpix", "FFTGaussian1DHealpix", "UpDownGaussian1DHealpix", "GaussianHealpixAnalyse" or "LargeGaussianHealpixAnalyse".'
         )
     if predictor_factory is None:
         predictor_factory = {
@@ -3029,6 +3510,11 @@ def create_parameters(
                 "sigma": None,
                 "truncate": 4.0 if class_name == "Gaussian1DHealpix" else None,
                 "kernel_size": None,
+                **(
+                    {"projection": "conservative"}
+                    if class_name == "FFTGaussian1DHealpix"
+                    else {}
+                ),
             },
         }
 
@@ -3087,7 +3573,7 @@ def hand_test_parameter(
     sigma_tested: list = [0.004],
     sigma_indices: list[list[int]] = None,
     single_behav=True,
-    Conv_method: str = "Foscat1DHealpix",
+    Conv_method: str = "FFTGaussian1DHealpix",
     target_root: str = ".",
     saving_root: str = "/hand_sigma",
     default_chunk_dims=None,
@@ -3116,10 +3602,10 @@ def hand_test_parameter(
     single_behav : bool, default=True
         Only used when ``sigma_indices`` is None. If False, one list of time
         indices per continuous segment. If True, one list per predictor value.
-    Conv_method : str, default="Foscat1DHealpix"
+    Conv_method : str, default="FFTGaussian1DHealpix"
         Convolution class name used to build the predictor factory
-        (see `create_parameters`). Expected values are
-        "Gaussian1DHealpix", "Foscat1DHealpix" or "UpDownGaussian1DHealpix".
+        (see `create_parameters` for the accepted names). The default is the
+        class behind ``conv_method="FFTConv"``, the default of `optimize_pdf`.
     target_root : str, default=""
         Root directory where the input `combined.zarr` is read from, and
         under which `saving_root` is created for the outputs.
@@ -3147,13 +3633,11 @@ def hand_test_parameter(
     """
     # Open the distributions
     emission = (
-        xr.open_dataset(
+        open_healpix_zarr(
             f"{target_root}/combined.zarr",
-            engine="zarr",
-            chunks={},
-            inline_array=True,
             storage_options=storage_options,
-        ).chunk(default_chunk_dims or {})
+            chunks=default_chunk_dims,
+        )
         if emission is None
         else emission
     )
@@ -3178,17 +3662,9 @@ def hand_test_parameter(
         storage_options=storage_options,
     )
 
-    # Create a new folder
-    # A rechunked read retains the source store's encoding. For this new store,
-    # derive safe storage chunks from the current Dask layout instead.
-    emission = emission.copy(deep=False)
-    for name in emission.variables:
-        emission[name].encoding.pop("chunks", None)
-    emission.to_zarr(
+    write_healpix_zarr(
+        emission,
         f"{target_root}{saving_root}/combined.zarr",
-        mode="w",
-        consolidated=True,
         storage_options=storage_options,
-        zarr_format=2,
     )
     return params

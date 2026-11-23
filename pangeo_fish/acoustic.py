@@ -7,60 +7,28 @@ import healpix_geo as hpg
 import numpy as np
 import pandas as pd
 import xarray as xr
-from tlz.itertoolz import first
 from xhealpixify.conversions import geographic_to_cartesian
 
 from pangeo_fish import utils
 from pangeo_fish.cf import bounds_to_bins
-from pangeo_fish.healpy import (
-    astronomic_to_cartesian,
-    astronomic_to_cell_ids,
-    geographic_to_astronomic,
-)
-
-# en haut de acoustic.py
-_WGS84_E2 = 0.00669437999014  # excentricité² de WGS84
+from pangeo_fish.dggs import canonical_ellipsoid, grid_ellipsoid
 
 
 def _unit_vector_to_lonlat(vector, ellipsoid):
-    """Cartesian vector -> lon/lat in degrees for a sphere or WGS84."""
-    # xdggs 0.7 resolves names into numeric dictionaries. Retain the existing
-    # conversions, recognizing reference bodies by their parameters, not names.
-    if hasattr(ellipsoid, "to_dict"):
-        ellipsoid = ellipsoid.to_dict()
-    if isinstance(ellipsoid, dict):
-        if "radius" in ellipsoid:
-            ellipsoid = "sphere"
-        else:
-            major = ellipsoid.get("semimajor_axis", ellipsoid.get("semi_major_axis", 0))
-            invf = ellipsoid.get("inverse_flattening", 0)
-            if np.isclose(major, 6378137.0, rtol=0, atol=1e-8) and np.isclose(
-                invf, 298.257223563, rtol=0, atol=1e-10
-            ):
-                ellipsoid = "WGS84"
-    if isinstance(ellipsoid, str) and ellipsoid.lower() == "sphere":
-        # comportement d'origine
-        lon, lat = hpg.cartesian_to_lonlat(
-            vector[0], vector[1], vector[2], ellipsoid=ellipsoid
-        )
-        return float(lon[0]), float(lat[0])
+    """Station unit vector -> (lon, lat) in degrees, for any grid ellipsoid.
 
+    The station vectors are built from the deployment longitude and latitude on
+    the unit sphere (``geographic_to_cartesian``), so their spherical longitude and
+    latitude *are* the station coordinates. They are read back directly; on an
+    ellipsoidal grid the latitude is the geodetic latitude expected by
+    ``healpix_geo`` and must not be converted again.
+    """
+    canonical_ellipsoid(ellipsoid)  # validates the ellipsoid
     x, y, z = (float(v) for v in vector)
-    n = np.sqrt(x * x + y * y + z * z)
-    x, y, z = x / n, y / n, z / n
-    lat_c = np.arcsin(np.clip(z / np.sqrt(x * x + y * y + z * z), -1.0, 1.0))
-    if isinstance(ellipsoid, str) and ellipsoid.lower() == "wgs84":
-        a = 6378137.0
-        e2 = _WGS84_E2
-        scale = a / np.sqrt(x * x + y * y + (1.0 - e2) * z * z)
-        lat = np.degrees(np.arctan(np.tan(lat_c) / (1.0 - _WGS84_E2)))
-        lon, lat = hpg.cartesian_to_lonlat(
-            x * scale, y * scale, z * scale, ellipsoid=ellipsoid
-        )
-        return float(lon[0]), float(lat[0])
-
-    else:
-        raise ValueError(f"unsupported ellipsoid: {ellipsoid!r}")
+    norm = np.sqrt(x * x + y * y + z * z)
+    lon = np.degrees(np.arctan2(y, x))
+    lat = np.degrees(np.arcsin(np.clip(z / norm, -1.0, 1.0)))
+    return float(lon), float(lat)
 
 
 def count_detections(detections, by):
@@ -84,10 +52,15 @@ def count_detections(detections, by):
     xarray.Dataset.groupby
     """
     if "bounds" in getattr(by, "dims", []):
-        if len(by.cf.bounds) != 1:
+        # cf_xarray lists the same bounds variable under every key of its
+        # coordinate (e.g. "time" and, with ``standard_name="time"``, "T").
+        bounds_vars = sorted(
+            {name for names in by.cf.bounds.values() for name in names}
+        )
+        if len(bounds_vars) != 1:
             raise ValueError("cannot find a valid bounds variable")
 
-        bounds_var = first(by.cf.bounds.values())[0]
+        bounds_var = bounds_vars[0]
         bins_var = f"{bounds_var.removesuffix('_bounds')}_bins"
         by = bounds_to_bins(by)[bins_var]
 
@@ -116,32 +89,23 @@ def deployment_reception_masks(
     stations,
     grid,
     buffer_size,
-    method="recompute",
+    method="keep",
     dims=["cells"],
     ellipsoid=None,
 ):
-    if ellipsoid is None:
-        info = getattr(grid.dggs, "grid_info", None)
-        ellipsoid = getattr(info, "ellipsoid", None) or grid["cell_ids"].attrs.get(
-            "ellipsoid"
-        )
+    ellipsoid = (
+        grid_ellipsoid(grid) if ellipsoid is None else canonical_ellipsoid(ellipsoid)
+    )
     rot = {
         "lat": grid["cell_ids"].attrs.get("lat", 0),
         "lon": grid["cell_ids"].attrs.get("lon", 0),
     }
     if method == "recompute":
-        phi, theta = geographic_to_astronomic(
-            lon=grid["longitude"], lat=grid["latitude"], rot=rot
+        # Builds the cell ids on an x/y grid and the station vectors with a
+        # reversed longitude; never used by the workflow, which keeps the ids.
+        raise NotImplementedError(
+            "method='recompute' is not supported on HEALPix cells; use method='keep'"
         )
-
-        cell_ids = astronomic_to_cell_ids(
-            nside=grid.attrs["nside"], theta=theta, phi=phi
-        ).assign_attrs(grid["cell_ids"].attrs)
-
-        phi, theta = geographic_to_astronomic(
-            lon=stations["deploy_longitude"], lat=stations["deploy_latitude"], rot=rot
-        )
-        positions = astronomic_to_cartesian(theta=theta, phi=phi, dim="deployment_id")
     elif method == "keep":
         cell_ids = grid["cell_ids"]
 
@@ -151,6 +115,8 @@ def deployment_reception_masks(
             rot=rot,
             dim="deployment_id",
         )
+    else:
+        raise ValueError(f"unknown method {method!r}: use 'keep'")
 
     if dims == ["cells"]:
         masks = buffer_points_cells(
@@ -180,8 +146,11 @@ def buffer_points_cells(
     intersect=False,
 ):
     """ """
-    if ellipsoid is None:
-        ellipsoid = cell_ids.attrs.get("ellipsoid")
+    ellipsoid = (
+        grid_ellipsoid(cell_ids)
+        if ellipsoid is None
+        else canonical_ellipsoid(ellipsoid)
+    )
 
     def _buffer_masks(
         cell_ids, vector, nside, radius, factor=4, intersect=False, ellipsoid=ellipsoid
@@ -300,14 +269,10 @@ def emission_probability(
 
         - "mask": set the buffer around stations without detections to ``0``.
         - "ignore": all valid pixels are equally probable.
-    cell_ids : {"recompute", "keep"}, default: "keep"
-        How to deal with model cell ids for the computation of reception masks.
-
-    cell_ids : {"recompute", "keep"}, default: "recompute"
+    cell_ids : {"keep"}, default: "keep"
         How to deal with model cell ids for the computation of reception masks:
-
-        - "keep": use the cell ids given by the model. This is the more correct method.
-        - "recompute": recompute the cell ids based on the rotated lat / lon coords.
+        "keep" uses the cell ids of the model grid. "recompute" is not supported
+        on HEALPix cells and raises ``NotImplementedError``.
 
     dims : list of str, default: None
         Dimensions to use: either ["x", "y"] or ["cells"]
@@ -317,11 +282,9 @@ def emission_probability(
     emission : xarray.Dataset
         The resulting emission probability maps.
     """
-    if ellipsoid is None:
-        info = getattr(grid.dggs, "grid_info", None)
-        ellipsoid = getattr(info, "ellipsoid", None) or grid["cell_ids"].attrs.get(
-            "ellipsoid"
-        )
+    ellipsoid = (
+        grid_ellipsoid(grid) if ellipsoid is None else canonical_ellipsoid(ellipsoid)
+    )
     if dims != ["cells"]:
         raise ValueError("dims is not filed right: try 'cells' ")
 

@@ -1,11 +1,13 @@
 import warnings
 
 import healpix_geo.nested as hpg_n
-import healpy as hp
 import numpy as np
 import xarray as xr
 from numba import njit, prange
 from tqdm import tqdm
+
+from pangeo_fish.dggs import canonical_ellipsoid, grid_attrs
+from pangeo_fish.storage import open_healpix_zarr
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
@@ -142,7 +144,12 @@ def compute_healpix_histogram_region_bin_size(
         used_cells,
         dims="cells",
         name="cell_ids",
-        attrs={"grid_name": "healpix", "nside": nside, "nest": nest},
+        attrs={
+            "grid_name": "healpix",
+            "level": int(np.log2(nside)),
+            "indexing_scheme": "nested" if nest else "ring",
+            "ellipsoid": canonical_ellipsoid(ellipsoid),
+        },
     )
 
     ds_out = xr.Dataset(
@@ -152,10 +159,11 @@ def compute_healpix_histogram_region_bin_size(
     # depth_bins: valeur du début du bin en mètres (0, depth_bin_size, 2*depth_bin_size, ...)
     ds_out["depth_bins"] = np.arange(nb_depth_bins) * depth_bin_size
 
-    cell_ids = ds_out.cell_ids.values
-    lon, lat = hp.pix2ang(nside, cell_ids, nest=True, lonlat=True)
+    # Cell centres on the same ellipsoid as the cell ids.
     depth = int(np.log2(nside))
-    lon_2, lat_2 = hpg_n.healpix_to_lonlat(cell_ids, depth, ellipsoid=ellipsoid)
+    lon, lat = hpg_n.healpix_to_lonlat(
+        ds_out.cell_ids.values.astype("uint64"), depth, ellipsoid=ellipsoid
+    )
     ds_out = ds_out.assign_coords(
         {"latitude": ("cells", lat), "longitude": ("cells", lon)}
     )
@@ -249,13 +257,21 @@ def compute_pdf_bathy_batch_numba(ds_chunk, reshaped_tag, copernicus_chunk):
 
 def batch_compute_pdf_bathy(ds_lr, reshaped_tag, target_root: str, batch_size=50000):
     pdf_chunks = []
-    reference = xr.open_dataset(
-        f"{target_root}/diff-regridded.zarr",
-        engine="zarr",
-        chunks={},
-        inline_array=True,
-        storage_options=None,
-    )
+    reference = open_healpix_zarr(f"{target_root}/diff-regridded.zarr")
+    reference_grid = grid_attrs(reference)
+    histogram_grid = grid_attrs(ds_lr)
+    if reference_grid is None:
+        raise ValueError("diff-regridded.zarr has no HEALPix grid (cell_ids level)")
+    if histogram_grid is None:
+        raise ValueError(
+            "the bathymetry histogram has no HEALPix grid attributes; recompute it"
+            " with compute_healpix_histogram_region_bin_size"
+        )
+    if histogram_grid != reference_grid:
+        raise ValueError(
+            "the bathymetry histogram and diff-regridded.zarr use different grids: "
+            f"{histogram_grid} != {reference_grid}"
+        )
     common_ids = np.intersect1d(reference.cell_ids.values, ds_lr.cell_ids.values)
 
     ds_histo_coords = ds_lr.assign_coords(cell_ids=("cells", ds_lr.cell_ids.values))
@@ -290,5 +306,7 @@ def batch_compute_pdf_bathy(ds_lr, reshaped_tag, target_root: str, batch_size=50
     concat_pdf = xr.concat(pdf_chunks, dim="cells")
     pdf_da_func = concat_pdf.to_dataset(name="pdf_bathy")
     pdf_da_func = pdf_da_func.rename_vars({"cells": "cell_ids"})
+    # The bathymetry pdf is on the grid of the reference model.
+    pdf_da_func["cell_ids"].attrs = dict(reference_grid)
 
     return pdf_da_func

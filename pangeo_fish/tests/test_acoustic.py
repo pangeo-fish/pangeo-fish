@@ -138,13 +138,21 @@ def dummy_tag():
     return tag
 
 
+@pytest.mark.parametrize("cf_time", [False, True])
 @pytest.mark.parametrize("detections", [False, True])
-def test_emission_probability(detections, dummy_tag, dummy_grid):
+def test_emission_probability(detections, cf_time, dummy_tag, dummy_grid):
     """
     Test of the ``emission_probability`` function using small datasets (10 time steps).
+
+    ``cf_time``: the grid read back from a workflow store has CF attributes on
+    ``time`` (``standard_name="time"``), so cf_xarray finds its bounds under two keys.
     """
     # Set receiver buffer size to 1000 m
     receiver_buffer = ureg.Quantity(1000, "m")
+    if cf_time:
+        from pangeo_fish.dggs import with_cf_attrs
+
+        dummy_grid = with_cf_attrs(dummy_grid)
 
     dummy_grid.cell_ids.attrs["lat"] = 0
     dummy_grid.cell_ids.attrs["lon"] = 0
@@ -182,3 +190,55 @@ def test_unit_vector_accepts_resolved_ellipsoid(name):
     named = _unit_vector_to_lonlat(vector, name)
     resolved = _unit_vector_to_lonlat(vector, resolve(name))
     np.testing.assert_allclose(resolved, named, rtol=0, atol=1e-12)
+
+
+@pytest.mark.parametrize("ellipsoid", ["sphere", "WGS84"])
+def test_reception_mask_is_centred_on_the_station(ellipsoid):
+    """The station latitude is geodetic: it must not be converted a second time."""
+    import healpix_geo.nested as hgn
+
+    from pangeo_fish.acoustic import deployment_reception_masks
+    from pangeo_fish.helpers import to_healpix
+
+    level = 10
+    lon, lat = np.meshgrid(np.linspace(-5, -4, 60), np.linspace(47.5, 48.6, 60))
+    ids = np.unique(
+        hgn.lonlat_to_healpix(lon.ravel(), lat.ravel(), level, ellipsoid=ellipsoid)
+    ).astype("int64")
+    cell_lon, cell_lat = hgn.healpix_to_lonlat(
+        ids.astype("uint64"), level, ellipsoid=ellipsoid
+    )
+    grid = to_healpix(
+        xr.Dataset(
+            coords={
+                "cell_ids": (
+                    "cells",
+                    ids,
+                    {
+                        "grid_name": "healpix",
+                        "level": level,
+                        "indexing_scheme": "nested",
+                        "ellipsoid": ellipsoid,
+                    },
+                ),
+                "longitude": ("cells", cell_lon),
+                "latitude": ("cells", cell_lat),
+            }
+        )
+    )
+    stations = xr.Dataset(
+        {
+            "deploy_longitude": ("deployment_id", [-4.5]),
+            "deploy_latitude": ("deployment_id", [48.0]),
+        },
+        coords={"deployment_id": ["r1"]},
+    )
+    mask = deployment_reception_masks(
+        stations, grid, ureg.Quantity(2000, "m"), method="keep"
+    ).isel(deployment_id=0)
+    selected = mask.values.astype(bool)
+    station_cell = hgn.lonlat_to_healpix(
+        np.array([-4.5]), np.array([48.0]), level, ellipsoid=ellipsoid
+    )[0]
+    assert station_cell in ids[selected]
+    np.testing.assert_allclose(cell_lat[selected].mean(), 48.0, atol=0.01)

@@ -17,9 +17,8 @@ cuda-toolkit==13.2.2
 dask-hpcconfig==2025.6.0
 dask-image==2026.5.0
 entrypoints==0.4.2
-foscat==2026.6.1
 h3ronpy==0.22.0
-healpix-analyse==2026.11.0
+healpix-analyse==2026.11.1
 healpix-convolution==0.1.2
 healpix-geo==0.5.0
 healpix-plot==2026.7.0
@@ -61,5 +60,6 @@ termcolor==3.3.0
 torch==2.15.0
 triton==3.9.0
 umap-learn==0.6.0
-xdggs==0.6.0
+# The Notebook image runs Python 3.13: pyproject.toml requires xdggs 0.7 there.
+xdggs==0.7.0
 xhealpixify==2025.3.3

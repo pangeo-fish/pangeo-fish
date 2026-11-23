@@ -1,26 +1,72 @@
 # HEALPix Zarr output and Gridlook Preview
 
-HEALPix datasets saved through the workflow helpers and the maintained demos
-carry the [DGGS Zarr v1 convention](https://github.com/zarr-conventions/dggs/blob/v1/README.md).
-The group's `dggs` attribute describes the level, indexing scheme, spatial
-dimension, cell coordinate and numeric reference ellipsoid. `zarr_conventions`
-identifies the versioned convention. The `cell_ids` coordinate also keeps the
-attributes needed by xdggs 0.6/0.7, so it can still be opened with `ds.dggs.decode()`.
+## Metadata: set once, kept, checked when written
 
-`prepare_dggs_zarr(ds)` prepares a dataset for a new store: cells last, one time
-step per chunk and up to 4096 cells per spatial chunk. It preserves the sparse
-cell domain and order used for inference. It clears inherited storage encodings
-before rechunking, so source chunk boundaries and zero-valued fill sentinels do
-not leak into the new store. Non-storage variable attributes are preserved.
-This helper does not write a store. For example:
+A dataset becomes HEALPix when it is regridded
+(`regrid_dataset_hpresample`, the tide and bathymetry regridding). At that point
+it receives its grid description and its CF attributes; the following steps keep
+them, and every store is written by one function that checks and completes them.
+
+**Grid.** The `cell_ids` coordinate carries `grid_name="healpix"`, `level`,
+`indexing_scheme` and `ellipsoid`, the attributes read by xdggs. The ellipsoid is
+kept in one canonical form (`pangeo_fish.dggs.canonical_ellipsoid`): its name for
+a known ellipsoid (`"WGS84"`, `"sphere"`), else a dict of its numeric parameters.
+xdggs 0.7 turns a name into a dict of parameters, and some libraries
+(healpix-analyse) only accept the name; every function reads the ellipsoid
+through `pangeo_fish.dggs.grid_ellipsoid`, which returns the canonical form.
+When a store is written, `cell_ids` keeps only these four attributes: xdggs passes
+every attribute of `cell_ids` to the grid constructor, so any other key (a CF
+`long_name`, or the `lat`/`lon` rotation keys of the acoustic step) would make the
+store undecodable
+([xarray-contrib/xdggs#282](https://github.com/xarray-contrib/xdggs/issues/282)).
+
+**CF.** The variables of the workflow get `long_name` and `units`
+(`pdf`, `states`, `acoustic`, `initial`, `final`: `units="1"`; `latitude`,
+`longitude`: `standard_name` and `degrees_north`/`degrees_east`; ...), and the
+group gets `Conventions="CF-1.11"`. Attributes set upstream are kept (e.g. the
+units of `diff`, taken from the model temperature). See `pangeo_fish.dggs.CF_ATTRS`.
+
+**DGGS Zarr.** The group carries the
+[DGGS Zarr v1 convention](https://github.com/zarr-conventions/dggs/blob/v1/README.md):
+the `dggs` attribute describes the level, indexing scheme, spatial dimension,
+cell coordinate and numeric reference ellipsoid, and `zarr_conventions`
+identifies the versioned convention.
+
+## Writing and reading the workflow stores
 
 ```python
-from pangeo_fish.storage import prepare_dggs_zarr
+from pangeo_fish.storage import open_healpix_zarr, write_healpix_zarr
 
-prepare_dggs_zarr(emission).to_zarr(
-    "combined.zarr", mode="w-", zarr_format=2, consolidated=True
+write_healpix_zarr(
+    emission, f"{target_root}/combined.zarr", storage_options=storage_options
+)
+emission = open_healpix_zarr(
+    f"{target_root}/combined.zarr",
+    storage_options=storage_options,
+    chunks={"time": 1, "cells": -1},
 )
 ```
+
+`write_healpix_zarr` adds the metadata above, puts the cells last, chooses the
+chunks and writes Zarr format 2 with consolidated metadata. The chunks are sized
+from the data, up to 64 MiB (`target_chunk_bytes`): when one map fits, all the
+cells stay in one chunk and several time steps are grouped; otherwise each chunk
+holds one time step and the cells are split into nearly equal chunks (see
+[Choosing a resolution](resolution-and-memory.md)). Inherited storage encodings
+are cleared, so source chunk boundaries and zero-valued fill sentinels do not
+leak into the new store. The sparse cell domain and order used for inference are
+preserved. The workflow helpers (`save=True`) and the demo notebooks write
+through it; the tide stores, written by time blocks, get the same metadata.
+
+`open_healpix_zarr` opens a store with its storage chunks, so each chunk is read
+once, then rechunks to `chunks`. It puts the grid attributes in canonical form,
+so stores written by earlier versions (ellipsoid stored as a dict) give the same
+dataset.
+
+`prepare_dggs_zarr(ds)` is the step before writing (metadata and chunks, no
+write), and `with_dggs_metadata(ds)` the metadata alone. Pass `cell_chunk_size`
+to `prepare_dggs_zarr` to force one time step and a fixed number of cells per
+chunk.
 
 ## Export parent-cell chunks
 

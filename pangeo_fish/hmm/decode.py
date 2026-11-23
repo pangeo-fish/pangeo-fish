@@ -318,6 +318,11 @@ def _angular_distances(cell_ids, disk, level, ellipsoid="sphere"):
     """
     Angular distances (radians) between each cell centre and its neighbourhood.
 
+    The angles are measured on the HEALPix sphere for every ellipsoid. A HEALPix
+    grid on an ellipsoid is the same grid on its authalic sphere, and the forward
+    model (the predictors) applies sigma as an angle on that sphere, so the
+    Viterbi transitions use the same distances.
+
     Parameters
     ----------
     cell_ids : numpy.ndarray of uint64, shape (n,)
@@ -327,44 +332,15 @@ def _angular_distances(cell_ids, disk, level, ellipsoid="sphere"):
         Entries equal to -1 are padding.
     level : int
         HEALPix depth of the cells.
-    ellipsoid : str, default "sphere"
-        Reference ellipsoid.
+    ellipsoid : str or dict, default "sphere"
+        Reference ellipsoid of the grid; it does not change the angles.
 
     Returns
     -------
     numpy.ndarray of float, shape (n, M)
         Distances in radians, NaN where `disk` is padding.
     """
-    valid = disk >= 0
-
-    if ellipsoid == "sphere":
-        return np.asarray(hgn.angular_distances(cell_ids, disk, level))
-
-    # Ellipsoid case: geocentric angle between the centre vectors.
-    # This is not the geodesic distance on the ellipsoid; the difference is
-    # small but grows at high latitude.
-    ids = np.where(valid, disk, 0).astype(np.uint64)
-
-    depth_c = np.full(cell_ids.size, level, dtype=np.uint8)
-    depth_d = np.full(ids.size, level, dtype=np.uint8)
-
-    # centre vectors of the sources, shape (n, 3)
-    pc = np.stack(
-        hgn.healpix_to_cartesian(cell_ids, depth_c, ellipsoid=ellipsoid), axis=-1
-    )
-    # centre vectors of the neighbours, shape (n, M, 3)
-    pd = np.stack(
-        hgn.healpix_to_cartesian(ids.ravel(), depth_d, ellipsoid=ellipsoid), axis=-1
-    ).reshape(ids.shape + (3,))
-
-    nc = np.linalg.norm(pc, axis=-1)  # (n,)
-    nd = np.linalg.norm(pd, axis=-1)  # (n, M)
-    dot = np.einsum("nmk,nk->nm", pd, pc)
-
-    cosang = dot / (nd * nc[:, None])
-    d = np.arccos(np.clip(cosang, -1.0, 1.0))
-
-    return np.where(valid, d, np.nan)
+    return np.asarray(hgn.angular_distances(cell_ids, disk, level))
 
 
 def build_transitions(cell_ids, level, sigmas, truncate=4.0, ellipsoid="sphere"):
@@ -450,9 +426,8 @@ def build_transitions(cell_ids, level, sigmas, truncate=4.0, ellipsoid="sphere")
 
         nbr = np.where(in_dom_s, loc_s, np.arange(n)[:, None])
         logT = np.where(in_dom_s, w_s - logZ[nbr], -np.inf)
-
-        all_nbr.append(nbr)
-        all_logT.append(logT)
+        all_nbr.append(nbr.astype(np.int32))
+        all_logT.append(logT.astype(np.float32))
 
     # Each sigma has a different support radius and hence a different row width.
     # Keep its sparse table intact: stacking requires equal widths and padding
@@ -460,7 +435,7 @@ def build_transitions(cell_ids, level, sigmas, truncate=4.0, ellipsoid="sphere")
     return tuple(all_nbr), tuple(all_logT)
 
 
-def viterbi_healpix(emission, sigmas, truncate=4.0, ellipsoid="sphere", level=None):
+def viterbi_healpix(emission, sigmas, truncate=4.0, ellipsoid=None, level=None):
     """
     Viterbi decoding on a HEALPix grid, with a sigma that may change per time step.
 
@@ -475,16 +450,22 @@ def viterbi_healpix(emission, sigmas, truncate=4.0, ellipsoid="sphere", level=No
         Standard deviations in radians.
     truncate : float, default 4.0
         Truncation radius in units of sigma.
-    ellipsoid : str, default "sphere"
-        Reference ellipsoid.
+    ellipsoid : str or dict, optional
+        Reference ellipsoid. Defaults to the ellipsoid of the grid of
+        ``emission`` (see :py:func:`pangeo_fish.dggs.grid_ellipsoid`), so the
+        track positions are the centres of the grid cells.
 
     Returns
     -------
     xarray.Dataset
         Most probable track, with 'cell_ids', 'longitude' and 'latitude' on time.
     """
+    from pangeo_fish.dggs import canonical_ellipsoid, grid_ellipsoid
+
     if ellipsoid is None:
-        ellipsoid = "sphere"
+        ellipsoid = grid_ellipsoid(emission)
+    else:
+        ellipsoid = canonical_ellipsoid(ellipsoid)
     if level is None:
         level = emission.dggs.grid_info.level
 
@@ -529,17 +510,22 @@ def viterbi_healpix(emission, sigmas, truncate=4.0, ellipsoid="sphere", level=No
     )
     print("fin neighbors")
     rows = np.arange(n)
-    M = np.where(ocean, logE[0], -np.inf)
+    # float64 like the work buffers: np.take(..., out=buf) refuses to cast
+    M = np.where(ocean, logE[0], -np.inf).astype(np.float64, copy=False)
     back = np.zeros((T, n), dtype=np.int32)
 
-    # forward pass
+    bufs = [np.empty(nb.shape, dtype=np.float64) for nb in neighbors]
+
     for t in range(1, T):
         s = sig_idx_u[t]
-        nbr = neighbors[s]
-        cand = M[nbr] + logT[s]  # (n, K): score of each predecessor
-        k = np.argmax(cand, axis=1)
-        best = cand[rows, k]
+        nbr, lt, buf = neighbors[s], logT[s], bufs[s]
+
+        np.take(M, nbr, out=buf, mode="clip")  # buf = M[nbr], sans allocation
+        buf += lt  # buf = M[nbr] + logT, en place
+
+        k = buf.argmax(axis=1)
         back[t] = nbr[rows, k]
+        best = buf[rows, k]
         M = np.where(ocean, best + logE[t], -np.inf)
 
     if not np.isfinite(M).any():
