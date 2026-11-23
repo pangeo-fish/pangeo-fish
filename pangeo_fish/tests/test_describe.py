@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from pangeo_fish.describe import describe_tag
+from pangeo_fish.describe import _records_summary, describe_tag
 from pangeo_fish.pressure_offset import estimate_pressure_offset
 
 RELEASE = pd.Timestamp("2023-05-03 11:07")
@@ -180,3 +180,36 @@ class TestDescribeTag:
         assert description["tagging_events"] == {"times": {}, "positions": {}}
         assert description["comparison"] == {}
         assert "questions" not in description
+
+
+def test_records_summary_drops_missing_times_and_sorts():
+    times = pd.DatetimeIndex(
+        [
+            "2023-05-03 08:05",
+            "2023-05-03 08:00",
+            pd.NaT,
+            "2023-05-03 08:01",
+            "2023-05-03 08:02",
+            "2023-05-03 08:03",
+        ],
+        name="time",
+    )
+    df = pd.DataFrame({"pressure": [5.0, 0.0, 9.0, 1.0, 2.0, 3.0]}, index=times)
+
+    summary = _records_summary(df, gap_factor=1.5)
+
+    assert summary["n_missing_times"] == 1
+    assert summary["n_records"] == 5
+    assert summary["first_record"] == pd.Timestamp("2023-05-03 08:00")
+    assert summary["last_record"] == pd.Timestamp("2023-05-03 08:05")
+    assert summary["duration_days"] == pytest.approx(5 / 1440)
+    assert summary["sampling_interval"] == pd.Timedelta(1, "min")
+    assert summary["n_gaps"] == 1
+    assert summary["longest_gap"] == pd.Timedelta(2, "min")
+
+
+@pytest.mark.parametrize("name", ["start_kwargs", "end_kwargs"])
+@pytest.mark.parametrize("key", ["sensor_ranges", "sensor_range_tolerance"])
+def test_rejects_flag_arguments_in_bounds_kwargs(name, key):
+    with pytest.raises(ValueError, match=f"{name} cannot contain .*{key}"):
+        describe_tag(synthetic_tag(), tide=False, **{name: {key: None}})

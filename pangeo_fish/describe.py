@@ -70,6 +70,9 @@ def _event_positions(events):
 
 
 def _records_summary(df, gap_factor):
+    # records without a time cannot be placed: count them, then ignore them
+    n_missing_times = int(df.index.isna().sum())
+    df = df[df.index.notna()].sort_index()
     times = df.index
     steps = pd.Series(times[1:] - times[:-1])
     interval = steps.median() if len(steps) else None
@@ -78,6 +81,7 @@ def _records_summary(df, gap_factor):
         "first_record": times[0] if len(times) else None,
         "last_record": times[-1] if len(times) else None,
         "n_records": int(len(df)),
+        "n_missing_times": n_missing_times,
         "duration_days": (
             float((times[-1] - times[0]) / pd.Timedelta(1, "D")) if len(times) else 0.0
         ),
@@ -205,7 +209,9 @@ def describe_tag(
         a lost tag on the seabed records the tide).
     start_kwargs, end_kwargs : dict, optional
         Parameters of :py:func:`pangeo_fish.track_bounds.detect_start_of_track` and
-        :py:func:`pangeo_fish.track_bounds.detect_end_of_track`.
+        :py:func:`pangeo_fish.track_bounds.detect_end_of_track`. They cannot
+        contain ``sensor_ranges`` or ``sensor_range_tolerance``, which are
+        arguments of :py:func:`describe_tag` (a ``ValueError`` is raised).
     offset_kwargs : dict, optional
         Parameters of :py:func:`pangeo_fish.pressure_offset.estimate_pressure_offset`.
 
@@ -248,6 +254,13 @@ def describe_tag(
         "sensor_ranges": sensor_ranges,
         "sensor_range_tolerance": sensor_range_tolerance,
     }
+    for name, kwargs in [("start_kwargs", start_kwargs), ("end_kwargs", end_kwargs)]:
+        clash = sorted(set(flag_kwargs) & set(kwargs or {}))
+        if clash:
+            raise ValueError(
+                f"{name} cannot contain {clash}: pass them as arguments of"
+                " describe_tag, which uses them for all the checks"
+            )
     start = detect_start_of_track(records, **flag_kwargs, **(start_kwargs or {}))
     start_time = start["start"]
     end = detect_end_of_track(
