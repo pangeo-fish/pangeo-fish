@@ -196,3 +196,17 @@ def test_updown_predictor_without_ellipsoid_uses_a_sphere(sample_dataset):
     assert predictor.ellipsoid == "sphere"
     state = sample_dataset["initial"].values
     np.testing.assert_allclose(predictor.predict(state).sum(), 1.0, rtol=1e-3)
+
+
+@pytest.mark.parametrize("factory", [None, "missing"])
+def test_parameters_file_without_predictor_factory(tmp_path, factory):
+    import json
+
+    from pangeo_fish.helpers import _build_estimator
+
+    params = {"sigma": [0.0004]}
+    if factory is None:
+        params["predictor_factory"] = None
+    (tmp_path / "parameters.json").write_text(json.dumps(params))
+    with pytest.raises(ValueError, match="no predictor_factory"):
+        _build_estimator(xr.Dataset(), str(tmp_path), None)

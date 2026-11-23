@@ -647,7 +647,7 @@ class FFTGaussian1DHealpix(Predictor):
         np_dtype = np.float64 if self.dtype == torch.float64 else np.float32
         if self.ellipsoid is None:
             attrs = getattr(self.cell_ids, "attrs", {})
-            self.ellipsoid = attrs.get("ellipsoid", "sphere")
+            self.ellipsoid = attrs.get("ellipsoid") or "sphere"
 
         # Projected pixel size, passed explicitly to LocalFFT so that the
         # radians -> pixels conversion is exact in the projected plane.

@@ -2285,7 +2285,12 @@ def _build_estimator(emission, target_root, storage_options, ellipsoid=None):
     ) as f:
         params = json.load(f)
 
-    factory_class = str((params.get("predictor_factory") or {}).get("class"))
+    if not isinstance(params.get("predictor_factory"), dict):
+        raise ValueError(
+            f"{target_root}/parameters.json has no predictor_factory entry; write"
+            " it with create_parameters."
+        )
+    factory_class = str(params["predictor_factory"].get("class"))
     if "Foscat1DHealpix" in factory_class:
         raise ValueError(
             'The predictor "Foscat1DHealpix" (found in the parameters file) has been '
