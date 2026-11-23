@@ -204,3 +204,66 @@ class TestDetectEndOfTrack:
 
         assert received["max_gap"] == "10min"
         assert received["level_change_threshold"] == 0.8
+
+
+def _track_bounds_warnings(function, ds, **kwargs):
+    import warnings
+
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        function(ds, **kwargs)
+    return [str(w.message) for w in record if "track_bounds:" in str(w.message)]
+
+
+@pytest.mark.parametrize("step", [1, 10])
+@pytest.mark.parametrize("end", ["stranded", "seabed", "none"])
+@pytest.mark.parametrize(
+    "function",
+    [track_bounds.detect_start_of_track, track_bounds.detect_end_of_track],
+)
+def test_no_warning_for_clean_records(function, end, step):
+    ds = synthetic_tag(end=end).isel(time=slice(None, None, step))
+
+    assert _track_bounds_warnings(function, ds) == []
+
+
+@pytest.mark.parametrize(
+    "function",
+    [track_bounds.detect_start_of_track, track_bounds.detect_end_of_track],
+)
+def test_warns_when_sampling_is_too_coarse_for_the_window(function):
+    ds = synthetic_tag().isel(time=slice(None, None, 30))
+
+    with pytest.warns(UserWarning, match=r"sampling interval \(0 days 00:30:00\).*1h"):
+        function(ds)
+    # a longer window is fine
+    assert _track_bounds_warnings(function, ds, window="3h") == []
+
+
+def _noisy_rest_tag(noise):
+    ds = synthetic_tag(end="seabed")
+    rng = np.random.default_rng(1)
+    rest = ds["time"].to_numpy() >= np.datetime64(STRANDED)
+    ds["pressure"].values[rest] += rng.normal(0, noise, rest.sum())
+    return ds
+
+
+@pytest.mark.parametrize(
+    "function",
+    [track_bounds.detect_start_of_track, track_bounds.detect_end_of_track],
+)
+def test_warns_when_noise_is_above_the_activity_threshold(function):
+    ds = _noisy_rest_tag(0.3)
+
+    with pytest.warns(UserWarning, match=r"activity_threshold = 0\.1 m"):
+        function(ds)
+    # raising the threshold above the noise silences it
+    assert _track_bounds_warnings(function, ds, activity_threshold=1.0) == []
+
+
+def test_end_without_start_warns_once():
+    ds = _noisy_rest_tag(0.3)
+
+    messages = _track_bounds_warnings(track_bounds.detect_end_of_track, ds)
+
+    assert len(messages) == 1

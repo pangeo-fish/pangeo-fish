@@ -18,6 +18,8 @@ and temperatures outside the plausible water range are also used.
 suggestions.
 """
 
+import warnings
+
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -72,6 +74,45 @@ def _pressure_activity(pressure, window):
     median = pressure.rolling(window, center=True, min_periods=1).median()
     deviation = (pressure - median).abs()
     return deviation.rolling(window, center=True, min_periods=1).mean()
+
+
+def _warn_if_undetectable(df, activity, *, window, activity_threshold, stacklevel=3):
+    """Warn when the sampling or the noise of the record defeats the activity criterion.
+
+    Detection itself is not changed.
+    """
+    interval = df.index.to_series().diff().median()
+    if pd.notna(interval) and interval > _timedelta(window) / 3:
+        warnings.warn(
+            f"track_bounds: the median sampling interval ({interval}) is longer"
+            f" than a third of the activity window ({window}): the activity is"
+            " computed from too few records per window and the start and the end"
+            " of the track cannot be detected. Use a longer `window`.",
+            UserWarning,
+            stacklevel=stacklevel,
+        )
+
+    activity = activity.dropna()
+    if len(activity):
+        # The quietest tenth of the record shows the sensor noise when the tag
+        # has quiet periods (in the air, stranded, on the seabed). A fish that
+        # is active throughout has no quiet level: its quietest tenth is not far
+        # below its usual activity, so only a quiet level well below the active
+        # one (a quarter of its 90th percentile) is taken as noise.
+        n_quiet = max(1, len(activity) // 10)
+        noise = float(activity.nsmallest(n_quiet).median())
+        active = float(activity.quantile(0.9))
+        if activity_threshold < noise < 0.25 * active:
+            warnings.warn(
+                f"track_bounds: the vertical activity of the quietest tenth of the"
+                f" record is {noise:.2g} m (median), above activity_threshold ="
+                f" {activity_threshold:g} m, while the usual activity is about"
+                f" {active:.2g} m: periods without movement are not flagged"
+                " inactive, so the start and the end of the track may be missed."
+                " Raise `activity_threshold` above the noise of the record.",
+                UserWarning,
+                stacklevel=stacklevel,
+            )
 
 
 def _flags(
@@ -265,6 +306,16 @@ def detect_start_of_track(
         ``pre_release_level``: median pressure (m) of that period (an estimate of
         the in-air reading, see the pressure offset); ``reason`` and
         ``parameters``.
+
+    Warns
+    -----
+    UserWarning
+        If the median sampling interval is longer than a third of ``window``
+        (the activity is computed from too few records), or if the quietest
+        tenth of the record is noisier than ``activity_threshold`` while the
+        usual activity is much higher (periods without movement are then not
+        flagged inactive: raise ``activity_threshold``). The detection itself is
+        not changed.
     """
     df, attrs = _to_frame(tag_log)
     parameters = _parameters(
@@ -294,6 +345,9 @@ def detect_start_of_track(
         sensor_ranges=sensor_ranges,
         sensor_range_tolerance=sensor_range_tolerance,
         temperature_range=temperature_range,
+    )
+    _warn_if_undetectable(
+        df, flags["activity"], window=window, activity_threshold=activity_threshold
     )
     active_runs = [
         (first, last)
@@ -415,6 +469,16 @@ def detect_end_of_track(
         - ``"no_vertical_movement"``: otherwise (fish dead or resting on the
           bottom, tag lost or stranded in water).
 
+    Warns
+    -----
+    UserWarning
+        If the median sampling interval is longer than a third of ``window``
+        (the activity is computed from too few records), or if the quietest
+        tenth of the record is noisier than ``activity_threshold`` while the
+        usual activity is much higher (periods without movement are then not
+        flagged inactive: raise ``activity_threshold``). The detection itself is
+        not changed.
+
     Examples
     --------
     >>> tag = pangeo_fish.io.open_tag(tag_root, "A19845")
@@ -453,18 +517,24 @@ def detect_end_of_track(
         temperature_range=temperature_range,
     )
     if start is None:
-        start = detect_start_of_track(
-            df.to_xarray().assign_attrs(attrs),
-            max_gap=max_gap,
-            level_change_threshold=level_change_threshold,
-            **flag_kwargs,
-        )["start"]
+        with warnings.catch_warnings():
+            # the warnings of this call are emitted once, below
+            warnings.filterwarnings("ignore", message="track_bounds:")
+            start = detect_start_of_track(
+                df.to_xarray().assign_attrs(attrs),
+                max_gap=max_gap,
+                level_change_threshold=level_change_threshold,
+                **flag_kwargs,
+            )["start"]
         if start is None:
             start = df.index[0]
     start = _timestamp(start)
     parameters["start"] = start
 
     flags = _flags(df, attrs, **flag_kwargs)
+    _warn_if_undetectable(
+        df, flags["activity"], window=window, activity_threshold=activity_threshold
+    )
     last_record = df.index[-1]
     candidates = [
         (first, last)
