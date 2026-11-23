@@ -145,6 +145,7 @@ with the legacy method.
    latlon_constants_from_tmd
    latlon_constants_from_amplitude_phase
    constants_to_healpix
+   fes2022b_constants_to_healpix
 
 
 Tag/time Operations

@@ -93,6 +93,13 @@ vertical coordinate has not been checked against their documentation.
   requested period (for example a rolling hourly dataset that no longer goes back
   far enough), the model is cut to the period it covers and a `UserWarning` is
   issued.
+- **Area not covered by the 3D temperature:** a 3D product can cover a smaller
+  area than its bathymetry and sea surface height. The IBI hourly 3D product, for
+  example, stops near 51.5° N, 3.1° E and does not cover the Western Scheldt
+  (checked 2026-11-23); the IBI reanalysis and the North-West Shelf model do.
+  If no sea cell of the requested area has a temperature, the loader raises a
+  `ValueError`; if only some have none, it issues a `UserWarning` with the
+  extent that has data.
 - **Global 6-hourly model:**
   - There is no 6-hourly sea surface height. `zos` is read from the hourly-mean
     2D dataset (stamped on the hour) and sampled at 00, 06, 12 and 18 UTC.

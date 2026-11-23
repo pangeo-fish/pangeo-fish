@@ -677,6 +677,49 @@ def _warn_if_period_clipped(dataset_id, times, start_datetime, end_datetime):
         )
 
 
+def _check_temperature_coverage(model, dataset_id):
+    """Fail or warn when sea cells of the requested area have no temperature.
+
+    Some 3D products cover a smaller area than their static fields and sea
+    surface height (the IBI hourly 3D product stops near 51.5° N, 3.1° E, before
+    the Western Scheldt). The bathymetry then marks sea cells whose ``TEMP`` is
+    NaN, and every later step would silently get no data there. Coverage does
+    not change with time, so the first time step of the top level is checked.
+    """
+    if "time" not in model["TEMP"].dims or not model.sizes["time"]:
+        return
+    sea = model["H0"].notnull()
+    temp = model["TEMP"].isel(time=0, depth=0).notnull()
+    counts = xr.Dataset(
+        {
+            "sea": sea.sum(),
+            "temp": (temp & sea).sum(),
+            "missing": (sea & ~temp).sum(),
+            "lat_covered": (temp & sea).any("lon"),
+            "lon_covered": (temp & sea).any("lat"),
+        }
+    ).compute()
+    n_sea, n_temp, n_missing = (int(counts[k]) for k in ["sea", "temp", "missing"])
+    if n_sea == 0 or n_missing == 0:
+        return
+    if n_temp == 0:
+        raise ValueError(
+            f"Copernicus dataset {dataset_id!r} has no temperature in the requested"
+            f" area ({n_sea} sea cells, all NaN): the 3D product does not cover it."
+            " Choose a product that covers the area, see the Copernicus model"
+            " documentation (copernicus-models)."
+        )
+    lat = counts["lat"].values[counts["lat_covered"].values]
+    lon = counts["lon"].values[counts["lon_covered"].values]
+    extent = f"lat {lat.min():.2f} to {lat.max():.2f}, lon {lon.min():.2f} to {lon.max():.2f}"
+    warnings.warn(
+        f"Copernicus dataset {dataset_id!r} has no temperature in {n_missing} of"
+        f" {n_sea} sea cells of the requested area; the cells with temperature lie"
+        f" within {extent}. The 3D product may not cover the whole area.",
+        category=UserWarning,
+    )
+
+
 def _sample_ssh_at_times(temperature, ssh, dataset_id):
     """Restrict both fields to their common period and match exact timestamps."""
     index = ssh.get_index("time")
@@ -833,9 +876,11 @@ def _open_copernicus_model(
     datasets.append(_align_copernicus_coordinates(temperature, static, static_id))
     ds_all = xr.merge(datasets, compat="no_conflicts", join="exact")
     ds_all = ds_all.rename({"latitude": "lat", "longitude": "lon"})
-    return _set_dynamic_depth(
+    model = _set_dynamic_depth(
         prepare_dataset(ds_all), _vertical_coordinate(temperature_id)
     )
+    _check_temperature_coverage(model, temperature_id)
+    return model
 
 
 def _open_parquet_model(parquet_url: str, remote_options=None):
