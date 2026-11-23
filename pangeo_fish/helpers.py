@@ -1829,6 +1829,47 @@ def _blocked_cells(ds: xr.Dataset):
     return np.asarray(ds["cell_ids"].values)[~ocean]
 
 
+# conv_method values whose predictor uses numpy / scipy instead of PyTorch
+_CPU_ONLY_CONV_METHODS = ("HealpixConv", "HealpixAnalyseConv")
+
+
+def _check_device(device, conv_method: str | None = None) -> None:
+    """Refuse a ``device`` that cannot run ``conv_method``, with an actionable message.
+
+    ``device`` is anything ``torch.device`` accepts ("cpu", "cuda", "cuda:1",
+    a ``torch.device``...). With ``conv_method=None`` only the device itself is
+    checked (used before the method is read from ``parameters.json``).
+    """
+    try:
+        resolved = torch.device(device)
+    except (RuntimeError, TypeError) as err:
+        raise ValueError(
+            f'Unknown device {device!r}. Use "cpu" or "cuda" (or "cuda:<index>").'
+        ) from err
+    if resolved.type == "cpu":
+        return
+    if conv_method in _CPU_ONLY_CONV_METHODS:
+        raise ValueError(
+            f'conv_method="{conv_method}" runs on the CPU only (numpy/scipy), so '
+            f'device={device!r} cannot be used. Use device="cpu", or one of the '
+            'PyTorch methods: "FFTConv", "LargeHealpixConv" or '
+            '"HealpixAnalyseLargeConv".'
+        )
+    if resolved.type == "cuda":
+        if not torch.cuda.is_available():
+            raise RuntimeError(
+                f"device={device!r} was requested, but PyTorch sees no CUDA device "
+                f"(torch {torch.__version__}, built for CUDA: {torch.version.cuda}). "
+                "Install the CUDA build of PyTorch (see the installation guide), "
+                'or use device="cpu".'
+            )
+        if resolved.index is not None and resolved.index >= torch.cuda.device_count():
+            raise RuntimeError(
+                f"device={device!r} was requested, but PyTorch sees only "
+                f"{torch.cuda.device_count()} CUDA device(s)."
+            )
+
+
 def _get_predictor_factory(
     ds: xr.Dataset,
     truncate: float | None,
@@ -1845,6 +1886,7 @@ def _get_predictor_factory(
         raise ValueError("dims must be ['cells'], ['x','y'] is not used anymore")
 
     elif dims == ["cells"]:
+        _check_device(device, conv_method)
         if ellipsoid is None:
             ellipsoid = ds["cell_ids"].attrs.get("ellipsoid")
         if conv_method == "HealpixConv":
@@ -2074,6 +2116,7 @@ def optimize_pdf(
     normalization: str = "full_disc",
     land_barrier: bool = False,
     projection: str = "conservative",
+    device: str = "cpu",
     **kwargs,
 ) -> dict:
     """Optimize a temporal probability distribution.
@@ -2111,6 +2154,13 @@ def optimize_pdf(
          are passed as blocked cells.
      projection : {"conservative", "average"}, default "conservative"
          Only for conv_method="FFTConv".
+     device : str or torch.device, default "cpu"
+         Device that runs the convolution, e.g. ``"cuda"`` for a GPU (this needs
+         the CUDA build of PyTorch). Only the PyTorch methods can use a GPU:
+         ``"FFTConv"``, ``"LargeHealpixConv"`` and ``"HealpixAnalyseLargeConv"``.
+         ``"HealpixConv"`` and ``"HealpixAnalyseConv"`` run on the CPU only and
+         raise a ValueError for another device. The predictions are returned as
+         numpy arrays on the CPU whatever the device.
      final : bool, default: False
          If True, optimize sigma by matching the predicted final state to the
          observed final position (``score_final_pos``) instead of the standard
@@ -2140,6 +2190,9 @@ def optimize_pdf(
          A dictionary containing the optimization results (mainly, the sigma value of the Brownian movement model)
     """
     predictor_index = "predictor_index"
+
+    # before loading the emission: a wrong device should fail at once
+    _check_device(device, conv_method)
 
     if final and predictor_index in ds:
         raise NotImplementedError(
@@ -2198,6 +2251,7 @@ def optimize_pdf(
         normalization=normalization,
         land_barrier=land_barrier,
         projection=projection,
+        device=device,
     )
 
     estimator = EagerEstimator(sigma=None, predictor_factory=predictor_factory)
@@ -2322,7 +2376,9 @@ def _compute_predictor_indices(indices: list[list[int]]):
     return np.array(acc).astype(np.int32)
 
 
-def _build_estimator(emission, target_root, storage_options, ellipsoid=None):
+def _build_estimator(
+    emission, target_root, storage_options, ellipsoid=None, device="cpu"
+):
     """Build the ``EagerEstimator`` from ``parameters.json`` and the emission.
 
     Converts the emission to HEALPix if needed, makes sure the
@@ -2339,6 +2395,9 @@ def _build_estimator(emission, target_root, storage_options, ellipsoid=None):
         Additional information for ``fsspec`` to open ``parameters.json``.
     ellipsoid : optional
         Ellipsoid used by the HEALPix grid. Inferred from the emission if None.
+    device : str or torch.device, default "cpu"
+        Device that runs the convolution. The ``device`` recorded in
+        ``parameters.json`` is not used.
 
     Returns
     -------
@@ -2456,6 +2515,7 @@ def _build_estimator(emission, target_root, storage_options, ellipsoid=None):
             conv_method="HealpixAnalyseLargeConv",
             dims=["cells"],
             ellipsoid=ellipsoid,
+            device=device,
         )
     elif "GaussianHealpixAnalyse" in cls_name:
         predictor_factory = _get_predictor_factory(
@@ -2464,6 +2524,7 @@ def _build_estimator(emission, target_root, storage_options, ellipsoid=None):
             conv_method="HealpixAnalyseConv",
             dims=["cells"],
             ellipsoid=ellipsoid,
+            device=device,
             normalization=normalization,
             land_barrier=land_barrier,
         )
@@ -2478,6 +2539,7 @@ def _build_estimator(emission, target_root, storage_options, ellipsoid=None):
             conv_method="LargeHealpixConv",
             dims=["cells"],
             ellipsoid=ellipsoid,
+            device=device,
         )
     elif "FFTGaussian1DHealpix" in cls_name:
         predictor_factory = _get_predictor_factory(
@@ -2486,6 +2548,7 @@ def _build_estimator(emission, target_root, storage_options, ellipsoid=None):
             conv_method="FFTConv",
             dims=["cells"],
             ellipsoid=ellipsoid,
+            device=device,
             max_sigma=max_sigma,
             projection=projection,
         )
@@ -2496,6 +2559,7 @@ def _build_estimator(emission, target_root, storage_options, ellipsoid=None):
             conv_method="HealpixConv",
             dims=["cells"],
             ellipsoid=ellipsoid,
+            device=device,
         )
     else:
         raise RuntimeError("Could not infer predictor's class from the `.json` file.")
@@ -2514,6 +2578,7 @@ def compute_states(
     chunks,
     ellipsoid=None,
     save=True,
+    device="cpu",
     **kwargs,
 ):
     """Compute the positional temporal probabilities (states) of the fish.
@@ -2545,6 +2610,11 @@ def compute_states(
         Ellipsoid used by the HEALPix grid. Inferred from the emission if None.
     save : bool, default: True
         Whether to save the ``states`` distribution under ``states.zarr``.
+    device : str or torch.device, default: "cpu"
+        Device that runs the convolution, e.g. ``"cuda"`` for a GPU; see
+        `optimize_pdf`. It does not have to be the device used by
+        `optimize_pdf`: the ``device`` recorded in ``parameters.json`` is not
+        used. The states are returned on the CPU.
 
     Returns
     -------
@@ -2557,9 +2627,10 @@ def compute_states(
     decode_trajectories
     pangeo_fish.hmm.estimator.EagerEstimator.predict_proba
     """
+    _check_device(device)  # before loading the emission
     emission = _load_emission(ds, target_root, storage_options, chunks)
     estimator, emission, params = _build_estimator(
-        emission, target_root, storage_options, ellipsoid
+        emission, target_root, storage_options, ellipsoid, device=device
     )
 
     states = estimator.predict_proba(emission)  # type: xr.DataArray
@@ -2599,6 +2670,7 @@ def decode_trajectories(
     ellipsoid=None,
     additional_track_quantities=["speed", "distance"],
     save=True,
+    device="cpu",
     **kwargs,
 ):
     """Decode the trajectories from the states of the fish.
@@ -2633,6 +2705,9 @@ def decode_trajectories(
         Additional quantities to compute from the decoded tracks.
     save : bool, default: True
         Whether to save the trajectories under ``trajectories.parq``.
+    device : str or torch.device, default: "cpu"
+        Device that runs the convolution of the estimator, e.g. ``"cuda"``;
+        see `compute_states`.
 
     Returns
     -------
@@ -2653,9 +2728,10 @@ def decode_trajectories(
 
     from pangeo_fish import tracks
 
+    _check_device(device)  # before loading the emission
     emission = _load_emission(ds, target_root, storage_options, chunks)
     estimator, emission, _ = _build_estimator(
-        emission, target_root, storage_options, ellipsoid
+        emission, target_root, storage_options, ellipsoid, device=device
     )
     needs_states = not set(track_modes) <= {"viterbi", "viterbi_healpix"}
     print(needs_states)
