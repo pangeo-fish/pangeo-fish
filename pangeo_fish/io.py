@@ -365,8 +365,8 @@ def open_copernicus_zarr(
     """
     Retrieve Copernicus Marine data in zarr format.
 
-    .. deprecated::
-        ``open_copernicus_zarr`` is deprecated and will be removed. It relies on
+    .. warning::
+        **Deprecated.** ``open_copernicus_zarr`` will be removed. It relies on
         an external STAC catalogue that no longer answers and on retired,
         versioned dataset IDs (for example ``_202309`` and ``_202211``). Use
         :py:func:`pangeo_fish.helpers.load_model` with ``uri=None`` and a
