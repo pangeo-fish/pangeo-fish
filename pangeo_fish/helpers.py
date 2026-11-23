@@ -1108,6 +1108,31 @@ def regrid_dataset_hpresample(
     mask_threshold=0.5,
     **kwargs,
 ):
+    """Regrid a model dataset to HEALPix cells with healpix-resample.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        Dataset on the model grid, with ``longitude``, ``latitude`` and
+        ``ocean_mask`` (1 or True for sea, 0 or False for land).
+    refinement_level : int
+        HEALPix refinement level of the output.
+    mask_threshold : float, default: 0.5
+        Land/sea separation on the HEALPix grid. The ocean mask is interpolated
+        to each HEALPix cell, which gives a value between 0 and 1 near the coast
+        (roughly the share of sea around the cell). A cell is kept as sea when
+        this value is at least ``mask_threshold``; the other cells are land and
+        get no data. ``0`` keeps every cell that touches the sea at all, ``0.5``
+        the cells that are at least about half sea, ``1`` only the cells
+        surrounded by sea points. A cell with no sea around it is always land.
+
+    Returns
+    -------
+    regridded : xarray.Dataset
+        The dataset on the HEALPix cells, with its ``ocean_mask``.
+    resampling_info : dict
+        Metadata of the regridding.
+    """
     nside = 2**refinement_level
 
     lon = ds.longitude.values.ravel().astype("float64")
