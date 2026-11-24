@@ -112,9 +112,17 @@ How the likelihoods differ
        the minimum number of valid hourly means for a day to contribute.
 
 The HEALPix likelihood assumes the tag is lying still on the seabed during the
-selected intervals. The demo uses the existing tide-detection flag to identify
-candidate intervals. Check that assumption when adapting the method to another
-tag. Days with too few valid hourly means get uniform weight over the cells
+selected intervals. The demo uses the tide-detection flag to identify
+candidate intervals. :func:`pangeo_fish.tide.detect_tide` slides a window of
+25 h (about two M2 cycles; never shorter than 12.42 h) along the pressure record.
+In each window it removes a linear trend, fits an M2 harmonic, and flags the
+window when the R² on the detrended series is above 0.85, the residual RMS is
+below 0.42 m and the amplitude lies between 0.6 and 5 m. Each flag is stored at
+the centre of its window, so the first and last 12.5 h have no flag. Ascents,
+descents and diel vertical migration are not flagged. The ``behav_found``
+variable is the same fit with relaxed thresholds, not a separate behaviour
+classifier. Check the assumption of a still tag when adapting the method to
+another tag. Days with too few valid hourly means get uniform weight over the cells
 with usable harmonic constants.
 
 Comparing the outputs

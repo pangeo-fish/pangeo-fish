@@ -16,96 +16,188 @@ from pangeo_fish.storage import write_time_blocks
 #####################################################################
 
 
-def lssinfit(time, depth):
-    """
-    Fit a simple sinusoidal model on depth measure.
-    Return rmse, rsquare, amplitude.
-    """
+M2_PERIOD_H = 12.42  # h, principal lunar semi-diurnal tide
+DEFAULT_TIDE_WINDOW_H = 25.0  # h, about two M2 cycles
+MAX_TIDE_AMPLITUDE_M = 5.0  # m, largest plausible M2 amplitude in pressure
 
-    depth_smoothed = savgol_filter(depth, window_length=15, polyorder=2, mode="mirror")
 
-    w = 2 * np.pi / (12.42 / 24)  # tide frequency (rad/day)
-    X = np.column_stack([np.ones_like(time), np.sin(w * time), np.cos(w * time)])
-    coef, _, _, _ = lstsq(X, depth_smoothed, rcond=None)
-    fitted = X @ coef
-    residuals = depth_smoothed - fitted
+def lssinfit(time, depth, periods_h=(M2_PERIOD_H,), trend_order=1):
+    """Fit a tidal harmonic model on a window of depth measurements.
+
+    A polynomial trend of order ``trend_order`` (in time) is fitted together with a
+    sine and a cosine at each period of ``periods_h``. The trend takes care of the
+    low-frequency part of the record (ascents, descents, slow drifts), so that only
+    what the polynomial cannot explain is attributed to the tide.
+
+    Parameters
+    ----------
+    time : array-like
+        Time in days.
+    depth : array-like
+        Depth (m) measured at ``time``. Non-finite values are ignored.
+    periods_h : sequence of float, optional
+        Tidal periods (h). Default: M2 (12.42 h) only. M2 and S2 cannot be separated
+        in a window shorter than about 15 days, so S2 is left to the residuals.
+    trend_order : int, optional
+        Order of the polynomial trend removed before assessing the fit. Default: 1 (linear; a quadratic trend starts to absorb diel migration).
+
+    Returns
+    -------
+    rmse : float
+        Root mean square of the residuals of the full fit (m).
+    rsq : float
+        R² of the harmonic part, computed on the detrended series: share of the
+        variance left by the trend that the harmonics explain.
+    amplitude : float
+        Amplitude (m) of the first period.
+        All values are NaN if the window has too few valid samples.
+    """
+    time = np.asarray(time, dtype=float)
+    depth = np.asarray(depth, dtype=float)
+    ok = np.isfinite(time) & np.isfinite(depth)
+    n_par = trend_order + 1 + 2 * len(periods_h)
+    if ok.sum() <= n_par:
+        return np.nan, np.nan, np.nan
+    t = time[ok]
+    y = depth[ok]
+    # centred and scaled time (-1..1) keeps the polynomial well conditioned
+    span = np.ptp(t)
+    x = (t - t.mean()) / (span / 2) if span > 0 else np.zeros_like(t)
+    poly = np.column_stack([x**k for k in range(trend_order + 1)])
+    cols = []
+    for period in periods_h:
+        w = 2 * np.pi / (period / 24)  # rad/day
+        cols += [np.sin(w * t), np.cos(w * t)]
+    X = np.column_stack([poly, *cols])
+
+    coef, _, _, _ = lstsq(X, y, rcond=None)
+    residuals = y - X @ coef
+    coef_trend, _, _, _ = lstsq(poly, y, rcond=None)
+    detrended = y - poly @ coef_trend
 
     ss_res = np.sum(residuals**2)
-    ss_tot = np.sum((depth - np.mean(depth)) ** 2)
+    ss_tot = np.sum(detrended**2)
     rsq = 1 - ss_res / ss_tot if ss_tot > 0 else np.nan
     rmse = np.sqrt(np.mean(residuals**2))
-    amplitude = np.sqrt(coef[1] ** 2 + coef[2] ** 2)
-    return rmse, rsq, amplitude  # , depth_smoothed
+    amplitude = np.hypot(coef[trend_order + 1], coef[trend_order + 2])
+    return rmse, rsq, amplitude
+
+
+def _sliding_fit(time, depth, window, **fit_kwargs):
+    """Fit ``lssinfit`` on every window of ``window`` samples.
+
+    Results are stored at the sample at the CENTRE of the window (``window // 2``
+    samples after its start); the first and last half windows are NaN.
+    """
+    n = len(depth)
+    out = np.full((3, n), np.nan)
+    half = window // 2
+    for i in tqdm(range(0, n - window + 1)):
+        idx = slice(i, i + window)
+        out[:, i + half] = lssinfit(time[idx], depth[idx], **fit_kwargs)
+    return out
 
 
 def tide_behav_extr(
     df,
     tagno,
-    tideFL=10,
+    tideFL=DEFAULT_TIDE_WINDOW_H,
     tideLV=[0.5, 0.7, 0.5],
-    behavFL=16,
+    behavFL=DEFAULT_TIDE_WINDOW_H,
     behavLV=[0.5, 0.7, 0.5],
     dt=10,
+    ampli_max=MAX_TIDE_AMPLITUDE_M,
+    trend_order=1,
+    periods_h=(M2_PERIOD_H,),
 ):
-    """
-    Traduction Python of MATLAB function tidebehavextr.m
-    Parameter : CSV with column 'time', 'depth' (and enventually 'temp')
-    Output : xarray.Dataset with result of the classification tide / behavior
+    """Sliding-window detection of the tide in a pressure record.
+
+    Python translation of the MATLAB function tidebehavextr.m, corrected so that a
+    flag means "the record looks like a fish lying on the bottom under the M2 tide".
+
+    For every window of ``tideFL`` hours, a polynomial trend of order ``trend_order``
+    and a harmonic at each of ``periods_h`` are fitted to the raw pressure (see
+    :func:`lssinfit`). The window is flagged when
+
+    - the residual RMS is below ``tideLV[0]`` (m),
+    - the R² on the detrended series is above ``tideLV[1]``,
+    - the amplitude is between ``tideLV[2]`` and ``ampli_max`` (m).
+
+    Each flag and each statistic is stored at the CENTRE of its window. The first and
+    last half windows have no value (NaN statistics, flag 0).
+
+    ``behav_found`` is the same test with the window ``behavFL`` and the thresholds
+    ``behavLV``. It is a relaxed tide fit (the demo uses it as a switch between
+    "still" and "moving" days), not an independent behaviour classifier.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Columns ``time`` and ``pressure`` (m), regularly sampled every ``dt`` minutes.
+    tagno : str
+        Tag identifier.
+    tideFL, behavFL : float, optional
+        Windows (h), at least one M2 period (12.42 h). Default: 25 h, two M2 cycles,
+        so that the trend and the harmonic are well separated. Windows are made of
+        ``round(60 / dt * FL)`` samples.
+    tideLV, behavLV : list of float, optional
+        ``[max residual RMS (m), min R², min amplitude (m)]``.
+    dt : float, optional
+        Time step (min).
+    ampli_max : float, optional
+        Largest plausible tidal amplitude (m). Default: 5.
+    trend_order : int, optional
+        Order of the trend removed in each window. Default: 1 (linear; a quadratic trend starts to absorb diel migration).
+    periods_h : sequence of float, optional
+        Tidal periods fitted (h). Default: M2.
+
+    Returns
+    -------
+    xarray.Dataset
+        Statistics (``rmse_*``, ``rsq_*``, ``ampli_*``) and flags (``tide_found``,
+        ``behav_found``, integer 0/1) along ``time``.
     """
     # --- Reading of the brute datas ---
 
     if "time" not in df.columns or "pressure" not in df.columns:
         raise ValueError("'time' and 'pressure' shoud be part of the CSV")
+    for name, fl in (("tideFL", tideFL), ("behavFL", behavFL)):
+        if fl < M2_PERIOD_H:
+            raise ValueError(
+                f"{name}={fl} h is shorter than one M2 period ({M2_PERIOD_H} h)"
+            )
+    df = df.copy()
     df["time"] = pd.to_datetime(df["time"])
     df = df.sort_values("time")
     time = (
         (df["time"] - df["time"].iloc[0]).dt.total_seconds() / 3600.0 / 24.0
     )  # in days
+    time = time.to_numpy()
     depth = df["pressure"].to_numpy()
-    print(df["time"] - df["time"].iloc[0])
     n = len(depth)
     tide_window = int(round(60 / dt * tideFL))
-    print(tide_window)
     behav_window = int(round(60 / dt * behavFL))
+    fit_kwargs = dict(periods_h=tuple(periods_h), trend_order=trend_order)
 
-    # --- Initialisation ---
-    rmse_tide = np.full(n, np.nan)
-    rsq_tide = np.full(n, np.nan)
-    ampli_tide = np.full(n, np.nan)
+    def found(stats, levels):
+        rmse, rsq, ampli = stats
+        with np.errstate(invalid="ignore"):
+            return (
+                (rmse < levels[0])
+                & (rsq > levels[1])
+                & (ampli > levels[2])
+                & (ampli < ampli_max)
+            )
 
-    rmse_behav = np.full(n, np.nan)
-    rsq_behav = np.full(n, np.nan)
-    ampli_behav = np.full(n, np.nan)
-
-    # --- Sliding loop for Tide ---
-    print(f"Extraction du signal de marée ({tideFL} h)...")
-    for i in tqdm(range(0, n - tide_window)):
-        idx = slice(i, i + tide_window)
-        rmse, rsq, ampli = lssinfit(time[idx], depth[idx])
-        rmse_tide[i] = rmse
-        rsq_tide[i] = rsq
-        ampli_tide[i] = ampli
-        # depth_smoothed_list[i] = depth_lissage
-
-    # --- Tide intervals detections ---
-    tide_found = (
-        (rmse_tide < tideLV[0]) & (rsq_tide > tideLV[1]) & (ampli_tide > tideLV[2])
-    )
-
-    # --- Sliding loop for behavior ---
-    print(f"Classification comportementale ({behavFL} h)...")
-    for i in tqdm(range(0, n - behav_window)):
-        idx = slice(i, i + behav_window)
-        rmse, rsq, ampli = lssinfit(time[idx], depth[idx])
-        rmse_behav[i] = rmse
-        rsq_behav[i] = rsq
-        ampli_behav[i] = ampli
-
-    behav_found = (
-        (rmse_behav < behavLV[0])
-        & (rsq_behav > behavLV[1])
-        & (ampli_behav > behavLV[2])
-    )
+    # --- Sliding loops (results at the window centres) ---
+    print(f"Tide signal extraction ({tideFL} h)...")
+    stats_tide = _sliding_fit(time, depth, tide_window, **fit_kwargs)
+    tide_found = found(stats_tide, tideLV)
+    print(f"Relaxed behaviour fit ({behavFL} h)...")
+    stats_behav = _sliding_fit(time, depth, behav_window, **fit_kwargs)
+    behav_found = found(stats_behav, behavLV)
+    rmse_tide, rsq_tide, ampli_tide = stats_tide
+    rmse_behav, rsq_behav, ampli_behav = stats_behav
 
     # --- Output dataset ---
     ds = xr.Dataset(
@@ -130,10 +222,13 @@ def tide_behav_extr(
             behavFL=behavFL,
             behavLV=behavLV,
             dt=dt,
+            ampli_max=ampli_max,
+            trend_order=trend_order,
+            periods_h=list(periods_h),
         ),
     )
 
-    print("\nExtraction terminée ✅")
+    print("\nExtraction done")
     return ds
 
 
@@ -436,9 +531,9 @@ from scipy.ndimage import median_filter
 DT_TARGET = 10  # min, time step expected by tide_behav_extr
 
 TIDE_PARAMS = dict(
-    tideFL=10,  # h, window used for tide detection
+    tideFL=DEFAULT_TIDE_WINDOW_H,  # h, window used for tide detection (>= one M2 period)
     tideLV=[0.42, 0.85, 0.6],  # max RMSE (m), min R², min amplitude (m) (cf. Pedersen)
-    behavFL=16,  # h, window used for behavior detection
+    behavFL=DEFAULT_TIDE_WINDOW_H,  # h, window of the relaxed fit (behav_found)
     behavLV=[0.42, 0.70, 0.2],
 )
 
@@ -470,6 +565,11 @@ def prepare_pressure(
 def detect_tide(tag_log, tag_name, smooth=False, **kwargs):
     """Detect tidal and behavioral patterns from a tag pressure time series.
 
+    A flag (``tide_found``) is set at the CENTRE of every window long enough to hold the
+    M2 tide whose detrended pressure is explained by an M2 harmonic (see
+    :func:`tide_behav_extr`: polynomial trend removed, R² on the detrended series,
+    residual RMS and amplitude range checked).
+
     The function extracts the ``pressure`` variable from the tag dataset, resamples it to a
     10 min time step if the data are recorded at a finer resolution, optionally removes short
     spikes with a median filter, and converts the result to a DataFrame. The detection itself
@@ -493,14 +593,19 @@ def detect_tide(tag_log, tag_name, smooth=False, **kwargs):
     Other Parameters
     ----------------
     tideFL : float, optional
-        Window (h) used for tide detection. Default is 10.
+        Window (h) used for tide detection, at least 12.42 h (one M2 period).
+        Default is 25 (about two cycles).
+    ampli_max : float, optional
+        Largest plausible tidal amplitude (m). Default is 5.
+    trend_order : int, optional
+        Order of the polynomial trend removed in each window. Default is 1 (linear).
     tideLV : list of float, optional
         Tide thresholds ``[max RMSE (m), min R², min amplitude (m)]``.
         Default is ``[0.42, 0.85, 0.6]``. A given list replaces the whole default.
     behavFL : float, optional
-        Window (h) used for behavior detection. Default is 16.
+        Window (h) of the relaxed fit behind ``behav_found``. Default is 25.
     behavLV : list of float, optional
-        Behavior thresholds, same structure as ``tideLV``.
+        Thresholds of the relaxed fit, same structure as ``tideLV``.
         Default is ``[0.42, 0.70, 0.2]``.
 
         Any other keyword accepted by ``tide_behav_extr`` can also be passed, except ``df`` and
@@ -521,7 +626,7 @@ def detect_tide(tag_log, tag_name, smooth=False, **kwargs):
     Examples
     --------
     >>> detect_tide(tag_log, "tag_01")
-    >>> detect_tide(tag_log, "tag_01", smooth=True, tideFL=12, behavLV=[0.5, 0.7, 0.3])
+    >>> detect_tide(tag_log, "tag_01", smooth=True, tideFL=30, behavLV=[0.5, 0.7, 0.3])
     """
     df = prepare_pressure(tag_log, smooth=smooth)
     return tide_behav_extr(
