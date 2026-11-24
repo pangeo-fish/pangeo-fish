@@ -216,7 +216,8 @@ def test_tide_writer(tmp_path, monkeypatch, step):
     actual = xr.open_zarr(tmp_path / "tide_pdf_healpix.zarr").load()
     xr.testing.assert_allclose(actual.drop_vars(["tide_found", "behav_found"]), ds)
     np.testing.assert_allclose(
-        actual.pdf.values, source.pdf.resample(time="1D").mean().values.reshape(3, 4)
+        actual.pdf.values,
+        source.pdf.resample(time="1D", offset="12h").mean().values.reshape(-1, 4),
     )
     xr.testing.assert_allclose(actual.tide_found, found)
     xr.testing.assert_allclose(actual.behav_found, behavior)
