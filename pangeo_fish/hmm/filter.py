@@ -217,7 +217,9 @@ def backward(states, predictions, predictors, predictor_indices, mask=None):
         range(1, n_max), predictor_indices[: n_max - 1][::-1]
     ):
         ratio = smoothed[time_index - 1] / (predictions[-time_index, ...] + eps)
-        backward_prediction = predictors[predictor_index].predict(ratio, mask=None)
+        predictor = predictors[predictor_index]
+        predict_backward = getattr(predictor, "predict_backward", predictor.predict)
+        backward_prediction = predict_backward(ratio, mask=None)
         normalized = backward_prediction / np.sum(backward_prediction)
         backward_predictions.append(normalized)
 
@@ -410,7 +412,8 @@ def _backward_zarr(ingroup, outgroup, predictor, progress=False):
         range(1, n_max), description="backwards filter", display=progress
     ):
         ratio = smoothed[-index, ...] / (predictions[-index, ...] + eps)
-        backward_prediction = predictor.predict(ratio, mask=None)
+        predict_backward = getattr(predictor, "predict_backward", predictor.predict)
+        backward_prediction = predict_backward(ratio, mask=None)
         normalized = backward_prediction / np.sum(backward_prediction)
         backward_pred[-index - 1, ...] = normalized
 

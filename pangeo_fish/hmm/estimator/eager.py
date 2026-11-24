@@ -6,7 +6,13 @@ from tlz.functoolz import compose_left, curry, pipe
 from tlz.itertoolz import first
 
 from pangeo_fish import tracks, utils
-from pangeo_fish.hmm.decode import mean_track, modal_track, viterbi, viterbi_healpix
+from pangeo_fish.hmm.decode import (
+    mean_track,
+    modal_track,
+    viterbi,
+    viterbi_healpix,
+    viterbi_mixed_healpix,
+)
 from pangeo_fish.hmm.filter import forward_backward, score, score_final_pos
 from pangeo_fish.hmm.prediction import Predictor
 
@@ -75,7 +81,7 @@ class EagerEstimator:
 
         dims = temporal_dims + spatial_dims
 
-        X_ = X.transpose(*dims)
+        X_ = X.transpose(*dims, ...)
 
         predictors: list[Predictor]
         if self.predictors is None:
@@ -105,7 +111,7 @@ class EagerEstimator:
 
         dims = temporal_dims + spatial_dims
 
-        X_ = X.transpose(*dims)
+        X_ = X.transpose(*dims, ...)
 
         # ajout : filet de sécurité si predictor_index est absent du dataset
         if "predictor_index" in X_:
@@ -160,7 +166,7 @@ class EagerEstimator:
             temporal_dims = utils._detect_temporal_dims(X)
 
         dims = temporal_dims + spatial_dims
-        X_ = X.transpose(*dims)
+        X_ = X.transpose(*dims, ...)
 
         predictors: list[Predictor]
         if self.predictors is None:
@@ -317,6 +323,14 @@ class EagerEstimator:
                 first, curry(viterbi_healpix, sigmas=self.sigma)
             ),
         }
+        if "cell_level" in X.coords:
+            decoders.pop("viterbi")
+            decoders["viterbi_healpix"] = compose_left(
+                first,
+                lambda emission: viterbi_mixed_healpix(
+                    emission, self.predictor_factory, self.sigma
+                ),
+            )
         if not isinstance(mode, list):
             modes = [mode]
         else:
