@@ -192,17 +192,22 @@ def lssinfit(time, depth, periods_h=(M2_PERIOD_H,), trend_order=1):
     return rmse, rsq, amplitude
 
 
-def _sliding_fit(time, depth, window, **fit_kwargs):
+def _sliding_fit(time, depth, window, min_coverage=0.8, **fit_kwargs):
     """Fit ``lssinfit`` on every window of ``window`` samples.
 
-    Results are stored at the sample at the CENTRE of the window (``window // 2``
-    samples after its start); the first and last half windows are NaN.
+    The samples must lie on a regular grid (NaN for gaps), so that a window of
+    ``window`` samples is a window of fixed duration. Results are stored at the
+    sample at the CENTRE of the window (``window // 2`` samples after its start);
+    the first and last half windows are NaN, and so are the windows in which fewer
+    than ``min_coverage`` of the samples are finite.
     """
     n = len(depth)
     out = np.full((3, n), np.nan)
     half = window // 2
     for i in tqdm(range(0, n - window + 1)):
         idx = slice(i, i + window)
+        if np.isfinite(depth[idx]).mean() < min_coverage:
+            continue
         out[:, i + half] = lssinfit(time[idx], depth[idx], **fit_kwargs)
     return out
 
@@ -218,6 +223,7 @@ def tide_behav_extr(
     ampli_max=MAX_TIDE_AMPLITUDE_M,
     trend_order=1,
     periods_h=(M2_PERIOD_H,),
+    min_coverage=0.8,
 ):
     """Sliding-window detection of the tide in a pressure record.
 
@@ -234,6 +240,11 @@ def tide_behav_extr(
 
     Each flag and each statistic is stored at the CENTRE of its window. The first and
     last half windows have no value (NaN statistics, flag 0).
+
+    The record is put on a regular grid of ``dt`` minutes (NaN where samples are
+    missing), so that a window always spans ``tideFL`` hours whatever the gaps. A
+    window with fewer than ``min_coverage`` of valid samples has NaN statistics and
+    flag 0.
 
     ``behav_found`` is the same test with the window ``behavFL`` and the thresholds
     ``behavLV``. It is a relaxed tide fit (the demo uses it as a switch between
@@ -259,6 +270,8 @@ def tide_behav_extr(
         Order of the trend removed in each window. Default: 1 (linear; a quadratic trend starts to absorb diel migration).
     periods_h : sequence of float, optional
         Tidal periods fitted (h). Default: M2.
+    min_coverage : float, optional
+        Minimum fraction of valid samples in a window. Default: 0.8.
 
     Returns
     -------
@@ -277,16 +290,26 @@ def tide_behav_extr(
             )
     df = df.copy()
     df["time"] = pd.to_datetime(df["time"])
-    df = df.sort_values("time")
-    time = (
-        (df["time"] - df["time"].iloc[0]).dt.total_seconds() / 3600.0 / 24.0
-    )  # in days
-    time = time.to_numpy()
-    depth = df["pressure"].to_numpy()
-    check_pressure_units(depth, df.attrs.get("units"))
+    df = df.sort_values("time").drop_duplicates("time")
+    check_pressure_units(df["pressure"].to_numpy(), df.attrs.get("units"))
+    # regular grid with NaN for the gaps (integer nanoseconds, no string timedeltas)
+    step = np.timedelta64(int(round(dt * 60e9)), "ns")
+    t_ns = df["time"].to_numpy().astype("datetime64[ns]")
+    n_grid = int((t_ns[-1] - t_ns[0]) // step) + 1
+    grid = pd.DatetimeIndex(t_ns[0] + np.arange(n_grid) * step)
+    depth = (
+        pd.Series(df["pressure"].to_numpy(dtype=float), index=pd.DatetimeIndex(t_ns))
+        .reindex(grid, method="nearest", tolerance=pd.Timedelta(step // 2))
+        .to_numpy()
+    )
+    time = (np.arange(n_grid) * step) / np.timedelta64(1, "D")  # in days
     tide_window = int(round(60 / dt * tideFL))
     behav_window = int(round(60 / dt * behavFL))
-    fit_kwargs = dict(periods_h=tuple(periods_h), trend_order=trend_order)
+    fit_kwargs = dict(
+        periods_h=tuple(periods_h),
+        trend_order=trend_order,
+        min_coverage=min_coverage,
+    )
 
     def found(stats, levels):
         rmse, rsq, ampli = stats
@@ -322,7 +345,7 @@ def tide_behav_extr(
             behav_found=("time", behav_found.astype(int)),
         ),
         coords=dict(
-            time=("time", df["time"]),
+            time=("time", grid),
         ),
         attrs=dict(
             tagno=str(tagno),
@@ -334,6 +357,7 @@ def tide_behav_extr(
             ampli_max=ampli_max,
             trend_order=trend_order,
             periods_h=list(periods_h),
+            min_coverage=min_coverage,
         ),
     )
 
@@ -684,6 +708,7 @@ def prepare_pressure(
         med = median_filter(da.values, size=2 * alpha + 1, mode="nearest")
         da = da.where(np.abs(da - med) <= threshold, med)
 
+    # missing rows are put back on the regular grid by tide_behav_extr
     return da.to_dataframe().reset_index().dropna(subset=[var])
 
 
@@ -941,6 +966,21 @@ def merge_tide_with_total(target_root, storage_options=None):
     values[np.ix_(has_time, has_cell)] = source[
         np.ix_(time_idx[has_time], cell_idx[has_cell])
     ]
+
+    # Cells without harmonic constants carry a finite placeholder in the stored pdf
+    # (0 on tidal days, uniform otherwise): they are unknown, not impossible.
+    if "ocean_mask" in daily:
+        ocean = daily["ocean_mask"].astype(float)
+        if "time" in ocean.dims:  # groupby broadcasts a time-independent mask
+            ocean = ocean.mean("time")
+        covered = np.zeros(n_cells, dtype=bool)
+        covered[has_cell] = ocean.values[cell_idx[has_cell]] >= 0.5
+        values[:, ~covered] = np.nan
+    if "tide_found" in daily:
+        # days without detected tide: the same neutral factor in every cell
+        stored = np.full(n_time, np.nan)
+        stored[has_time] = daily["tide_found"].values[time_idx[has_time]]
+        values[stored == 0, :] = 1.0 / n_cells
 
     missing = ~np.isfinite(values)
     if missing.any():

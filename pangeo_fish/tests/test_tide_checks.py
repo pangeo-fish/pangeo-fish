@@ -172,3 +172,26 @@ def test_sigma_no_warning(method, sigma, recwarn):
 def test_valid_methods_do_not_warn(method, recwarn):
     tide.check_tide_method(method)
     assert not recwarn.list
+
+
+def test_merge_uncovered_cells_are_neutral_not_zero(tmp_path, recwarn):
+    """Cells without harmonic constants are stored as 0 on tidal days: unknown, not impossible."""
+    times = pd.date_range("2024-01-01", periods=2)
+    likelihood = xr.Dataset(
+        {
+            "pdf": (("time", "cells"), [[1.0, 0.0], [0.4, 0.0]]),
+            "ocean_mask": ("cells", [True, False]),
+            "tide_found": ("time", [0.0, 1.0]),
+        },
+        coords={"time": times, "cell_ids": th.make_cell_ids([1, 2], 2, "WGS84")},
+    )
+    th.write_tide_pdf_healpix(likelihood, tmp_path, behav_found=[0, 1])
+    total = xr.Dataset(
+        {"pdf": (("time", "cells"), np.full((2, 2), 0.5))},
+        coords={"time": times, "cell_ids": th.make_cell_ids([1, 2], 2, "WGS84")},
+    )
+    total.to_zarr(tmp_path / "total_pdf.zarr", zarr_format=2, consolidated=True)
+    merged, _, _ = tide.merge_tide_with_total(tmp_path)
+    p = merged["pdf_tide"].values
+    np.testing.assert_allclose(p[0], [0.5, 0.5])  # no tide: neutral everywhere
+    np.testing.assert_allclose(p[1], [0.4, 0.4])  # tide: day's mean for the cell
