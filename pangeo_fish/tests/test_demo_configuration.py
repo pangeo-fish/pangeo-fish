@@ -25,7 +25,7 @@ def test_common_defaults_are_identical():
     base, _ = demo_settings(load_demo("base"))
     complete, _ = demo_settings(load_demo("complete"))
     assert base.pop("scratch_root") != complete.pop("scratch_root")
-    assert complete.pop("tide_method") == "legacy"
+    assert complete.pop("tide_method") == "pedersen"
     assert complete.pop("tide_model") == "tpxo9"
     assert complete.pop("tide_model_source") is None
     assert complete.pop("tide_constants_store") is None

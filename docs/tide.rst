@@ -9,13 +9,14 @@ Choose ``tide_method`` in **Study settings** at the top of the
 
 .. code-block:: python
 
-    tide_method = "legacy"  # Original method (default)
-    # tide_method = "healpix"  # Local harmonic prediction on the HMM grid
+    tide_method = "pedersen"  # Pedersen et al. (2008) tide likelihood (default)
+    # tide_method = "healpix"  # Tide shape only, with a model error tide_sigma_m
 
-Both methods use the existing depth-based flags. TPXO9 is the default tide
+Both methods predict the tide on the HMM cells from local harmonic constants and
+use the existing depth-based flags. TPXO9 is the default tide
 model. Section 7 downloads it from Ifremer, and ``tide_model_source`` can
 point to a local copy of the same TMD3 NetCDF file. Install the optional tide
-dependency in the notebook kernel's environment to use the HEALPix method.
+dependency in the notebook kernel's environment to use either method.
 
 .. code-block:: console
 
@@ -29,7 +30,7 @@ the Complete demo's Study settings.
 
 .. code-block:: python
 
-    tide_method = "healpix"
+    tide_method = "pedersen"  # or "healpix"
     tide_model = "fes2022b"
     tide_model_source = "/path/to/FES2022b_OceanTide_NSgrid.nc"
     ellipsoid = "WGS84"
@@ -61,7 +62,7 @@ and set the HEALPix level to match your store.
 
 .. code-block:: python
 
-    tide_method = "healpix"
+    tide_method = "pedersen"  # or "healpix"
     tide_model = "fes2022b"
     ellipsoid = "WGS84"
     refinement_level = 10
@@ -81,37 +82,58 @@ result with ``write_harmonic_constants``. Set ``chunk_constituents=1`` for
 independent reads by constituent. Include the AVISO citation, licence,
 product version and interpolation method in the store metadata.
 
-How the likelihoods differ
---------------------------
+The Pedersen et al. likelihood
+------------------------------
+
+``tide_method = "pedersen"`` is a port of the tide likelihood of the HMM
+geolocation toolbox of DTU (Pedersen, Righton, Thygesen, Andersen and Madsen,
+2008, *Can. J. Fish. Aquat. Sci.* 65:2367,
+`doi:10.1139/f08-144 <https://doi.org/10.1139/f08-144>`_). The MATLAB source is
+in ``datalik/datalikelihood.m`` and ``datalik/datalikparam.m`` of
+`cliu3/hmm_smast <https://github.com/cliu3/hmm_smast/blob/dev/datalik/datalikelihood.m>`_
+(ver. 0.52, 2008). The implementation is
+:func:`pangeo_fish.tide_healpix.pedersen_tide_likelihood`; its docstring lists
+every departure from the MATLAB.
+
+For each window of the depth record in which the tide detection finds a tide,
+the depth samples ``y`` are one Gaussian vector around the depth predicted at
+cell ``c``, ``mu_c(t) = D_c + eta_c(t)``. ``D_c`` is the mean water depth
+(positive down, referenced to mean sea level) and ``eta_c`` the tide elevation
+from the harmonic constants of the cell with the nodal corrections of pyfes.
+The covariance does not depend on the cell: white noise (0.2 m), a correlated
+term with the rmse of the tide fit of the window and a memory of 6.67 h, and a
+constant 10 m standard deviation on the mean depth. A day labelled ``T``
+combines the windows whose centre lies in ``[T - 12 h, T + 12 h)``. A day without
+a tidal window gets the bathymetry-only likelihood of the MATLAB (the fish
+cannot be where the seabed is shallower than its deepest depth).
+
+Comparing with the ``healpix`` method
+-------------------------------------
 
 .. list-table::
    :header-rows: 1
    :widths: 20 40 40
 
    * - Step
-     - ``legacy``
+     - ``pedersen``
      - ``healpix``
-   * - Tide prediction
-     - Builds a tide signal from the file's constituent amplitudes and phases.
-       This time-dependent signal is shared across the model grid.
-     - Obtains complex harmonics at the HMM cell centres by interpolation
-       or by reading precomputed FES2022b constants. PyFES supplies the
-       astronomical arguments and nodal corrections at the observation times.
    * - Depth reference
-     - Compares observed depth to the model water-column depth adjusted by the
-       shared signal. Shallow-water cells can be favoured by absolute depth.
+     - Compares the depth to the water depth of the cell plus the tide
+       (absolute depth evidence, with a 10 m standard deviation on the mean
+       depth). Days without tide use a bathymetry-only likelihood.
      - Fits an unknown mean depth per cell and per day. The tide term uses the
        shape of the depth record during candidate near-bed intervals. The demo
        supplies absolute depth evidence through its separate bathymetry PDF.
+   * - Errors
+     - Time-correlated Gaussian errors (full covariance, one Cholesky factor
+       per window, log space).
+     - Independent errors with standard deviation ``tide_sigma_m``;
+       ``tide_min_samples`` sets the minimum number of valid hourly means.
    * - Time aggregation
-     - Produces hourly likelihoods on the latitude/longitude grid, regrids
-       them to HEALPix, then averages them by day. A day labelled ``T`` covers
+     - Raw samples of the flagged windows. Day ``T`` covers
        ``[T - 12 h, T + 12 h)``, as in the temperature emission.
-     - Averages observations and tide predictions over the same sample times
-       within each hour, then computes one likelihood per day on the HMM grid
-       (day ``T`` covers ``[T - 12 h, T + 12 h)``, as in the temperature emission).
-       ``tide_sigma_m`` sets the model error and ``tide_min_samples`` sets
-       the minimum number of valid hourly means for a day to contribute.
+     - Hourly means of the observations and of the predicted tide, one
+       likelihood per day on the HMM grid (same day convention).
 
 The HEALPix likelihood assumes the tag is lying still on the seabed during the
 selected intervals. The demo uses the tide-detection flag to identify
@@ -158,5 +180,5 @@ The tide helpers stop or warn instead of silently changing the evidence:
   mbar, ...) or if the values are impossible for a depth (above 3000 or below
   -50).
 - ``tide_sigma_m`` is only used by ``tide_method = "healpix"``. With
-  ``"legacy"`` the demo warns (via ``check_tide_sigma``) when it differs from
-  the default of 2.0, which the legacy path does not read.
+  ``"pedersen"`` the demo warns (via ``check_tide_sigma``) when it differs from
+  the default of 2.0, which that method does not read.

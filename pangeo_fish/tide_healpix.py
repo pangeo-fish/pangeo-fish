@@ -24,7 +24,9 @@ Contents
 --------
 - containers: :func:`harmonic_constants_dataset`, :func:`open_harmonic_constants`;
 - prediction: :func:`nodal_modulations`, :func:`predict_tide`;
-- evidence: :func:`still_tag_tide_likelihood` (with model-based tide detection),
+- evidence: :func:`pedersen_tide_likelihood` (port of Pedersen et al. 2008, with
+  :func:`tide_windows`, :func:`pedersen_covariance`, :func:`cell_bathymetry`),
+  :func:`still_tag_tide_likelihood` (with model-based tide detection),
   :func:`write_tide_pdf_healpix`;
 - record analysis: :func:`harmonic_analysis`, :func:`constants_misfit`;
 - storage: :func:`write_harmonic_constants`;
@@ -652,6 +654,479 @@ def still_tag_tide_likelihood(
         },
     )
     return ds
+
+
+# ----------------------------------------------------------------------------
+# Pedersen et al. (2008) tide likelihood (port of the DTU / HMM geolocation MATLAB)
+# ----------------------------------------------------------------------------
+
+PEDERSEN_REFERENCE = (
+    "Pedersen, M. W., Righton, D., Thygesen, U. H., Andersen, K. H. and Madsen, H."
+    " (2008). Geolocation of North Sea cod (Gadus morhua) using hidden Markov models"
+    " and behavioural switching. Can. J. Fish. Aquat. Sci. 65, 2367-2377,"
+    " doi:10.1139/f08-144"
+)
+PEDERSEN_MATLAB_SOURCE = (
+    "https://raw.githubusercontent.com/cliu3/hmm_smast/dev/datalik/datalikelihood.m"
+)
+M2_PERIOD_HOURS = 12.420601  # tidebehavextr.m: p = 12.420601
+_MATLAB_EPS = float(np.finfo(float).eps)  # MATLAB's ``eps``, used in the denominator
+
+
+def tide_windows(
+    times,
+    tide_found,
+    *,
+    rmse=None,
+    window_hours=25.0,
+    time_step="1D",
+):
+    """Tidal windows selected from the detection flags, with their daily labels.
+
+    ``tide_found`` is the output of :func:`pangeo_fish.tide.detect_tide`: a flag at
+    the CENTRE of every window of ``window_hours`` explained by a tide. A flagged
+    centre ``c`` stands for the samples in ``[c - window_hours / 2, c + window_hours / 2)``.
+    The window belongs to the label ``T`` whose period ``[T - time_step / 2,
+    T + time_step / 2)`` contains ``c``. Within a label, windows are taken in
+    increasing ``rmse`` (best sine fit first, as ``td.tideBestfit`` in the MATLAB
+    ``tidebehavextr.m``; time order when ``rmse`` is None) and a window that
+    overlaps one already taken is skipped, so that the same samples never count
+    twice. For a 25 h window and a daily label this leaves exactly one window per day.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per window: ``centre`` (Timestamp), ``label`` (Timestamp), ``rmse``
+        (NaN when unknown).
+    """
+    flags = _as_series(tide_found).fillna(0).astype(bool)
+    centres = flags.index[flags.values]
+    err = np.full(len(centres), np.nan)
+    if rmse is not None:
+        err = _as_series(rmse).reindex(centres).values
+    half = pd.Timedelta(time_step) / 2
+    labels = ((centres + half).floor(time_step)) if len(centres) else centres
+    width = pd.Timedelta(hours=window_hours)
+    rows = []
+    for label in pd.unique(labels):
+        idx = np.flatnonzero(labels == label)
+        order = idx[np.lexsort((idx, np.where(np.isnan(err[idx]), np.inf, err[idx])))]
+        taken = []
+        for i in order:
+            if all(abs(centres[i] - centres[j]) >= width for j in taken):
+                taken.append(i)
+        for i in sorted(taken):
+            rows.append((centres[i], label, err[i]))
+    return pd.DataFrame(rows, columns=["centre", "label", "rmse"])
+
+
+def pedersen_covariance(
+    hours,
+    *,
+    white_noise_sd=0.2,
+    epsilon=0.4,
+    ar_decay_hours=40 * 10 / 60,
+    ar_level=0.05,
+    tidal_roughness_sd=0.0,
+    depth_offset_sd=10.0,
+    tidal_period_hours=M2_PERIOD_HOURS,
+):
+    """Covariance (m^2) of the depth record about its prediction, for one window.
+
+    With ``tau = |t_i - t_j|`` (hours) between samples ``i`` and ``j``::
+
+        S_ij = E^2 delta_ij                                  (white noise, sensor)
+             + epsilon^2 lambda^(tau / dt_ref)               (AR(1): tide model error)
+             + sigma_e^2 cos(2 pi tau / T_M2)                (tidal roughness)
+             + sigma_eta^2                                   (constant: offset of the depth)
+
+    The MATLAB ``datalikparam.m`` uses ``E = 0.2`` m, ``lambda = 0.05^(1/40)`` per
+    10 min sample (the correlation falls to 0.05 after 40 samples, 6.67 h),
+    ``epsilon`` = the rmse of the sine fit of the window (or 0.4 m when constant) and
+    ``s_eta_tid = 10^2`` m^2 for the "fast" type, which has no cell-dependent term;
+    the cell-dependent tidal roughness ``s_e`` and bathymetric roughness of the
+    "full" type are not used here (``tidal_roughness_sd`` is a cell-independent
+    optional replacement, 0 by default). The decay is written in hours, so it does
+    not depend on the sampling interval.
+
+    Returns
+    -------
+    numpy.ndarray
+        Symmetric positive definite matrix ``(n, n)``.
+    """
+    hours = np.asarray(hours, dtype=float)
+    tau = np.abs(hours[:, None] - hours[None, :])
+    lam_rate = np.log(ar_level) / ar_decay_hours  # lambda^(tau) = exp(rate * tau)
+    cov = white_noise_sd**2 * np.eye(len(hours))
+    cov += epsilon**2 * np.exp(lam_rate * tau)
+    if tidal_roughness_sd:
+        cov += tidal_roughness_sd**2 * np.cos(2 * np.pi * tau / tidal_period_hours)
+    cov += depth_offset_sd**2
+    return cov
+
+
+def _log_gaussian_columns(resid, cov):
+    """log N(resid[:, c]; 0, cov) for every column, with one Cholesky factor."""
+    from scipy.linalg import cho_factor, solve_triangular
+
+    chol, lower = cho_factor(cov, lower=True)
+    z = solve_triangular(chol, resid, lower=True)
+    n = cov.shape[0]
+    logdet = 2.0 * np.log(np.diag(chol)).sum()
+    return -0.5 * ((z**2).sum(axis=0) + logdet + n * np.log(2 * np.pi))
+
+
+def _bathymetry_only_loglik(d_max, eta, water_column, bathy_sd, z_off_bottom):
+    """Log of ``normcdf(mindepth; mu, s) / (eps + normcdf(0; mu, s))`` (MATLAB)."""
+    from scipy.special import log_ndtr, ndtr
+
+    mu = water_column + eta
+    num = log_ndtr((mu - d_max) / bathy_sd)
+    den = np.log(_MATLAB_EPS + ndtr(mu / bathy_sd))
+    out = num - den
+    if z_off_bottom > 0:
+        with np.errstate(divide="ignore"):
+            tide2 = 1.0 - np.exp(log_ndtr((mu - z_off_bottom - d_max) / bathy_sd) - den)
+            out = out + np.log(np.clip(tide2, 0.0, None))
+    return out
+
+
+def pedersen_tide_likelihood(
+    depth,
+    constants,
+    water_column,
+    *,
+    tide_found,
+    rmse=None,
+    window_hours=25.0,
+    time_step="1D",
+    freq=None,
+    white_noise_sd=0.2,
+    epsilon=0.4,
+    ar_decay_hours=40 * 10 / 60,
+    ar_level=0.05,
+    tidal_roughness_sd=0.0,
+    depth_offset_sd=10.0,
+    bathy_variance=20.0,
+    z_off_bottom=0.0,
+    non_tidal="bathymetry",
+    min_fraction=0.8,
+    ocean_mask=None,
+    modulations=None,
+):
+    r"""Tidal likelihood of Pedersen et al. (2008) for a tag on the seabed, on HEALPix cells.
+
+    Port of the "DTU" tide likelihood of the HMM geolocation toolbox (Pedersen et
+    al. 2008, Can. J. Fish. Aquat. Sci. 65:2367, doi:10.1139/f08-144), kept as
+    commented-out code in ``datalik/datalikelihood.m`` (ver. 0.52, 21/10/2008) of
+    https://github.com/cliu3/hmm_smast, with the variances of ``datalikparam.m``.
+
+    **Tidal window.** For every window of ``window_hours`` flagged in ``tide_found``
+    (:func:`tide_windows`), the depth samples ``y`` (m, positive down) are one draw of
+    a Gaussian vector around the depth predicted at cell ``c``::
+
+        mu_c(t) = D_c + eta_c(t),   eta_c(t) = sum_k f_k(t) A_k,c cos(V_k(t) + u_k(t) - G_k,c)
+        log L_c = log N(y; mu_c, S)
+
+    ``D_c`` is the mean water depth (m, positive down, referenced to mean sea level)
+    and ``eta_c`` the tide elevation (positive up) from the harmonic constants of the
+    cell with the nodal corrections of pyfes. In the MATLAB (depth negative up) this
+    is ``mu = -sum(f A cos(w t + G - phase)) + db.depth``. ``S`` is the covariance of
+    :func:`pedersen_covariance` and does not depend on the cell: one Cholesky factor
+    per window serves all cells, and everything is computed in log space.
+    A daily label ``T`` combines the windows whose centre lies in ``[T - 12 h,
+    T + 12 h)`` by adding their log-likelihoods.
+
+    **Days without a tidal window.** The likelihood is the bathymetry-only form
+    ``normcdf(d_max; mu, s) / (eps + normcdf(0; mu, s))``, in the MATLAB's depth
+    convention, i.e. ``P(Y >= d_max) / P(Y >= 0)`` with ``Y ~ N(D_c + eta_c(t*),
+    bathy_variance)``, ``d_max`` the deepest sample of the label and ``t*`` its time.
+    With ``z_off_bottom > 0`` the likelihood is also multiplied by
+    ``1 - P(Y >= d_max + z_off_bottom) / (eps + P(Y >= 0))`` (the fish is at most
+    ``z_off_bottom`` m above the seabed). Cells shallower than the fish are almost
+    impossible. ``non_tidal="uniform"`` gives instead a uniform pdf (use it when the
+    bathymetry is already in the total emission and must not count twice).
+
+    Departures from the MATLAB (all deliberate)
+    -------------------------------------------
+    - HEALPix cells instead of a latitude/longitude grid; tide constants
+      ``A_k exp(iG_k)`` from FES/TPXO on the cells, pyfes (Schureman) nodal
+      corrections ``f``, ``V + u`` in place of ``td.f`` and ``td.G`` (the 1992-based
+      argument of the original toolbox); constituents are the stored ones, no
+      inference of minor constituents.
+    - Only the "fast" covariance (no cell-dependent tidal roughness ``db.tidalro``
+      nor bathymetric roughness inside the tidal likelihood), so that it is
+      independent of the cell. ``tidal_roughness_sd`` (default 0) adds a constant
+      replacement for the cosine term, with the period of M2 rather than of the first
+      constituent of the database.
+    - ``epsilon`` is the rmse of the window's sine fit (``td.rmse``) when ``rmse`` is
+      given, else the constant 0.4 m of the comment in ``datalikparam.m``. The rmse
+      comes from :func:`pangeo_fish.tide.detect_tide` (trend removed, M2 fit) and
+      not from ``lssinfit.m``.
+    - The AR(1) term is written with real time lags in hours, so a gap in the record
+      or another sampling interval keeps the same 6.67 h memory.
+    - The windows come from the sliding-window flags of ``detect_tide`` (centre
+      flags; 25 h by default, ``tideFL = 10 h`` in the MATLAB defaults) and a label
+      keeps the non-overlapping windows with the best fits (one for 25 h windows),
+      like ``td.tideBestfit``. A window with fewer than ``min_fraction`` of its
+      expected samples is dropped.
+    - The roughness ``s_eta`` of the bathymetry-only likelihood is ``bathy_variance``
+      (m^2, scalar or per cell) instead of the database variable ``db.bathro``. The
+      default 20 m^2 is the debug value of the MATLAB source (``s_eta = 20*ones``),
+      not a calibrated value.
+    - Land cells (no depth, no constants) and cells outside ``ocean_mask`` are
+      excluded; the pdf is normalised over the allowed cells for every label. The
+      recapture position and the behaviour classification of the toolbox are not
+      part of this function.
+    - No ``mvnpdf``/``gausspdf`` underflow: log-likelihoods are returned and
+      normalised with a maximum shift.
+
+    Parameters
+    ----------
+    depth : pandas.Series or xarray.DataArray
+        Pressure depth of the tag (m, positive down), indexed by UTC time.
+    constants : xarray.Dataset
+        Harmonic constants on the HMM cells.
+    water_column : array-like or xarray.DataArray
+        Mean water depth ``D_c`` (m, positive), same conventions as in
+        :func:`still_tag_tide_likelihood` (aligned on ``cell_ids`` when a DataArray;
+        referenced to mean sea level).
+    tide_found : pandas.Series or xarray.DataArray
+        Flags at the centre of the tidal windows (``detect_tide``).
+    rmse : pandas.Series or xarray.DataArray, optional
+        Sine-fit rmse at the window centres (``rmse_tide`` of ``detect_tide``).
+    window_hours : float, default 25
+        Length of the window of one flag (``tideFL`` of ``detect_tide``).
+    time_step : str, default "1D"
+        Label spacing; label ``T`` covers ``[T - time_step/2, T + time_step/2)``.
+    freq : str or None
+        Average the depth record (and the predicted tide at the same times) over
+        this period first. None (default, as the MATLAB): use the samples.
+    white_noise_sd, epsilon, ar_decay_hours, ar_level, tidal_roughness_sd, depth_offset_sd
+        Covariance parameters, see :func:`pedersen_covariance` (``E``, ``epsilon``,
+        ``lambda``, ``s_e``, ``sqrt(s_eta_tid)``).
+    bathy_variance : float or array-like, default 20
+        Variance (m^2) of the seabed depth for days without tide.
+    z_off_bottom : float, default 0
+        Maximum height of the fish above the seabed (m) for days without tide.
+    non_tidal : {"bathymetry", "uniform"}
+    min_fraction : float, default 0.8
+        Minimum fraction of the expected samples of a window.
+    ocean_mask : array-like of bool, optional
+        Additional allowed cells.
+    modulations : xarray.Dataset, optional
+        Precomputed :func:`nodal_modulations` covering all sample times (then pyfes
+        is not needed).
+
+    Returns
+    -------
+    xarray.Dataset
+        Same structure as :func:`still_tag_tide_likelihood`: ``pdf`` (time, cells),
+        ``log_likelihood``, ``tide_found`` (1 when at least one tidal window is used),
+        ``ocean_mask``, plus ``n_windows`` and ``n_samples``, with ``cell_ids`` and
+        its grid attributes. ``time`` is the label ``T`` (centre of the window).
+    """
+    if non_tidal not in {"bathymetry", "uniform"}:
+        raise ValueError("non_tidal must be 'bathymetry' or 'uniform'")
+    series = _as_series(depth).dropna()
+    if series.empty:
+        raise ValueError("the depth record has no samples")
+    constants = constants.compute()
+    constituents = constants[CONSTITUENT_DIM].values
+    n_cells = constants.sizes[CELL_DIM]
+
+    allowed = (
+        (np.isfinite(constants["tide_real"]) & np.isfinite(constants["tide_imag"]))
+        .all(CONSTITUENT_DIM)
+        .values
+    )
+    if ocean_mask is not None:
+        allowed &= _per_cell(ocean_mask, constants, "ocean_mask", bool)
+    wc = _per_cell(water_column, constants, "water_column", float)
+    allowed &= np.isfinite(wc)
+    if not allowed.any():
+        raise ValueError("no eligible cells with finite tide constants and depth")
+    bathy_var = np.broadcast_to(
+        np.asarray(
+            _per_cell(bathy_variance, constants, "bathy_variance", float)
+            if np.ndim(bathy_variance) or isinstance(bathy_variance, xr.DataArray)
+            else float(bathy_variance)
+        ),
+        (n_cells,),
+    )
+    if (bathy_var[allowed] <= 0).any():
+        raise ValueError("bathy_variance must be positive")
+    bathy_sd = np.sqrt(bathy_var)
+
+    def eta_at(index):
+        """Tide (n, cells) at the exact times of ``index`` (no averaging)."""
+        if modulations is not None:
+            mod = modulations.sel(time=pd.DatetimeIndex(index).values)
+        else:
+            mod = None
+        return predict_tide(constants, times=index.values, modulations=mod).values
+
+    # ---- labels -------------------------------------------------------------
+    half = pd.Timedelta(time_step) / 2
+    first = (series.index.min() + half).floor(time_step)
+    last = (series.index.max() + half).floor(time_step)
+    starts = pd.date_range(first, last, freq=time_step)
+    sample_labels = starts.get_indexer((series.index + half).floor(time_step))
+    n_win = len(starts)
+
+    windows = tide_windows(
+        series.index,
+        tide_found,
+        rmse=rmse,
+        window_hours=window_hours,
+        time_step=time_step,
+    )
+    dt_hours = float(np.median(np.diff(series.index.as_unit("ns").asi8)) / 3.6e12)
+    expected = window_hours / dt_hours
+    if freq is not None:
+        expected = window_hours / (pd.Timedelta(freq) / pd.Timedelta(hours=1))
+
+    loglik = np.full((n_win, n_cells), np.nan)
+    n_windows = np.zeros(n_win, dtype=int)
+    n_samples = np.bincount(sample_labels[sample_labels >= 0], minlength=n_win)
+    wc_row = wc[None, :]
+    allowed_idx = np.flatnonzero(allowed)
+
+    for row in windows.itertuples(index=False):
+        w = starts.get_loc(row.label)
+        lo = row.centre - pd.Timedelta(hours=window_hours) / 2
+        hi = row.centre + pd.Timedelta(hours=window_hours) / 2
+        sel = series[(series.index >= lo) & (series.index < hi)]
+        if len(sel) < max(2, min_fraction * expected):
+            continue
+        if freq is None:
+            used = sel
+            eta = eta_at(sel.index)
+        else:
+            used = _bin_average(sel, freq)
+            basis = _bin_nodal_basis(sel, used, freq, constituents)
+            eta = _tide_from_basis(constants, basis).values
+        hours = _seconds_since(used.index, used.index[0]) / 3600.0
+        eps_w = epsilon if not np.isfinite(row.rmse) else float(row.rmse)
+        cov = pedersen_covariance(
+            hours,
+            white_noise_sd=white_noise_sd,
+            epsilon=eps_w,
+            ar_decay_hours=ar_decay_hours,
+            ar_level=ar_level,
+            tidal_roughness_sd=tidal_roughness_sd,
+            depth_offset_sd=depth_offset_sd,
+        )
+        resid = used.values[:, None] - (eta[:, allowed_idx] + wc_row[:, allowed_idx])
+        ll = _log_gaussian_columns(resid, cov)
+        if np.isnan(loglik[w, allowed_idx[0]]):
+            loglik[w, allowed_idx] = 0.0
+        loglik[w, allowed_idx] += ll
+        n_windows[w] += 1
+
+    tidal = n_windows > 0
+    if non_tidal == "bathymetry":
+        for w in np.flatnonzero(~tidal & (n_samples > 0)):
+            sel = series[sample_labels == w]
+            t_deep = sel.idxmax()
+            eta = eta_at(pd.DatetimeIndex([t_deep]))[0]
+            ll = _bathymetry_only_loglik(
+                float(sel.max()),
+                eta[allowed_idx],
+                wc[allowed_idx],
+                bathy_sd[allowed_idx],
+                z_off_bottom,
+            )
+            loglik[w, allowed_idx] = ll
+
+    pdf = np.zeros((n_win, n_cells))
+    uniform = allowed / allowed.sum()
+    for w in range(n_win):
+        ll = loglik[w]
+        ok = allowed & np.isfinite(ll)
+        if not ok.any() or not np.isfinite(ll[ok]).any():
+            pdf[w] = uniform
+            loglik[w] = np.where(allowed, np.nan, np.nan)
+            continue
+        p = np.where(ok, np.exp(ll - np.nanmax(ll[ok])), 0.0)
+        pdf[w] = p / p.sum()
+
+    dims = ("time", CELL_DIM)
+    return xr.Dataset(
+        {
+            "pdf": (dims, pdf),
+            "log_likelihood": (dims, loglik),
+            "tide_found": ("time", tidal.astype(int)),
+            "n_windows": ("time", n_windows),
+            "n_samples": ("time", n_samples),
+            "ocean_mask": (CELL_DIM, allowed),
+        },
+        coords={"time": starts.values, "cell_ids": constants["cell_ids"]},
+        attrs={
+            "method": "pedersen",
+            "reference": PEDERSEN_REFERENCE,
+            "matlab_source": PEDERSEN_MATLAB_SOURCE,
+            "window_hours": float(window_hours),
+            "time_step": time_step,
+            "white_noise_sd_m": float(white_noise_sd),
+            "ar_decay_hours": float(ar_decay_hours),
+            "depth_offset_sd_m": float(depth_offset_sd),
+            "non_tidal": non_tidal,
+        },
+    )
+
+
+def cell_bathymetry(elevation, cell_ids, *, min_variance=1.0):
+    """Mean water depth and depth variance on HEALPix cells from a gridded elevation.
+
+    Parameters
+    ----------
+    elevation : xarray.DataArray
+        Elevation (m, negative below sea level, e.g. GEBCO) with dimensions
+        ``latitude`` and ``longitude`` (or ``lat``, ``lon``). It must refer to mean
+        sea level, the level around which the tide is predicted.
+    cell_ids : xarray.DataArray
+        HMM cells with their DGGS attributes (``level``, ``ellipsoid``).
+    min_variance : float, default 1
+        Floor of the variance (m^2).
+
+    Returns
+    -------
+    xarray.Dataset
+        ``water_column`` (m, positive down: mean over the sea points of each cell,
+        NaN for cells without sea points) and ``bathy_variance`` (m^2, variance of
+        the depths of the points of the cell, the counterpart of the MATLAB
+        ``db.bathro``), on ``cell_ids``.
+    """
+    import healpix_geo
+
+    info = _grid_info(cell_ids)
+    names = {"lat": "latitude", "lon": "longitude"}
+    elevation = elevation.rename(
+        {k: v for k, v in names.items() if k in elevation.dims}
+    ).load()
+    lon, lat = np.meshgrid(elevation["longitude"].values, elevation["latitude"].values)
+    values = elevation.transpose("latitude", "longitude").values
+    sea = np.isfinite(values) & (values < 0)
+    ids = healpix_geo.nested.lonlat_to_healpix(
+        lon[sea], lat[sea], info["level"], ellipsoid=info["ellipsoid"]
+    )
+    depth = -values[sea]
+    frame = pd.DataFrame({"id": ids, "d": depth, "d2": depth**2})
+    grouped = frame.groupby("id").agg(n=("d", "size"), s=("d", "sum"), s2=("d2", "sum"))
+    mean = grouped["s"] / grouped["n"]
+    var = (grouped["s2"] / grouped["n"] - mean**2).clip(lower=min_variance)
+    index = pd.Index(cell_ids.values)
+    wc = mean.reindex(index).values
+    bv = var.reindex(index).values
+    out = xr.Dataset(
+        {
+            "water_column": (CELL_DIM, wc, {"units": "m"}),
+            "bathy_variance": (CELL_DIM, bv, {"units": "m2"}),
+        },
+        coords={"cell_ids": cell_ids},
+    )
+    return out
 
 
 def _frequencies_rad_per_hour(constituents):

@@ -147,9 +147,28 @@ def test_sigma_ignored_by_legacy_warns():
         tide.check_tide_sigma("legacy", 1.0)
 
 
+def test_sigma_ignored_by_pedersen_warns():
+    with pytest.warns(UserWarning, match="ignored by tide_method='pedersen'"):
+        tide.check_tide_sigma("pedersen", 1.0)
+
+
+def test_legacy_method_warns_and_unknown_raises():
+    with pytest.warns(UserWarning, match="incorrect"):
+        tide.check_tide_method("legacy")
+    with pytest.raises(ValueError, match="tide_method"):
+        tide.check_tide_method("nope")
+
+
 @pytest.mark.parametrize(
-    ("method", "sigma"), [("legacy", 2.0), ("legacy", None), ("healpix", 1.0)]
+    ("method", "sigma"),
+    [("legacy", 2.0), ("legacy", None), ("healpix", 1.0), ("pedersen", 2.0)],
 )
 def test_sigma_no_warning(method, sigma, recwarn):
     tide.check_tide_sigma(method, sigma)
+    assert not recwarn.list
+
+
+@pytest.mark.parametrize("method", ["pedersen", "healpix"])
+def test_valid_methods_do_not_warn(method, recwarn):
+    tide.check_tide_method(method)
     assert not recwarn.list

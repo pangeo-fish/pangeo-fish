@@ -17,10 +17,14 @@ The defaults shared by the demos are identical except for their output folders:
 | Main trajectories                    | Viterbi, mode, mean              |
 | Manual-sigma comparison trajectories | mode, mean                       |
 
-In the Complete demo's **Study settings**, set `tide_method = "legacy"` for
-the original gridded likelihood or `tide_method = "healpix"` to predict tides
-from local harmonic constants directly on the HMM grid. Install `.[notebooks,tide]`
-for the HEALPix method. See the [tide methods guide](../docs/tide.rst) for details.
+In the Complete demo's **Study settings**, `tide_method = "pedersen"` (default)
+uses the tide likelihood of [Pedersen et al. (2008)](https://doi.org/10.1139/f08-144)
+(*Can. J. Fish. Aquat. Sci.* 65:2367), ported from the
+[DTU / HMM geolocation MATLAB code](https://github.com/cliu3/hmm_smast/blob/dev/datalik/datalikelihood.m).
+`tide_method = "healpix"` compares the tide shape only, with a model error
+`tide_sigma_m`. Both predict tides from local harmonic constants directly on the
+HMM grid: install `.[notebooks,tide]`. See the [tide methods guide](../docs/tide.rst)
+for details.
 
 The Complete demo also includes bathymetry and a two-sigma model. The
 manual-sigma appendix uses a separate `comparison_track_modes` setting in both
@@ -40,7 +44,7 @@ papermill notebooks/pangeo-fish-complete-demo.ipynb executed/complete-A19124.ipy
   -k python3 -p tag_name A19124 -p scratch_root ./results/complete
 ```
 
-To compare with the HEALPix tide method, use a separate results folder.
+To compare with the `healpix` tide method, use a separate results folder.
 
 ```bash
 python -m pip install -e '.[notebooks,tide]'

@@ -81,22 +81,49 @@ def check_pressure_units(values, units=None, name="pressure"):
         )
 
 
+TIDE_METHODS = ("pedersen", "healpix", "legacy")
+
+
+def check_tide_method(tide_method):
+    """Validate ``tide_method`` and warn when it is the incorrect legacy method.
+
+    ``"legacy"`` is kept only to reproduce old runs: it is a depth likelihood around
+    the water-column thickness, not a tidal likelihood (see
+    :func:`datalikelihood_tide_only_full_normalized`).
+    """
+    if tide_method not in TIDE_METHODS:
+        raise ValueError(
+            f"tide_method must be one of {TIDE_METHODS}, got {tide_method!r}"
+        )
+    if tide_method == "legacy":
+        warnings.warn(
+            "tide_method='legacy' is incorrect and kept only to reproduce old runs: it"
+            " does not compute a tidal likelihood. Use tide_method='pedersen'"
+            " (Pedersen et al. 2008) or 'healpix'.",
+            UserWarning,
+            stacklevel=2,
+        )
+
+
 def check_tide_sigma(tide_method, tide_sigma_m, default=2.0):
-    """Warn when ``tide_sigma_m`` is set but the legacy tide method ignores it.
+    """Warn when ``tide_sigma_m`` is set but the chosen tide method ignores it.
 
     The legacy method (``tide_pdf``) estimates the observation error from the
-    data and uses a fixed 2 m fallback; only ``tide_method="healpix"`` reads
-    ``tide_sigma_m``. A value equal to the demo default (2.0) is not reported.
+    data and uses a fixed 2 m fallback; ``tide_method="pedersen"`` takes its
+    covariance from the Pedersen et al. parameters; only ``tide_method="healpix"``
+    reads ``tide_sigma_m``. A value equal to the demo default (2.0) is not reported.
     """
-    if (
-        tide_method == "legacy"
-        and tide_sigma_m is not None
-        and float(tide_sigma_m) != default
+    if tide_method in ("legacy", "pedersen") and (
+        tide_sigma_m is not None and float(tide_sigma_m) != default
     ):
+        what = (
+            "it uses a fixed fallback of 2.0 m"
+            if tide_method == "legacy"
+            else "its covariance has its own parameters"
+        )
         warnings.warn(
-            f"tide_sigma_m={tide_sigma_m} is ignored by tide_method='legacy' "
-            "(it uses a fixed fallback of 2.0 m). Use tide_method='healpix' to "
-            "set the model error.",
+            f"tide_sigma_m={tide_sigma_m} is ignored by tide_method='{tide_method}' "
+            f"({what}). Use tide_method='healpix' to set the model error.",
             UserWarning,
             stacklevel=2,
         )
@@ -382,6 +409,16 @@ def datalikelihood_tide_only_full_normalized(
     td_depth, td_time, tidal_ds, tide_found, sigma_tid=2.0
 ):
     """
+    INCORRECT METHOD, kept only to reproduce old runs (see ``tide_method="legacy"``).
+
+    It reads the equilibrium-tide amplitude (constant in space) and the 1992
+    astronomical argument instead of the harmonic constants ``hRe``/``hIm``, mixes
+    omega in 1/s with a time in hours, and uses hourly means with the within-hour
+    standard deviation as sigma. It is therefore a depth likelihood around the
+    water-column thickness, not a tidal likelihood, and not a faithful port of
+    ``datalikelihood.m`` (Pedersen et al. 2008). Use
+    :func:`pangeo_fish.tide_healpix.pedersen_tide_likelihood` instead.
+
     Compute a normalized PDF for each steptime.
     - If tide detected : PDF = likelihood  (gaussian)
     - Else :  uniform PDF on the ocean (sum == 1)
@@ -460,7 +497,15 @@ def datalikelihood_tide_only_full_normalized(
 
 
 def tide_pdf(tide_behav, data):
-    """Compute the tide-based likelihood map of a tag from its depth time series.
+    """INCORRECT METHOD, kept only to reproduce old runs: tide-based likelihood map.
+
+    It is not a tidal likelihood (it reads the equilibrium-tide amplitude and the
+    1992 astronomical argument instead of the harmonic constants, mixes omega in 1/s
+    with hours, and uses the within-hour sd as sigma): see
+    :func:`datalikelihood_tide_only_full_normalized`. Use
+    ``tide_method="pedersen"`` instead.
+
+    Compute the tide-based likelihood map of a tag from its depth time series.
 
     The function resamples the depth record into hourly groups, builds a matrix of
     measurements (one row per hour, padded with NaN) and a binary hourly indicator of tide
