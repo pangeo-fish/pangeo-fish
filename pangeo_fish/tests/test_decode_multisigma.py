@@ -6,7 +6,31 @@ import pytest
 import xarray as xr
 import xdggs  # noqa: F401
 
+from pangeo_fish.hmm import decode
 from pangeo_fish.hmm.decode import build_transitions, viterbi_healpix
+from pangeo_fish.hmm.filter import forward
+
+
+def sigma_indices_used_by_the_filter(predictor_index, n):
+    """Index of the sigma that ``hmm.filter.forward`` applies to each transition."""
+    calls = []
+
+    class Recorder:
+        def __init__(self, index):
+            self.index = index
+
+        def predict(self, X, *, mask=None):
+            calls.append(self.index)
+            return X
+
+    steps = len(predictor_index)
+    forward(
+        np.ones((steps, n)),
+        [Recorder(0), Recorder(1)],
+        predictor_index,
+        np.full(n, 1 / n),
+    )
+    return calls
 
 
 @pytest.mark.parametrize("dtype", [np.float64, np.float32])
@@ -21,16 +45,27 @@ def test_multisigma_transitions_and_exact_viterbi(dtype):
         np.testing.assert_array_equal(neighbors[s], single_neighbors[0])
         np.testing.assert_array_equal(weights[s], single_weights[0])
 
-    # Enumerate all feasible paths independently of the decoder's dynamic
-    # programming, using the exact same transitions as the single-sigma model.
     rng = np.random.default_rng(3)
     pdf = rng.uniform(0.1, 1, (3, len(cells))).astype(dtype)
     initial = np.zeros(len(cells), dtype=dtype)
     initial[5] = 1
     mask = np.ones(len(cells), dtype=bool)
     mask[6] = False
+    indices = np.array([1, 0, 0], dtype=np.int32)
+    # the sigma of each transition is the one the HMM filter applies
+    transition_indices = sigma_indices_used_by_the_filter(indices, len(cells))
+    assert transition_indices == [1, 0]
+    # Favour a cell that the wide kernel reaches from the first cell and the
+    # narrow one does not: the two possible conventions then give different paths.
+    reach = [
+        set(nbr[5, np.isfinite(w[5])].tolist()) for nbr, w in zip(neighbors, weights)
+    ]
+    far = min((reach[1] - reach[0]) & set(np.flatnonzero(mask).tolist()))
+    pdf[1:, far] = 50
     pdf[:, ~mask] = np.nan
-    indices = np.array([0, 0, 1], dtype=np.int32)
+
+    # Enumerate all feasible paths independently of the decoder's dynamic
+    # programming, using the exact same transitions as the single-sigma model.
     dense = []
     for nbr, w in zip(neighbors, weights):
         matrix = np.full((len(cells), len(cells)), -np.inf)
@@ -38,17 +73,24 @@ def test_multisigma_transitions_and_exact_viterbi(dtype):
             valid = np.isfinite(w[destination])
             matrix[destination, nbr[destination, valid]] = w[destination, valid]
         dense.append(matrix)
-    candidates = []
-    for second, last in product(np.flatnonzero(mask), repeat=2):
-        score = (
-            dense[0][second, 5]
-            + np.log(pdf[1, second])
-            + dense[1][last, second]
-            + np.log(pdf[2, last])
-        )
-        candidates.append((score, (5, second, last)))
-    best_score, best_path = max(candidates)
+
+    def best(transition_indices):
+        into_second, into_last = transition_indices
+        candidates = []
+        for second, last in product(np.flatnonzero(mask), repeat=2):
+            score = (
+                dense[into_second][second, 5]
+                + np.log(pdf[1, second])
+                + dense[into_last][last, second]
+                + np.log(pdf[2, last])
+            )
+            candidates.append((score, (5, second, last)))
+        return max(candidates)
+
+    best_score, best_path = best(transition_indices)
     assert np.isfinite(best_score)
+    # using the index of the step a transition ends at would give another path
+    assert best(indices[1:])[1] != best_path
     emission = xr.Dataset(
         {
             "pdf": (("time", "cells"), pdf),
@@ -60,7 +102,63 @@ def test_multisigma_transitions_and_exact_viterbi(dtype):
             "cell_ids": ("cells", cells),
             "time": pd.date_range("2025-01-01", periods=3),
         },
-    ).dggs.decode({"grid_name": "healpix", "level": level, "indexing_scheme": "nested"})
+    ).dggs.decode(
+        {
+            "grid_name": "healpix",
+            "level": level,
+            "indexing_scheme": "nested",
+            "ellipsoid": "WGS84",
+        }
+    )
     actual = viterbi_healpix(emission, sigmas)
     np.testing.assert_array_equal(actual.cell_ids, cells[list(best_path)])
     xr.testing.assert_identical(actual.time, emission.time)
+
+
+@pytest.mark.parametrize("indices, expected_sigmas", [([1], []), ([0, 1], [0.02])])
+def test_viterbi_skips_sigma_used_only_at_final_step(
+    monkeypatch, indices, expected_sigmas
+):
+    level = 2
+    cells = np.arange(12 * 4**level, dtype=np.uint64)
+    initial = np.zeros(len(cells))
+    initial[5] = 1
+    emission = xr.Dataset(
+        {
+            "pdf": (("time", "cells"), np.ones((len(indices), len(cells)))),
+            "initial": ("cells", initial),
+            "mask": ("cells", np.ones(len(cells), dtype=bool)),
+            "predictor_index": ("time", indices),
+        },
+        coords={"cell_ids": ("cells", cells), "time": np.arange(len(indices))},
+    )
+    built_sigmas = []
+
+    def record_transitions(cell_ids, level, sigmas, **kwargs):
+        built_sigmas.extend(sigmas)
+        return build_transitions(cell_ids, level, sigmas, **kwargs)
+
+    monkeypatch.setattr(decode, "build_transitions", record_transitions)
+    actual = viterbi_healpix(emission, [0.02, 0.15], level=level)
+
+    assert built_sigmas == expected_sigmas
+    np.testing.assert_array_equal(actual.cell_ids, [5] * len(indices))
+
+
+def test_viterbi_rejects_out_of_range_final_index():
+    level = 2
+    cells = np.arange(12 * 4**level, dtype=np.uint64)
+    initial = np.zeros(len(cells))
+    initial[5] = 1
+    emission = xr.Dataset(
+        {
+            "pdf": (("time", "cells"), np.ones((3, len(cells)))),
+            "initial": ("cells", initial),
+            "mask": ("cells", np.ones(len(cells), dtype=bool)),
+            # no transition uses the last index, but it must still be valid
+            "predictor_index": ("time", [0, 0, 2]),
+        },
+        coords={"cell_ids": ("cells", cells), "time": np.arange(3)},
+    )
+    with pytest.raises(ValueError, match="out of range"):
+        viterbi_healpix(emission, [0.02, 0.15], level=level)

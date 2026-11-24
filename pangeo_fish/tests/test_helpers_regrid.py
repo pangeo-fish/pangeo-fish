@@ -94,13 +94,13 @@ def test_regrid_coastal_constant_with_real_resamplers():
         },
     )
     ct = helpers.CloughTocherResampler(
-        lon_deg=lon[sea], lat_deg=lat[sea], level=8, ellipsoid="sphere"
+        lon_deg=lon[sea], lat_deg=lat[sea], level=8, ellipsoid="WGS84"
     )
     bil = helpers.BilinearResampler(
         lon_deg=lon[sea],
         lat_deg=lat[sea],
         level=8,
-        ellipsoid="sphere",
+        ellipsoid="WGS84",
         threshold=0.5,
         ring_search_max=4,
     )
@@ -189,3 +189,33 @@ def test_regrid_keeps_negative_values_of_signed_fields():
     finite = np.isfinite(values)
     assert finite.any()
     np.testing.assert_allclose(values[finite], -2.5)
+
+
+@pytest.mark.parametrize("dims", [("yi", "xi"), ("xi", "yi")])
+def test_resolution_2d_uses_named_axes_on_a_skewed_grid(dims):
+    yi, xi = np.indices((3, 5))
+    lon = -7 + 0.1 * xi + 0.2 * yi
+    lat = 46 + 0.1 * yi
+    source = xr.Dataset(
+        {"diff": (("time", "yi", "xi"), np.zeros((11, 3, 5)))},
+        coords={
+            "time": np.arange(11),
+            "longitude": (("yi", "xi"), lon),
+            "latitude": (("yi", "xi"), lat),
+        },
+    ).transpose("time", *dims)
+
+    assert helpers._resolution_2d(source) == [5, 3]
+
+
+def test_resolution_2d_with_one_dimensional_coordinates():
+    source = xr.Dataset(
+        {"diff": (("time", "latitude", "longitude"), np.zeros((11, 3, 5)))},
+        coords={
+            "time": np.arange(11),
+            "longitude": np.linspace(-7, 0, 5),
+            "latitude": np.linspace(46, 51.5, 3),
+        },
+    )
+
+    assert helpers._resolution_2d(source) == [5, 3]

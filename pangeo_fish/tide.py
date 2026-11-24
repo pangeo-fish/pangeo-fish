@@ -943,6 +943,8 @@ def merge_tide_with_total(target_root, storage_options=None):
       likelihood over that day's available cells, so that unknown cells are
       neither favoured nor penalised against the known ones.
 
+    Older HEALPix stores without an ellipsoid attribute use the spherical grid.
+
     Parameters
     ----------
     target_root : str or Path
@@ -973,6 +975,9 @@ def merge_tide_with_total(target_root, storage_options=None):
     for name in ("grid_name", "level", "indexing_scheme", "ellipsoid"):
         tide_value = daily.cell_ids.attrs.get(name)
         total_value = total.cell_ids.attrs.get(name)
+        if name == "ellipsoid":
+            tide_value = "sphere" if tide_value is None else tide_value
+            total_value = "sphere" if total_value is None else total_value
         if (
             tide_value is not None
             and total_value is not None
@@ -1047,6 +1052,13 @@ def merge_tide_with_total(target_root, storage_options=None):
         behav_found=daily_flag("behav_found"),
     )
     merged.attrs = total.attrs.copy()
+    if "ellipsoid" not in merged.cell_ids.attrs:
+        # older total stores without the attribute use the spherical grid (checked
+        # above): write the ellipsoid explicitly, as the tide store does
+        ellipsoid = daily.cell_ids.attrs.get("ellipsoid", "sphere")
+        merged = merged.assign_coords(
+            cell_ids=merged.cell_ids.assign_attrs(ellipsoid=ellipsoid)
+        )
 
     tide_mask = merged["tide_found"].broadcast_like(merged["pdf_tide"])
     behav_mask = merged["behav_found"].broadcast_like(merged["pdf_tide"])

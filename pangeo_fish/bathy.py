@@ -55,7 +55,7 @@ def compute_healpix_histogram_region_bin_size(
     chunk_size=500,
     depth_offset=0,
     depth_bin_size=1,
-    ellipsoid="sphere",
+    ellipsoid="WGS84",
     default_stdev_m=_DEFAULT_STDEV_M,
 ):
     """Probability that the seabed of each HEALPix cell is at least ``d`` deep.
@@ -81,8 +81,10 @@ def compute_healpix_histogram_region_bin_size(
     depth_bin_size : float
         Bin width in metres. The final interval can be shorter when using
         ``max_depth_m``.
-    ellipsoid : str or dict
-        Ellipsoid of the HEALPix grid (the one of ``diff-regridded.zarr``).
+    ellipsoid : str or dict, default "WGS84"
+        Ellipsoid of the HEALPix grid. When using an existing
+        ``diff-regridded.zarr``, use its ellipsoid or pass ``"sphere"`` for a
+        legacy store without an ellipsoid attribute.
     default_stdev_m : float, default 1
         Vertical uncertainty (m) of the GEBCO depths where ``stdev`` is missing
         or non-finite. A larger value tolerates more errors, e.g. the tide that

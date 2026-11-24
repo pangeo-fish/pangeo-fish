@@ -1,4 +1,4 @@
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import MISSING, asdict, dataclass, field, replace
 
 import movingpandas as mpd
 import numpy as np
@@ -46,6 +46,18 @@ class EagerEstimator:
             Mapping of parameter name to new value.
         """
         return replace(self, **params)
+
+    def _viterbi_ellipsoid(self):
+        """Return the predictor's ellipsoid, or None to use the emission grid."""
+        factory = self.predictor_factory
+        keywords = getattr(factory, "keywords", None) or {}
+        ellipsoid = keywords.get("ellipsoid")
+        if ellipsoid is not None:
+            return ellipsoid
+
+        fields = getattr(getattr(factory, "func", factory), "__dataclass_fields__", {})
+        default = getattr(fields.get("ellipsoid"), "default", MISSING)
+        return None if default is MISSING else default
 
     ####New
     def _get_predictors(self) -> list[Predictor]:
@@ -284,6 +296,8 @@ class EagerEstimator:
             - ``"mean"``: use the centroid of the state probabilities as decoded state.
             - ``"mode"``: use the maximum of the state probabilities as decoded state.
             - ``"viterbi"``: use the Viterbi algorithm to determine the most probable states.
+            - ``"viterbi_healpix"``: decode the most probable HEALPix track with transitions
+              truncated at four standard deviations.
 
             If a list of methods is given, decode using all methods in sequence.
 
@@ -314,7 +328,12 @@ class EagerEstimator:
             # TODO: not supported with multiple sigma
             "viterbi": compose_left(first, curry(viterbi, sigma=self.sigma)),
             "viterbi_healpix": compose_left(
-                first, curry(viterbi_healpix, sigmas=self.sigma)
+                first,
+                curry(
+                    viterbi_healpix,
+                    sigmas=self.sigma,
+                    ellipsoid=self._viterbi_ellipsoid(),
+                ),
             ),
         }
         if not isinstance(mode, list):

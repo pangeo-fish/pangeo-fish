@@ -481,10 +481,18 @@ def test_writer_roundtrip_with_merge(tmp_path, synthetic_astronomy):
 
 
 @pytest.mark.parametrize(
-    ("level", "ellipsoid", "mismatch"),
-    [(2, "WGS84", None), (3, "WGS84", "level"), (2, "sphere", "ellipsoid")],
+    ("level", "tide_ellipsoid", "total_ellipsoid", "mismatch"),
+    [
+        (2, "WGS84", "WGS84", None),
+        (3, "WGS84", "WGS84", "level"),
+        (2, "WGS84", "sphere", "ellipsoid"),
+        (2, "WGS84", None, "ellipsoid"),
+        (2, "sphere", None, None),
+    ],
 )
-def test_merge_tide_matches_cell_ids_and_grid(tmp_path, level, ellipsoid, mismatch):
+def test_merge_tide_matches_cell_ids_and_grid(
+    tmp_path, level, tide_ellipsoid, total_ellipsoid, mismatch
+):
     from pangeo_fish.tide import merge_tide_with_total
 
     times = pd.date_range("2024-01-01", periods=8)
@@ -494,15 +502,21 @@ def test_merge_tide_matches_cell_ids_and_grid(tmp_path, level, ellipsoid, mismat
             "ocean_mask": ("cells", [True, True]),
             "tide_found": ("time", np.ones(len(times))),
         },
-        coords={"time": times, "cell_ids": th.make_cell_ids([1, 2], 2, "WGS84")},
+        coords={
+            "time": times,
+            "cell_ids": th.make_cell_ids([1, 2], 2, tide_ellipsoid),
+        },
     )
     th.write_tide_pdf_healpix(likelihood, tmp_path, behav_found=[0, 1] * 4)
+    total_cells = th.make_cell_ids([2, 1], level, total_ellipsoid or "sphere")
+    if total_ellipsoid is None:
+        total_cells.attrs.pop("ellipsoid")
     total = xr.Dataset(
         {
             "pdf": (("time", "cells"), np.tile([[0.3, 0.7], [0.4, 0.6]], (4, 1))),
             "pdf_bathy": (("time", "cells"), np.tile([[0.6, 0.4]], (8, 1))),
         },
-        coords={"time": times, "cell_ids": th.make_cell_ids([2, 1], level, ellipsoid)},
+        coords={"time": times, "cell_ids": total_cells},
     )
     total.to_zarr(
         tmp_path / "total_pdf.zarr",
@@ -521,8 +535,11 @@ def test_merge_tide_matches_cell_ids_and_grid(tmp_path, level, ellipsoid, mismat
     np.testing.assert_array_equal(merged.pdf, total.pdf)
     np.testing.assert_array_equal(merged.pdf_tide, likelihood.pdf[:, ::-1])
     merged.to_zarr(tmp_path / "merged.zarr", zarr_format=2, consolidated=True)
+    expected_bathy = total.pdf_bathy.assign_coords(
+        cell_ids=total.cell_ids.assign_attrs(ellipsoid=tide_ellipsoid)
+    )
     with xr.open_zarr(tmp_path / "merged.zarr") as written:
-        xr.testing.assert_identical(written.pdf_bathy, total.pdf_bathy)
+        xr.testing.assert_identical(written.pdf_bathy, expected_bathy)
 
 
 @pytest.mark.parametrize("use_xarray", [False, True])
