@@ -462,7 +462,8 @@ def still_tag_tide_likelihood(
     with a separate bathymetry likelihood).
 
     ``sigma`` is the model error (tide model, surge, sensor), not the variability of
-    the depth within an hour. For each window of length ``time_step``::
+    the depth within an hour. For each window of length ``time_step``, centred on its
+    label ``T`` (``[T - 12 h, T + 12 h)`` for one day, like the temperature emission)::
 
         log L_c = -0.5 * n_eff * mean(r_c^2) / sigma^2
 
@@ -521,7 +522,7 @@ def still_tag_tide_likelihood(
         given), ``n_samples``, ``no_tide_rms``, ``best_rms`` (smallest RMS of the
         demeaned residuals over the allowed cells, the detection statistic) and
         ``tide_found`` (time, 1 when the window is used as evidence, else 0), with
-        ``cell_ids`` and its grid attributes. ``time`` is the start of each window.
+        ``cell_ids`` and its grid attributes. ``time`` is the centre of each window.
         Windows without valid samples (e.g. ``valid`` all False) get a uniform pdf.
 
     Raises
@@ -559,10 +560,13 @@ def still_tag_tide_likelihood(
         starts = pd.DatetimeIndex([record_start.floor("D")])
         labels = np.zeros(len(hourly), dtype=int)
     else:
-        first = record_start.floor(time_step)
-        last = record_end.floor(time_step)
+        # windows centred on their label T: [T - time_step/2, T + time_step/2),
+        # the convention of the temperature emission (cf_xarray time bounds)
+        half = pd.Timedelta(time_step) / 2
+        first = (record_start + half).floor(time_step)
+        last = (record_end + half).floor(time_step)
         starts = pd.date_range(first, last, freq=time_step)
-        labels = starts.get_indexer(hourly.index.floor(time_step))
+        labels = starts.get_indexer((hourly.index + half).floor(time_step))
     if time_step is not None and freq is not None:
         # integer nanoseconds: no timedelta division (NumPy generic-unit deprecation)
         window = np.diff(pd.date_range("2000-01-01", periods=2, freq=time_step).asi8)

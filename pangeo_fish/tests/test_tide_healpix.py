@@ -207,7 +207,7 @@ def test_timezone_aware_times(synthetic_astronomy):
 # --------------------------------------------------------------------------
 
 
-def _synthetic_record(const, cell, start="2023-08-01", days=4, depth=19.0, noise=0.05):
+def _synthetic_record(const, cell, start="2023-08-01T12:00", days=4, depth=19.0, noise=0.05):
     times = pd.date_range(start, periods=days * 24 * 6, freq="10min")
     eta = th.predict_tide(const.isel(cells=[cell]), times.values).values[:, 0]
     rng = np.random.default_rng(3)
@@ -239,7 +239,7 @@ def test_likelihood_uniform_without_evidence(synthetic_astronomy):
     real[:, :10] = np.nan  # land cells
     const["tide_real"] = (const["tide_real"].dims, real)
     record = _synthetic_record(const, 50, days=2)
-    valid = pd.Series(record.index < pd.Timestamp("2023-08-02"), index=record.index)
+    valid = pd.Series(record.index < pd.Timestamp("2023-08-02T12:00"), index=record.index)
     lik = th.still_tag_tide_likelihood(record, const, sigma=0.3, valid=valid)
     assert lik["tide_found"].values.tolist() == [1, 0]
     day2 = lik["pdf"].isel(time=1).values
@@ -251,7 +251,7 @@ def test_likelihood_time_reference(synthetic_astronomy):
     const = random_constants(region_cells(), seed=7)
     record = _synthetic_record(const, 77, days=5)
     full = th.still_tag_tide_likelihood(record, const, sigma=0.3)
-    late = th.still_tag_tide_likelihood(record["2023-08-03":], const, sigma=0.3)
+    late = th.still_tag_tide_likelihood(record["2023-08-03T12:00":], const, sigma=0.3)
     xr.testing.assert_allclose(
         full["pdf"].sel(time=late.time), late["pdf"], rtol=1e-10, atol=1e-300
     )
@@ -556,8 +556,8 @@ def test_model_based_detection(synthetic_astronomy):
     record = _synthetic_record(const, 60, days=4, noise=0.03)
     # day 2: flat record (no tide), day 3: noise only (no tide of any cell)
     rng = np.random.default_rng(0)
-    day2 = (record.index >= "2023-08-02") & (record.index < "2023-08-03")
-    day3 = (record.index >= "2023-08-03") & (record.index < "2023-08-04")
+    day2 = (record.index >= "2023-08-02T12:00") & (record.index < "2023-08-03T12:00")
+    day3 = (record.index >= "2023-08-03T12:00") & (record.index < "2023-08-04T12:00")
     record[day2] = 19.0
     record[day3] = 19.0 + rng.normal(0, 0.5, day3.sum())
     lik = th.still_tag_tide_likelihood(record, const, sigma=0.3, detection_ratio=0.5)
@@ -775,7 +775,7 @@ def test_n_eff_scaled_by_window_coverage(synthetic_astronomy):
     cells = region_cells()
     const = random_constants(cells, seed=2)
     record = _synthetic_record(const, 10, days=2, noise=0.2)
-    record = record[record.index < pd.Timestamp("2023-08-02T12:00")]  # 1.5 days
+    record = record[record.index < pd.Timestamp("2023-08-03T00:00")]  # 1.5 days
     lik = th.still_tag_tide_likelihood(record, const, sigma=0.4, n_eff=8)
     n = -2 * 0.4**2 * lik["log_likelihood"] / lik["rms"] ** 2
     np.testing.assert_allclose(n.isel(cells=0).values, [8.0, 4.0])
@@ -841,3 +841,18 @@ def test_fes2022b_native_mesh_roundtrip(tmp_path, longitude):
     sphere = th.make_cell_ids(cells.values, level, "sphere")
     with pytest.raises(ValueError, match="requires WGS84"):
         th.fes2022b_constants_to_healpix(source, sphere)
+
+
+def test_window_is_centred_on_label(synthetic_astronomy):
+    """Label T covers [T - 12 h, T + 12 h), like the temperature emission."""
+    const = random_constants(region_cells()[:5], seed=5)
+    record = _synthetic_record(const, 1, start="2023-08-01", days=3)
+    # starts at a label (T): partial first and last windows
+    lik = th.still_tag_tide_likelihood(record, const, sigma=0.3, freq=None)
+    times = pd.DatetimeIndex(lik.time.values)
+    assert times[0] == pd.Timestamp("2023-08-01")
+    assert times[-1] == pd.Timestamp("2023-08-04")
+    # 10 min samples: 72 in each partial edge window, 144 per full day
+    np.testing.assert_array_equal(lik.n_samples.values, [72, 144, 144, 72])
+    day = record[(record.index >= "2023-08-01 12:00") & (record.index < "2023-08-02 12:00")]
+    assert len(day) == lik.n_samples.sel(time="2023-08-02").item()

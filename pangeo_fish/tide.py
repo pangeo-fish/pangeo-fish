@@ -532,6 +532,17 @@ def detect_tide(tag_log, tag_name, smooth=False, **kwargs):
 VARS_NO_TIME = ["cell_ids", "latitude", "longitude", "resolution", "ocean_mask"]
 
 
+def _centered_daily_mean(obj):
+    """Daily mean over [T - 12 h, T + 12 h), labelled T (midnight).
+
+    This is the window of the temperature emission (``cf_xarray`` time bounds of a
+    daily axis), unlike ``resample(time="1D")`` which covers [T, T + 24 h).
+    """
+    half = pd.Timedelta("12h")
+    out = obj.resample(time="1D", offset=half).mean(skipna=True)
+    return out.assign_coords(time=out.time + half)
+
+
 def tide_to_healpix(
     target_root,
     refinement_level,
@@ -582,7 +593,8 @@ def tide_to_healpix(
     # Regrid by temporal chunks to limit memory
     times = lik_full.time.to_index()
     n_time = len(times)
-    days = times.normalize()
+    # chunks are cut at 12:00 so that no centred daily window (label +- 12 h) is split
+    days = (times - pd.Timedelta("12h")).normalize()
 
     day_starts = np.flatnonzero(np.r_[True, days[1:] != days[:-1]])
 
@@ -609,7 +621,7 @@ def tide_to_healpix(
         mask = reshaped["ocean_mask"].compute()
         if isinstance(mask.data, sparse.SparseArray):
             reshaped["ocean_mask"] = mask.copy(data=mask.data.todense())
-        chunks.append(reshaped.resample(time="1D").mean(skipna=True))
+        chunks.append(_centered_daily_mean(reshaped))
 
     print("Concatenating chunks...")
     ds = xr.concat(chunks, dim="time")
@@ -618,11 +630,11 @@ def tide_to_healpix(
     store_path = f"{target_root}/tide_pdf_healpix.zarr"
     write_time_blocks(ds.chunk({"cells": -1}), store_path, step=step)
 
-    tide_found_resampled = tide_found.resample(time="1D").mean(skipna=True)
+    tide_found_resampled = _centered_daily_mean(tide_found)
     tide_found_resampled.sel(time=ds.time).to_zarr(
         store_path, mode="a", zarr_format=2, consolidated=False
     )
-    behav_found_resampled = behav_found.resample(time="1D").mean(skipna=True)
+    behav_found_resampled = _centered_daily_mean(behav_found)
     behav_found_resampled.sel(time=ds.time).to_zarr(
         store_path, mode="a", zarr_format=2, consolidated=False
     )

@@ -105,9 +105,11 @@ How the likelihoods differ
        supplies absolute depth evidence through its separate bathymetry PDF.
    * - Time aggregation
      - Produces hourly likelihoods on the latitude/longitude grid, regrids
-       them to HEALPix, then averages them by day.
+       them to HEALPix, then averages them by day. A day labelled ``T`` covers
+       ``[T - 12 h, T + 12 h)``, as in the temperature emission.
      - Averages observations and tide predictions over the same sample times
-       within each hour, then computes one likelihood per day on the HMM grid.
+       within each hour, then computes one likelihood per day on the HMM grid
+       (day ``T`` covers ``[T - 12 h, T + 12 h)``, as in the temperature emission).
        ``tide_sigma_m`` sets the model error and ``tide_min_samples`` sets
        the minimum number of valid hourly means for a day to contribute.
 
