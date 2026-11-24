@@ -27,7 +27,8 @@ show no dry cells.
 ## What `compute_diff` does
 
 - `min_water_depth="auto"` (default): if the model has dry cells (`H0 + XE <= 0`),
-  their `diff` becomes NaN, which gives them a probability of 0 later on, and a
+  their `diff` becomes NaN, which removes them from the combined probability
+  later on (the likelihood is NaN there, see {doc}`how-likelihoods-are-built`), and a
   `DryCellWarning` (a `UserWarning`) reports how many. **In practice this happens
   only with the North-West Shelf hourly product, so with NWS the dry cells are
   excluded automatically.** IBI (hourly and daily) and the global products have no

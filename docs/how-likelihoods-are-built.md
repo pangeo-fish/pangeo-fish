@@ -6,7 +6,7 @@ For the tide terms, see {doc}`tide`.
 For the movement model, see {doc}`choosing-conv-method`.
 For the input files, see {doc}`format`.
 
-All grids are HEALPix grids on the WGS84 ellipsoid.
+All grids are HEALPix grids on the WGS84 ellipsoid (the default `ellipsoid="WGS84"`).
 
 ## 1. Temperature (emission) likelihood
 
@@ -22,6 +22,7 @@ The temperature term is built in three steps: `compute_diff`, then `regrid_datas
    A level above the surface (negative `dynamic_depth`, for example at low tide) is moved to depth 0.
 4. For each tag record with a valid `pressure`, the model level with the closest depth is chosen (`diff_z`).
    There is no vertical interpolation.
+   A record with a missing temperature gives no residual.
 5. The residual of a record is `tag temperature - model temperature` at that level.
 6. `diff` is the mean of the residuals of the bin.
    It is signed. A bin without any valid record gives `NaN`.
@@ -60,7 +61,7 @@ Sea cells are chosen with `mask_threshold` (default `0.5`), and land cells get `
 ## 2. Acoustic likelihood
 
 `compute_acoustic_pdf` calls `emission_probability` with `nondetections="mask"`.
-Without `acoustic` and `stations` in the tag, `emission_probability` returns an empty dataset.
+If the tag has no `acoustic` or no `stations`, `emission_probability` returns an empty dataset.
 
 1. Detections are counted per receiver (`deployment_id`) in each time bin of the emission grid (`count_detections`).
    A `deployment_id` that is missing from `stations` raises a `ValueError`.
@@ -68,6 +69,7 @@ Without `acoustic` and `stations` in the tag, `emission_probability` returns an 
    The recover position is not used.
 3. The buffer of a receiver is the set of cells covered by a disc of radius `receiver_buffer` around that centre.
    It is a 0/1 mask per receiver.
+   The radius in metres is turned into an angle with a fixed radius of 6371 km (`buffer_points_cells`).
 4. In a time bin with detections, the weight of a cell is the sum over receivers of `mask * number of detections`.
    Cells in the buffer of several detecting receivers add up.
    The buffers are not intersected.
@@ -77,10 +79,11 @@ In a time bin without any detection, `nondetections` decides:
 
 | Value      | Weight in a time bin without detection                                                                                                                    |
 | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `"mask"`   | Cells inside the buffer of a receiver that was active during the whole bin get 0. Other cells share the weight equally. `compute_acoustic_pdf` uses this. |
+| `"mask"`   | Cells inside the buffer of a receiver that was active during the whole bin get `NaN`, so they are removed when the terms are combined (section 4). Other cells share the weight equally. `compute_acoustic_pdf` uses this. |
 | `"ignore"` | All cells have the same weight.                                                                                                                           |
 
 A receiver is active in a bin when the whole bin lies between its `deploy_time` and `recover_time`.
+A receiver that never covers a whole bin is handled separately in `create_masked_fill_map`.
 
 ## 3. Bathymetry likelihood
 
@@ -142,13 +145,15 @@ The demos use it.
    `NaN` cells are skipped in that sum.
 5. The result is stored as `pdf`.
 
-`normalize_pdf` warns when `pdf` has no value at some time steps.
+`normalize_pdf` warns when the input `pdf` (the temperature term) has no value at some time steps.
+This check runs before the product, so an empty product caused by another term is not reported there.
 It does not stop there.
 `optimize_pdf` calls an emission check first.
 That check raises a `ValueError` when a time step has no positive mass (`NaN`, 0 or negative everywhere), inside `mask` if the dataset has one.
 
-`combine_pdfs` is an older helper for temperature and acoustic only.
-When all cells are 0 or `NaN` at a time step, it replaces `pdf` by the acoustic values and warns.
+`combine_pdfs` is an older helper.
+It combines the terms with `combine_emission_pdf`.
+When, in every cell of a time step, the acoustic value is 0 or the temperature `pdf` is `NaN`, it replaces `pdf` by the acoustic values and warns.
 
 ### How the terms are aligned
 
@@ -175,7 +180,9 @@ When all cells are 0 or `NaN` at a time step, it replaces `pdf` by the acoustic 
 Multi-sigma mode starts when the dataset has a `predictor_index` variable, one integer per time step.
 `stamp_parameter_indices` builds it from a list of times (nearest time step).
 `stamp_parameter_indices_from_mask` builds it from a 0/1 mask, matched by position.
-Sigma is searched in radians, from `1e-4` to `maximum_speed * time step * adjustment_factor / Earth radius`.
+Sigma is searched in radians, from `1e-4` to `maximum_speed * time step * adjustment_factor / earth_radius`.
+By default `earth_radius` is the semi-major axis of the grid ellipsoid (6378.137 km for WGS84); it can be set with `earth_radius=`.
+In multi-sigma mode with `sigma_bounds`, each behaviour has its own upper bound, and the lower bound stays `1e-4`.
 
 ### Tide likelihood
 
