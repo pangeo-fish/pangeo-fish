@@ -468,8 +468,9 @@ def viterbi_healpix(emission, sigmas, truncate=4.0, ellipsoid="sphere", level=No
     emission : xarray.Dataset
         Dimensions (time, cells) for 'pdf'; 'initial' on cells;
         'mask' on cells (True = ocean); 'predictor_index' on time
-        (index into `sigmas` used for the transition into each step);
-        and 'cell_ids'.
+        (index into `sigmas`; as in the HMM filter, the transition from
+        step ``t`` to step ``t + 1`` uses the index of step ``t``, so the
+        index of the last step is not used); and 'cell_ids'.
     sigmas : sequence of float
         Standard deviations in radians.
     truncate : float, default 4.0
@@ -493,12 +494,15 @@ def viterbi_healpix(emission, sigmas, truncate=4.0, ellipsoid="sphere", level=No
     pdf = emission["pdf"].transpose("time", "cells").values
     initial = emission["initial"].transpose("cells").values
     ocean = np.asarray(emission["mask"].transpose("cells").values, dtype=bool)
-    sig_idx = np.asarray(emission["predictor_index"].values, dtype=int)
+    predictor_index = np.asarray(emission["predictor_index"].values, dtype=int)
 
     T, n = pdf.shape
     print(f"T={T},n={n}")
-    if sig_idx.min() < 0 or sig_idx.max() >= len(sigmas):
+    # validate every index, including the last one that no transition uses
+    if np.any((predictor_index < 0) | (predictor_index >= len(sigmas))):
         raise ValueError("predictor_index is out of range of the sigma list")
+    # the transition t - 1 -> t uses the index of step t - 1
+    sig_idx = predictor_index[:-1]
 
     # emissions in log space; the first step uses the initial distribution
     with np.errstate(divide="ignore"):
@@ -508,19 +512,13 @@ def viterbi_healpix(emission, sigmas, truncate=4.0, ellipsoid="sphere", level=No
     # sigmas arrondis pour éviter les doublons dus au flottant
     sigmas_r = np.array([float(f"{s:.10g}") for s in sigmas])
 
-    # sigmas réellement utilisés par predictor_index, sans doublons
-    used = np.unique(sig_idx)
-    unique_vals, inverse = np.unique(sigmas_r[used], return_inverse=True)
-
-    # nouvel index de chaque pas, dans la liste réduite
-    remap = np.full(len(sigmas), -1, dtype=int)
-    remap[used] = inverse
-    sig_idx_u = remap[sig_idx]
+    # Only build tables for sigmas used by outgoing transitions.
+    unique_vals, sig_idx_u = np.unique(sigmas_r[sig_idx], return_inverse=True)
     print(f"nombre de sigmas demandés : {len(sigmas)}")
     print(f"sigmas uniques utilisés   : {len(unique_vals)}")
     print(f"valeurs                   : {unique_vals}")
     print(
-        f"pas par sigma            : {np.bincount(sig_idx_u, minlength=len(unique_vals))}"
+        f"transitions par sigma    : {np.bincount(sig_idx_u, minlength=len(unique_vals))}"
     )
     print(f"n={n}, T={T}, level={level}")
     neighbors, logT = build_transitions(
@@ -535,7 +533,9 @@ def viterbi_healpix(emission, sigmas, truncate=4.0, ellipsoid="sphere", level=No
     bufs = [np.empty(nb.shape, dtype=np.float64) for nb in neighbors]
 
     for t in range(1, T):
-        s = sig_idx_u[t]
+        # same convention as hmm.filter: the transition t - 1 -> t uses the
+        # index of the step it starts from
+        s = sig_idx_u[t - 1]
         nbr, lt, buf = neighbors[s], logT[s], bufs[s]
 
         np.take(M, nbr, out=buf, mode="clip")  # buf = M[nbr], sans allocation
