@@ -1176,6 +1176,8 @@ def regrid_dataset_hpresample(
         ``ocean_mask`` (1 or True for sea, 0 or False for land).
     refinement_level : int
         HEALPix refinement level of the output.
+    ellipsoid : str, default: "WGS84"
+        Ellipsoid for the new grid. Pass ``"sphere"`` to reproduce a spherical grid.
     mask_threshold : float, default: 0.5
         Land/sea separation on the HEALPix grid. The ocean mask is interpolated
         to each HEALPix cell, which gives a value between 0 and 1 near the coast

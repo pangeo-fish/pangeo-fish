@@ -87,7 +87,6 @@ def test_bathy_pdf_store_decodes(tmp_path):
         nside=2**LEVEL,
         max_depth_m=200,
         depth_bin_size=16,
-        ellipsoid="WGS84",
     )
     reference = _reference(hist.cell_ids.values, "WGS84")
     write_healpix_zarr(reference, str(tmp_path / "diff-regridded.zarr"))

@@ -368,6 +368,9 @@ def build_transitions(cell_ids, level, sigmas, truncate=4.0, ellipsoid="WGS84"):
     """
     Neighbours and log-transition weights for each sigma (radians).
 
+    Pass the ellipsoid of the input cell IDs. For IDs from a legacy spherical
+    grid, pass ``ellipsoid="sphere"``.
+
     Returns
     -------
     neighbors : tuple of numpy.ndarray of int, each shape (n, K_sigma)
