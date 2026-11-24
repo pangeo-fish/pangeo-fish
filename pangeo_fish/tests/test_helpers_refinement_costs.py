@@ -89,10 +89,11 @@ class TestEstimateRefinementCosts:
 
     def test_ellipsoid_uses_authalic_radius(self):
         sphere = helpers.estimate_refinement_costs(
-            bbox=BBOX, n_steps=1, refinement_levels=[10]
+            bbox=BBOX, n_steps=1, refinement_levels=[10], ellipsoid="sphere"
         )
+        # the default
         wgs84 = helpers.estimate_refinement_costs(
-            bbox=BBOX, n_steps=1, refinement_levels=[10], ellipsoid="WGS84"
+            bbox=BBOX, n_steps=1, refinement_levels=[10]
         )
 
         # WGS84 authalic radius 6371.007 km, sphere radius 6370.997 km

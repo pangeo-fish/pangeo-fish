@@ -314,7 +314,7 @@ def viterbi2(emission, sigma):
 ### Healpix viterbi try ###
 
 
-def _angular_distances(cell_ids, disk, level, ellipsoid="sphere"):
+def _angular_distances(cell_ids, disk, level, ellipsoid="WGS84"):
     """
     Angular distances (radians) between each cell centre and its neighbourhood.
 
@@ -327,7 +327,7 @@ def _angular_distances(cell_ids, disk, level, ellipsoid="sphere"):
         Entries equal to -1 are padding.
     level : int
         HEALPix depth of the cells.
-    ellipsoid : str, default "sphere"
+    ellipsoid : str, default "WGS84"
         Reference ellipsoid.
 
     Returns
@@ -364,9 +364,12 @@ def _angular_distances(cell_ids, disk, level, ellipsoid="sphere"):
     return np.where(valid, d, np.nan)
 
 
-def build_transitions(cell_ids, level, sigmas, truncate=4.0, ellipsoid="sphere"):
+def build_transitions(cell_ids, level, sigmas, truncate=4.0, ellipsoid="WGS84"):
     """
     Neighbours and log-transition weights for each sigma (radians).
+
+    Pass the ellipsoid of the input cell IDs. For IDs from a legacy spherical
+    grid, pass ``ellipsoid="sphere"``.
 
     Returns
     -------
@@ -385,7 +388,7 @@ def build_transitions(cell_ids, level, sigmas, truncate=4.0, ellipsoid="sphere")
     by Gaussian1DHealpix, where mass leaving the domain is not renormalised.
     """
     if ellipsoid is None:
-        ellipsoid = "sphere"
+        ellipsoid = "WGS84"
 
     cell_ids = np.asarray(cell_ids, dtype=np.uint64)
     n = cell_ids.size

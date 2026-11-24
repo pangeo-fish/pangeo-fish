@@ -634,6 +634,8 @@ def tide_to_healpix(
 def merge_tide_with_total(target_root, storage_options=None):
     """Merge the daily tide likelihood with the other likelihoods on their common cells and days.
 
+    Older HEALPix stores without an ellipsoid attribute use the spherical grid.
+
     Parameters
     ----------
     target_root : str or Path
@@ -655,6 +657,9 @@ def merge_tide_with_total(target_root, storage_options=None):
     for name in ("grid_name", "level", "indexing_scheme", "ellipsoid"):
         tide_value = daily.cell_ids.attrs.get(name)
         total_value = total.cell_ids.attrs.get(name)
+        if name == "ellipsoid":
+            tide_value = "sphere" if tide_value is None else tide_value
+            total_value = "sphere" if total_value is None else total_value
         if (
             tide_value is not None
             and total_value is not None

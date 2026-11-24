@@ -1158,7 +1158,7 @@ def regrid_dataset_hpresample(
     ds: xr.Dataset,
     refinement_level: int,
     min_vertices=1,
-    ellipsoid="sphere",
+    ellipsoid="WGS84",
     dims: list[str] = ["cells"],
     plot=False,
     save=False,
@@ -1176,6 +1176,8 @@ def regrid_dataset_hpresample(
         ``ocean_mask`` (1 or True for sea, 0 or False for land).
     refinement_level : int
         HEALPix refinement level of the output.
+    ellipsoid : str, default: "WGS84"
+        Ellipsoid for the new grid. Pass ``"sphere"`` to reproduce a spherical grid.
     mask_threshold : float, default: 0.5
         Land/sea separation on the HEALPix grid. The ocean mask is interpolated
         to each HEALPix cell, which gives a value between 0 and 1 near the coast
@@ -1456,7 +1458,7 @@ def estimate_refinement_costs(
     n_steps: int,
     refinement_levels=range(8, 14),
     ocean_mask: xr.DataArray = None,
-    ellipsoid="sphere",
+    ellipsoid="WGS84",
     n_arrays: int = 5,
 ) -> pd.DataFrame:
     """Estimate grid resolution and cost of each HEALPix refinement level.
@@ -1477,7 +1479,7 @@ def estimate_refinement_costs(
         ``latitude``/``longitude``), e.g. ``model["H0"].notnull()`` or the
         ``ocean_mask`` of :func:`compute_diff`. If given, the ocean share is
         the fraction of cell centres whose nearest mask point is ocean.
-    ellipsoid : str, default: "sphere"
+    ellipsoid : str, default: "WGS84"
         Ellipsoid of the HEALPix grid, as passed to :func:`regrid_dataset_hpresample`.
     n_arrays : int, default: 5
         Number of ``(time, cells)`` float64 arrays held at the same time.

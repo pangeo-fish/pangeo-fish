@@ -102,7 +102,14 @@ def test_multisigma_transitions_and_exact_viterbi(dtype):
             "cell_ids": ("cells", cells),
             "time": pd.date_range("2025-01-01", periods=3),
         },
-    ).dggs.decode({"grid_name": "healpix", "level": level, "indexing_scheme": "nested"})
+    ).dggs.decode(
+        {
+            "grid_name": "healpix",
+            "level": level,
+            "indexing_scheme": "nested",
+            "ellipsoid": "WGS84",
+        }
+    )
     actual = viterbi_healpix(emission, sigmas)
     np.testing.assert_array_equal(actual.cell_ids, cells[list(best_path)])
     xr.testing.assert_identical(actual.time, emission.time)
