@@ -1,4 +1,4 @@
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import MISSING, asdict, dataclass, field, replace
 
 import movingpandas as mpd
 import numpy as np
@@ -46,6 +46,29 @@ class EagerEstimator:
             Mapping of parameter name to new value.
         """
         return replace(self, **params)
+
+    def _viterbi_healpix_settings(self) -> dict:
+        """Settings the Viterbi decoding shares with the predictors.
+
+        The kernel truncation and the ellipsoid given to the predictor factory
+        (or the defaults of the predictor class) are passed on, so that the
+        decoding uses the same transition radius and the same grid geometry as
+        the HMM filter. A setting the predictor does not have is left to the
+        default of :py:func:`pangeo_fish.hmm.decode.viterbi_healpix`.
+        """
+        factory = self.predictor_factory
+        keywords = getattr(factory, "keywords", None) or {}
+        fields = getattr(getattr(factory, "func", factory), "__dataclass_fields__", {})
+
+        settings = {}
+        for name in ("truncate", "ellipsoid"):
+            value = keywords.get(name)
+            if value is None and name in fields:
+                default = fields[name].default
+                value = None if default is MISSING else default
+            if value is not None:
+                settings[name] = value
+        return settings
 
     ####New
     def _get_predictors(self) -> list[Predictor]:
@@ -314,7 +337,12 @@ class EagerEstimator:
             # TODO: not supported with multiple sigma
             "viterbi": compose_left(first, curry(viterbi, sigma=self.sigma)),
             "viterbi_healpix": compose_left(
-                first, curry(viterbi_healpix, sigmas=self.sigma)
+                first,
+                curry(
+                    viterbi_healpix,
+                    sigmas=self.sigma,
+                    **self._viterbi_healpix_settings(),
+                ),
             ),
         }
         if not isinstance(mode, list):

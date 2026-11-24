@@ -345,16 +345,13 @@ def _angular_distances(cell_ids, disk, level, ellipsoid="sphere"):
     # small but grows at high latitude.
     ids = np.where(valid, disk, 0).astype(np.uint64)
 
-    depth_c = np.full(cell_ids.size, level, dtype=np.uint8)
-    depth_d = np.full(ids.size, level, dtype=np.uint8)
-
     # centre vectors of the sources, shape (n, 3)
     pc = np.stack(
-        hgn.healpix_to_cartesian(cell_ids, depth_c, ellipsoid=ellipsoid), axis=-1
+        hgn.healpix_to_cartesian(cell_ids, level, ellipsoid=ellipsoid), axis=-1
     )
     # centre vectors of the neighbours, shape (n, M, 3)
     pd = np.stack(
-        hgn.healpix_to_cartesian(ids.ravel(), depth_d, ellipsoid=ellipsoid), axis=-1
+        hgn.healpix_to_cartesian(ids.ravel(), level, ellipsoid=ellipsoid), axis=-1
     ).reshape(ids.shape + (3,))
 
     nc = np.linalg.norm(pc, axis=-1)  # (n,)
@@ -459,7 +456,21 @@ def build_transitions(cell_ids, level, sigmas, truncate=4.0, ellipsoid="sphere")
     return tuple(all_nbr), tuple(all_logT)
 
 
-def viterbi_healpix(emission, sigmas, truncate=4.0, ellipsoid="sphere", level=None):
+def _grid_ellipsoid(emission):
+    """Ellipsoid of the HEALPix grid of ``emission`` (``"sphere"`` if not recorded)."""
+    try:
+        ellipsoid = getattr(emission.dggs.grid_info, "ellipsoid", None)
+    except ValueError:
+        # no DGGS index on the dataset
+        ellipsoid = None
+    if ellipsoid is None:
+        ellipsoid = emission["cell_ids"].attrs.get("ellipsoid")
+    if ellipsoid is None:
+        return "sphere"
+    return getattr(ellipsoid, "name", ellipsoid)
+
+
+def viterbi_healpix(emission, sigmas, truncate=4.0, ellipsoid=None, level=None):
     """
     Viterbi decoding on a HEALPix grid, with a sigma that may change per time step.
 
@@ -474,8 +485,11 @@ def viterbi_healpix(emission, sigmas, truncate=4.0, ellipsoid="sphere", level=No
         Standard deviations in radians.
     truncate : float, default 4.0
         Truncation radius in units of sigma.
-    ellipsoid : str, default "sphere"
-        Reference ellipsoid.
+    ellipsoid : str, optional
+        Reference ellipsoid of the HEALPix grid. By default, the ellipsoid
+        recorded with the grid of ``emission`` (``"sphere"`` if there is none):
+        the cell ids only give the right positions on the ellipsoid they were
+        computed for.
 
     Returns
     -------
@@ -483,7 +497,7 @@ def viterbi_healpix(emission, sigmas, truncate=4.0, ellipsoid="sphere", level=No
         Most probable track, with 'cell_ids', 'longitude' and 'latitude' on time.
     """
     if ellipsoid is None:
-        ellipsoid = "sphere"
+        ellipsoid = _grid_ellipsoid(emission)
     if level is None:
         level = emission.dggs.grid_info.level
 
