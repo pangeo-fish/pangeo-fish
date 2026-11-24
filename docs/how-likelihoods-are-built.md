@@ -99,13 +99,13 @@ It is 1 at the shallowest edge and decreases with depth.
 The edges start 10 bins above the surface.
 With `max_depth_m`, the last edge is `max_depth_m` and holds the share of all deeper seabed.
 
-| Parameter         | Default        | Meaning                                                                                  |
-| ----------------- | -------------- | ---------------------------------------------------------------------------------------- |
-| `depth_bin_size`  | `1` m          | Bin width. The likelihood is linear inside a bin.                                        |
-| `max_depth_m`     | `None`         | Depth of the last edge. Give this or `nb_depth_bins`.                                    |
-| `depth_offset`    | `0` m          | Clearance of the fish above the seabed. A negative value lets the fish go below GEBCO.   |
-| `default_stdev_m` | `1` m          | Uncertainty used where `stdev` is missing or not finite. The minimum used is 0.001 m.    |
-| `ellipsoid`       | `"WGS84"`      | Ellipsoid of the HEALPix grid. It must match the one of `diff-regridded.zarr`.           |
+| Parameter         | Default   | Meaning                                                                                |
+| ----------------- | --------- | -------------------------------------------------------------------------------------- |
+| `depth_bin_size`  | `1` m     | Bin width. The likelihood is linear inside a bin.                                      |
+| `max_depth_m`     | `None`    | Depth of the last edge. Give this or `nb_depth_bins`.                                  |
+| `depth_offset`    | `0` m     | Clearance of the fish above the seabed. A negative value lets the fish go below GEBCO. |
+| `default_stdev_m` | `1` m     | Uncertainty used where `stdev` is missing or not finite. The minimum used is 0.001 m.  |
+| `ellipsoid`       | `"WGS84"` | Ellipsoid of the HEALPix grid. It must match the one of `diff-regridded.zarr`.         |
 
 ### Per time step
 
@@ -165,12 +165,12 @@ When all cells are 0 or `NaN` at a time step, it replaces `pdf` by the acoustic 
 
 ### `optimize_pdf`
 
-| Option             | Default       | Effect                                                                                                                              |
-| ------------------ | ------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `single_behav`     | `True`        | Multi-sigma only, not multivariate. `True`: one sigma per predictor value. `False`: one sigma per continuous segment.               |
-| `multivariate`     | `False`       | Multi-sigma only. `True`: all sigmas are optimised together on the whole sequence, and `single_behav` is ignored.                   |
-| `final`            | `False`       | `True`: sigma is fitted on the final position instead of the forward likelihood. The upper bound is then 0.01. Not allowed with multi-sigma (`NotImplementedError`). |
-| `conv_method`      | `"FFTConv"`   | See {doc}`choosing-conv-method`.                                                                                                    |
+| Option         | Default     | Effect                                                                                                                                                               |
+| -------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `single_behav` | `True`      | Multi-sigma only, not multivariate. `True`: one sigma per predictor value. `False`: one sigma per continuous segment.                                                |
+| `multivariate` | `False`     | Multi-sigma only. `True`: all sigmas are optimised together on the whole sequence, and `single_behav` is ignored.                                                    |
+| `final`        | `False`     | `True`: sigma is fitted on the final position instead of the forward likelihood. The upper bound is then 0.01. Not allowed with multi-sigma (`NotImplementedError`). |
+| `conv_method`  | `"FFTConv"` | See {doc}`choosing-conv-method`.                                                                                                                                     |
 
 Multi-sigma mode starts when the dataset has a `predictor_index` variable, one integer per time step.
 `stamp_parameter_indices` builds it from a list of times (nearest time step).
@@ -179,14 +179,14 @@ Sigma is searched in radians, from `1e-4` to `maximum_speed * time step * adjust
 
 ### Tide likelihood
 
-| Name                | Default                  | Where                                                                       |
-| ------------------- | ------------------------ | --------------------------------------------------------------------------- |
-| `tide_sigma_m`      | `2.0` (demo)             | Model error of `still_tag_tide_likelihood` (no default in the function).   |
-| `tide_min_samples`  | `6` (demo), `12` (function `min_samples`) | Minimum number of valid hourly means for a day to count.   |
-| `tideFL`            | `25` h                   | `detect_tide`: window of the tide detection (at least 12.42 h).             |
-| `tideLV`            | `[0.42, 0.85, 0.6]`      | `detect_tide`: maximum RMSE (m), minimum R², minimum amplitude (m).         |
-| `behavFL`           | `25` h                   | `detect_tide`: window of the relaxed fit behind `behav_found`.              |
-| `behavLV`           | `[0.42, 0.70, 0.2]`      | `detect_tide`: thresholds of the relaxed fit.                               |
+| Name               | Default                                   | Where                                                                    |
+| ------------------ | ----------------------------------------- | ------------------------------------------------------------------------ |
+| `tide_sigma_m`     | `2.0` (demo)                              | Model error of `still_tag_tide_likelihood` (no default in the function). |
+| `tide_min_samples` | `6` (demo), `12` (function `min_samples`) | Minimum number of valid hourly means for a day to count.                 |
+| `tideFL`           | `25` h                                    | `detect_tide`: window of the tide detection (at least 12.42 h).          |
+| `tideLV`           | `[0.42, 0.85, 0.6]`                       | `detect_tide`: maximum RMSE (m), minimum R², minimum amplitude (m).      |
+| `behavFL`          | `25` h                                    | `detect_tide`: window of the relaxed fit behind `behav_found`.           |
+| `behavLV`          | `[0.42, 0.70, 0.2]`                       | `detect_tide`: thresholds of the relaxed fit.                            |
 
 `detect_tide` resamples the pressure to 10 minutes and does not accept a coarser time step.
 `tide_sigma_m` is read only by `tide_method = "healpix"`.
