@@ -82,7 +82,7 @@ The lifetime data describes the start and end of the natural behavior of the fis
 
 It must have four columns: `event_name`, `time`, `latitude`, and `longitude`.
 
-The valid values for `event_name` are: `release`, `recapture` and `fish_death` (more are possible but will be ignored).
+The valid values for `event_name` are: `release`, `recapture` and `fish_death` (more are possible). Only `release` and `fish_death` are used as positions, but every row with a time takes part in the row-order rule below.
 
 The file must contain two entries: `release` and `fish_death`.
 The temperature step (`compute_emission_pdf`) reads the end position from the `fish_death` row only.
@@ -96,7 +96,7 @@ A `recapture` row with a time placed before `fish_death` would therefore end the
 
 `latitude` and `longitude` are fixed-point representations of the position in degree, with a `.` as separator.
 `latitude` must be in a range of `-90°` to `90°`, while `longitude` may be given in either `0°` to `360°` or `-180°` to `180°`.
-If the position is unknown, both `latitude` and `longitude` must be set to `NA`.
+If the `fish_death` position is unknown, both `latitude` and `longitude` must be set to `NA`. The `release` position must be known.
 
 For example:
 

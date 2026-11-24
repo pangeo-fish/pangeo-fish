@@ -83,7 +83,8 @@ In a time bin without any detection, `nondetections` decides:
 | `"ignore"` | All cells have the same weight.                                                                                                                                                                                            |
 
 A receiver is active in a bin when the whole bin lies between its `deploy_time` and `recover_time`.
-A receiver that never covers a whole bin is handled separately in `create_masked_fill_map`.
+A receiver that never covers a whole bin is treated as active in every bin (`create_masked_fill_map`).
+Its buffer then gets `NaN` in every bin without detection, even outside its deployment period.
 
 ## 3. Bathymetry likelihood
 
@@ -165,6 +166,8 @@ When, in every cell of a time step, the acoustic value is 0 or the temperature `
   The grid attributes (`grid_name`, `level`, `indexing_scheme`, `ellipsoid`) must agree, or a `ValueError` is raised.
   Cells or days that the tide store does not cover get a constant factor and a `UserWarning`.
   In that case the tide term has no effect there.
+  The complete demo then clips `pdf_tide` at 0 (`clip(min=0)`) before combining.
+  Interpolation can give small negative values, and a time step where every value is 0 or negative counts as having no mass.
 
 ## 5. Options and defaults
 
@@ -180,6 +183,8 @@ When, in every cell of a time step, the acoustic value is 0 or the temperature `
 Multi-sigma mode starts when the dataset has a `predictor_index` variable, one integer per time step.
 `stamp_parameter_indices` builds it from a list of times (nearest time step).
 `stamp_parameter_indices_from_mask` builds it from a 0/1 mask, matched by position.
+In multi-sigma mode, `optimize_pdf` currently needs `ds.attrs["sigma_bounds"]`, a dictionary `{predictor value: (minimum speed, maximum speed)}`.
+Only `stamp_parameter_indices_from_mask(..., sigma_bounds_dict=...)` sets it; without it, `optimize_pdf` stops with an error.
 Sigma is searched in radians, from `1e-4` to `maximum_speed * time step * adjustment_factor / earth_radius`.
 By default `earth_radius` is the semi-major axis of the grid ellipsoid (6378.137 km for WGS84); it can be set with `earth_radius=`.
 In multi-sigma mode with `sigma_bounds`, each behaviour has its own upper bound, and the lower bound stays `1e-4`.
@@ -195,6 +200,6 @@ In multi-sigma mode with `sigma_bounds`, each behaviour has its own upper bound,
 | `behavFL`          | `25` h                                    | `detect_tide`: window of the relaxed fit behind `behav_found`.           |
 | `behavLV`          | `[0.42, 0.70, 0.2]`                       | `detect_tide`: thresholds of the relaxed fit.                            |
 
-`detect_tide` resamples the pressure to 10 minutes and does not accept a coarser time step.
+`detect_tide` resamples the pressure to 10 minutes; a coarser time step raises a `NotImplementedError`.
 `tide_sigma_m` is read only by `tide_method = "healpix"`.
 See {doc}`tide` for what the two tide methods assume.
