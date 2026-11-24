@@ -104,8 +104,10 @@ The covariance does not depend on the cell: white noise (0.2 m), a correlated
 term with the rmse of the tide fit of the window and a memory of 6.67 h, and a
 constant 10 m standard deviation on the mean depth. A day labelled ``T``
 combines the windows whose centre lies in ``[T - 12 h, T + 12 h)``. A day without
-a tidal window gets the bathymetry-only likelihood of the MATLAB (the fish
-cannot be where the seabed is shallower than its deepest depth).
+a tidal window gets a uniform tide pdf: the bathymetry PDF of the demo already
+says that the fish cannot be where the seabed is shallower than its deepest
+depth. ``non_tidal="bathymetry"`` restores the bathymetry-only likelihood of the
+MATLAB, which then counts the bathymetry twice.
 
 Comparing with the ``healpix`` method
 -------------------------------------
@@ -120,7 +122,8 @@ Comparing with the ``healpix`` method
    * - Depth reference
      - Compares the depth to the water depth of the cell plus the tide
        (absolute depth evidence, with a 10 m standard deviation on the mean
-       depth). Days without tide use a bathymetry-only likelihood.
+       depth). Days without tide get a uniform pdf (the MATLAB's
+       bathymetry-only likelihood with ``non_tidal="bathymetry"``).
      - Fits an unknown mean depth per cell and per day. The tide term uses the
        shape of the depth record during candidate near-bed intervals. The demo
        supplies absolute depth evidence through its separate bathymetry PDF.

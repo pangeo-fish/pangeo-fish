@@ -138,6 +138,7 @@ def test_non_tidal_day_uses_bathymetry_only(setup):
         pd.Series(False, series.index),
         wc=wc,
         bathy_variance=1.0,
+        non_tidal="bathymetry",
     )
     assert (out["tide_found"] == 0).all()
     pdf = out["pdf"].values[1]
@@ -161,7 +162,7 @@ def test_non_tidal_day_uses_bathymetry_only(setup):
 def test_uniform_option_for_non_tidal_days(setup):
     cells, const = setup
     series = record(const)
-    out = run(const, cells, series, pd.Series(False, series.index), non_tidal="uniform")
+    out = run(const, cells, series, pd.Series(False, series.index))
     np.testing.assert_allclose(out["pdf"].values, 1.0 / cells.size)
 
 

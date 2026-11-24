@@ -809,7 +809,7 @@ def pedersen_tide_likelihood(
     depth_offset_sd=10.0,
     bathy_variance=20.0,
     z_off_bottom=0.0,
-    non_tidal="bathymetry",
+    non_tidal="uniform",
     min_fraction=0.8,
     ocean_mask=None,
     modulations=None,
@@ -837,15 +837,17 @@ def pedersen_tide_likelihood(
     A daily label ``T`` combines the windows whose centre lies in ``[T - 12 h,
     T + 12 h)`` by adding their log-likelihoods.
 
-    **Days without a tidal window.** The likelihood is the bathymetry-only form
+    **Days without a tidal window.** By default (``non_tidal="uniform"``) the pdf
+    is uniform: the bathymetry is already in the total emission (``pdf_bathy``) and
+    must not count twice. ``non_tidal="bathymetry"`` reproduces the MATLAB, where
+    the tide likelihood also carries the bathymetry: the bathymetry-only form
     ``normcdf(d_max; mu, s) / (eps + normcdf(0; mu, s))``, in the MATLAB's depth
     convention, i.e. ``P(Y >= d_max) / P(Y >= 0)`` with ``Y ~ N(D_c + eta_c(t*),
     bathy_variance)``, ``d_max`` the deepest sample of the label and ``t*`` its time.
     With ``z_off_bottom > 0`` the likelihood is also multiplied by
     ``1 - P(Y >= d_max + z_off_bottom) / (eps + P(Y >= 0))`` (the fish is at most
     ``z_off_bottom`` m above the seabed). Cells shallower than the fish are almost
-    impossible. ``non_tidal="uniform"`` gives instead a uniform pdf (use it when the
-    bathymetry is already in the total emission and must not count twice).
+    impossible.
 
     Departures from the MATLAB (all deliberate)
     -------------------------------------------
@@ -909,7 +911,9 @@ def pedersen_tide_likelihood(
         Variance (m^2) of the seabed depth for days without tide.
     z_off_bottom : float, default 0
         Maximum height of the fish above the seabed (m) for days without tide.
-    non_tidal : {"bathymetry", "uniform"}
+    non_tidal : {"uniform", "bathymetry"}, default "uniform"
+        Pdf of days without a tidal window: uniform, or the MATLAB bathymetry-only
+        likelihood (counts the bathymetry twice when ``pdf_bathy`` is also used).
     min_fraction : float, default 0.8
         Minimum fraction of the expected samples of a window.
     ocean_mask : array-like of bool, optional
