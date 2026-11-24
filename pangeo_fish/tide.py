@@ -11,6 +11,7 @@ from tqdm import tqdm
 
 from pangeo_fish.helpers import _with_dggs_attrs, regrid_dataset_hpresample
 from pangeo_fish.storage import write_time_blocks
+from pangeo_fish.tide_healpix import _step_ns
 
 #####################################################################
 #  First part : extraction of a tidal signal
@@ -722,7 +723,7 @@ def _centered_daily_mean(obj):
     This is the window of the temperature emission (``cf_xarray`` time bounds of a
     daily axis), unlike ``resample(time="1D")`` which covers [T, T + 24 h).
     """
-    half = pd.Timedelta("12h")
+    half = _step_ns("12h")
     out = obj.resample(time="1D", offset=half).mean(skipna=True)
     return out.assign_coords(time=out.time + half)
 
@@ -778,7 +779,7 @@ def tide_to_healpix(
     times = lik_full.time.to_index()
     n_time = len(times)
     # chunks are cut at 12:00 so that no centred daily window (label +- 12 h) is split
-    days = (times - pd.Timedelta("12h")).normalize()
+    days = (times - _step_ns("12h")).normalize()
 
     day_starts = np.flatnonzero(np.r_[True, days[1:] != days[:-1]])
 

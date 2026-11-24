@@ -373,6 +373,17 @@ def _as_series(depth):
     return pd.Series(depth.values, index=index).sort_index()
 
 
+def _step_ns(freq):
+    """Length of ``freq`` (e.g. ``"1D"``, ``"12h"``) as ``numpy.timedelta64[ns]``.
+
+    Built from integer nanoseconds: ``pd.Timedelta("12h")`` emits the NumPy
+    generic-unit DeprecationWarning with recent NumPy/pandas (an error in CI).
+    """
+    t0 = pd.Timestamp("2000-01-01")
+    ns = (t0 + pd.tseries.frequencies.to_offset(freq)).value - t0.value
+    return np.timedelta64(int(ns), "ns")
+
+
 def _seconds_since(index, t0):
     """Seconds from ``t0`` as floats (integer nanoseconds, no timedelta division)."""
     ns = pd.DatetimeIndex(index).as_unit("ns").asi8
@@ -562,7 +573,7 @@ def still_tag_tide_likelihood(
     else:
         # windows centred on their label T: [T - time_step/2, T + time_step/2),
         # the convention of the temperature emission (cf_xarray time bounds)
-        half = pd.Timedelta(time_step) / 2
+        half = _step_ns(time_step) / 2
         first = (record_start + half).floor(time_step)
         last = (record_end + half).floor(time_step)
         starts = pd.date_range(first, last, freq=time_step)
