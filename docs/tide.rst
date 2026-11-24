@@ -129,3 +129,24 @@ Match both ``time`` and ``cell_ids`` when comparing runs. Renormalize over
 the common wet cells if you want to compare how the two methods distribute
 probability over the same area. Comparing the combined PDFs shows how much of
 that difference remains after including the other evidence.
+
+Checks that fail loudly
+-----------------------
+
+The tide helpers stop or warn instead of silently changing the evidence:
+
+- ``merge_tide_with_total`` keeps every cell and day of the total emission.
+  Cells or days without tide information get a neutral constant factor (the
+  mean of the day's available tide values, or ``1 / n_cells`` for a day with
+  none) and a warning reports the counts. ``initial``, ``final`` and ``mask``
+  are not modified.
+- ``convert_lon_360_to_180`` raises ``ValueError`` when the ``bbox`` lies outside
+  the tide file (the demo TPXO subset only covers the North Sea and the
+  Channel), and warns with the clipped extent when it is only partly covered.
+- The pressure record must be in dbar or m: ``prepare_pressure`` and
+  ``tide_behav_extr`` raise if the ``units`` attribute says otherwise (Pa, hPa,
+  mbar, ...) or if the values are impossible for a depth (above 3000 or below
+  -50).
+- ``tide_sigma_m`` is only used by ``tide_method = "healpix"``. With
+  ``"legacy"`` the demo warns (via ``check_tide_sigma``) when it differs from
+  the default of 2.0, which the legacy path does not read.
