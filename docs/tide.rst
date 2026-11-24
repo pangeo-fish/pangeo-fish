@@ -15,11 +15,11 @@ Choose ``tide_method`` in **Study settings** at the top of the
     # tide_method = "pedersen"  # Pedersen et al. (2008) tide likelihood
 
 Both methods predict the tide on the HMM cells from local harmonic constants and
-use the depth-based tide flags of :func:`pangeo_fish.tide.detect_tide`. TPXO9 is
-the default tide model. Section 7 downloads it from Ifremer, and
+use the depth-based tide flags of :func:`pangeo_fish.tide.detect_tide`. TPXO9
+[Egbert2002]_ is the default tide model. Section 7 downloads it from Ifremer, and
 ``tide_model_source`` can point to a local copy of the same TMD3 NetCDF file.
-Both methods need `pyfes <https://github.com/CNES/aviso-fes>`_ in the notebook
-kernel's environment. Install it from conda-forge:
+Both methods need `pyfes <https://github.com/CNES/aviso-fes>`_ [PyFES]_ in the
+notebook kernel's environment. Install it from conda-forge:
 
 .. code-block:: console
 
@@ -52,10 +52,13 @@ See the `AVISO FES product page
 <https://www.aviso.altimetry.fr/index.php?id=1279>`_ and
 the `AVISO data license
 <https://aviso.altimetry.fr/en/data/data-access/fileadmin/documents/data/License_Aviso.pdf>`_
-for access and attribution.
+for access and attribution. Cite the data set [FES2022]_ with the credit line
+required by AVISO: "The FES2022 Tide product was funded by CNES, produced by
+LEGOS, NOVELTIS and CLS and made freely available by AVISO", and the model
+description [Lyard2026]_.
 
 Reading precomputed FES2022b constants
--------------------------------------
+--------------------------------------
 
 A precomputed store contains the real and imaginary parts of the harmonic
 constants in metres at nested WGS84 HEALPix cell centres. It must cover every
@@ -276,3 +279,17 @@ References
    and Madsen, H. (2008). Geolocation of North Sea cod (*Gadus morhua*) using
    hidden Markov models and behavioural switching. *Can. J. Fish. Aquat. Sci.*
    65, 2367-2377. `doi:10.1139/f08-144 <https://doi.org/10.1139/f08-144>`_
+.. [Egbert2002] Egbert, G. D. and Erofeeva, S. Y. (2002). Efficient inverse
+   modeling of barotropic ocean tides. *J. Atmos. Oceanic Technol.* 19(2),
+   183-204.
+   `doi <https://doi.org/10.1175/1520-0426(2002)019%3C0183:EIMOBO%3E2.0.CO;2>`__
+.. [FES2022] CNES (2024). FES2022 (Finite Element Solution) Ocean Tide
+   (Version 2022) [Data set]. CNES.
+   `doi:10.24400/527896/A01-2024.004 <https://doi.org/10.24400/527896/A01-2024.004>`_
+.. [Lyard2026] Lyard, F. H., Carrère, L., Fouchet, E., Cancet, M., Ferrari, R.,
+   Dabat, M.-L., Skandrani, C., Greenberg, D., Allain, D., Dibarboure, G. and
+   Picot, N. (2026). FES2022 global tide atlas: a step towards SWOT-compliant
+   tidal corrections. *EGUsphere* [preprint, in review for Ocean Science].
+   `doi:10.5194/egusphere-2026-6805 <https://doi.org/10.5194/egusphere-2026-6805>`_
+.. [PyFES] PyFES: ocean tide prediction software, CNES.
+   https://github.com/CNES/aviso-fes (no DOI; cite the release used).
