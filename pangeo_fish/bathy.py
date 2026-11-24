@@ -55,7 +55,7 @@ def compute_healpix_histogram_region_bin_size(
     chunk_size=500,
     depth_offset=0,
     depth_bin_size=1,
-    ellipsoid="sphere",
+    ellipsoid="WGS84",
     default_stdev_m=_DEFAULT_STDEV_M,
 ):
     """Probability that the seabed of each HEALPix cell is at least ``d`` deep.

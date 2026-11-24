@@ -94,13 +94,13 @@ def test_regrid_coastal_constant_with_real_resamplers():
         },
     )
     ct = helpers.CloughTocherResampler(
-        lon_deg=lon[sea], lat_deg=lat[sea], level=8, ellipsoid="sphere"
+        lon_deg=lon[sea], lat_deg=lat[sea], level=8, ellipsoid="WGS84"
     )
     bil = helpers.BilinearResampler(
         lon_deg=lon[sea],
         lat_deg=lat[sea],
         level=8,
-        ellipsoid="sphere",
+        ellipsoid="WGS84",
         threshold=0.5,
         ring_search_max=4,
     )
