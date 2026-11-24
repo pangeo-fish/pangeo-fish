@@ -118,8 +118,8 @@ Tidal harmonic constants on HEALPix cells, tide prediction with nodal correction
 (requires ``pyfes``, extra ``pangeo-fish[tide]``) and the tidal likelihood of a tag
 lying still on the seabed.
 
-See :ref:`tide-methods` for the Complete demo selector and the comparison
-with the legacy method.
+See :ref:`tide-methods` for the Complete demo selector, the comparison of the
+``healpix`` and ``pedersen`` likelihoods and when to use each.
 
 .. currentmodule:: pangeo_fish.tide_healpix
 .. autosummary::
@@ -134,6 +134,10 @@ with the legacy method.
    write_harmonic_constants
    nodal_modulations
    predict_tide
+   pedersen_tide_likelihood
+   tide_windows
+   pedersen_covariance
+   cell_bathymetry
    still_tag_tide_likelihood
    write_tide_pdf_healpix
    harmonic_analysis

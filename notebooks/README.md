@@ -17,10 +17,15 @@ The defaults shared by the demos are identical except for their output folders:
 | Main trajectories                    | Viterbi, mode, mean              |
 | Manual-sigma comparison trajectories | mode, mean                       |
 
-In the Complete demo's **Study settings**, set `tide_method = "legacy"` for
-the original gridded likelihood or `tide_method = "healpix"` to predict tides
-from local harmonic constants directly on the HMM grid. Install `.[notebooks,tide]`
-for the HEALPix method. See the [tide methods guide](../docs/tide.rst) for details.
+In the Complete demo's **Study settings**, `tide_method = "healpix"` (default)
+compares the shape of the tide with the depth record, with a model error
+`tide_sigma_m`. `tide_method = "pedersen"` uses the tide likelihood of
+[Pedersen et al. (2008)](https://doi.org/10.1139/f08-144)
+(_Can. J. Fish. Aquat. Sci._ 65:2367), ported from the
+[DTU / HMM geolocation MATLAB code](https://github.com/cliu3/hmm_smast/blob/dev/datalik/datalikelihood.m);
+its error parameters are not calibrated yet. Both predict tides from local
+harmonic constants directly on the HMM grid: install `.[notebooks,tide]`. See the
+[tide methods guide](../docs/tide.rst) for when to use each.
 
 The Complete demo also includes bathymetry and a two-sigma model. The
 manual-sigma appendix uses a separate `comparison_track_modes` setting in both
@@ -29,9 +34,12 @@ large transition tables.
 
 ## Run with Papermill
 
-Install the optional notebook tools in the same environment as your kernel:
+Install the optional notebook tools in the same environment as your kernel.
+The Complete demo also needs pyfes: install it from conda-forge first (PyPI has
+no wheels, so `pip install -e '.[notebooks,tide]'` compiles it).
 
 ```bash
+conda install -c conda-forge pyfes
 python -m pip install -e '.[notebooks]'
 mkdir -p executed
 papermill notebooks/pangeo-fish-base-demo.ipynb executed/base-A19124.ipynb \
@@ -40,12 +48,11 @@ papermill notebooks/pangeo-fish-complete-demo.ipynb executed/complete-A19124.ipy
   -k python3 -p tag_name A19124 -p scratch_root ./results/complete
 ```
 
-To compare with the HEALPix tide method, use a separate results folder.
+To compare with the `pedersen` tide method, use a separate results folder.
 
 ```bash
-python -m pip install -e '.[notebooks,tide]'
-papermill notebooks/pangeo-fish-complete-demo.ipynb executed/complete-healpix-A19124.ipynb \
-  -k python3 -p tide_method healpix -p scratch_root ./results/complete-healpix
+papermill notebooks/pangeo-fish-complete-demo.ipynb executed/complete-pedersen-A19124.ipynb \
+  -k python3 -p tide_method pedersen -p scratch_root ./results/complete-pedersen
 ```
 
 The `parameters` cell contains serializable defaults. Papermill inserts overrides

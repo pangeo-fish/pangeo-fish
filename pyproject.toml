@@ -83,7 +83,8 @@ dynamic = ["version"]
 
 [project.optional-dependencies]
 notebooks = ["papermill>=2.7,<3", "ipykernel>=6.29,<8"]
-# astronomical arguments and nodal corrections for pangeo_fish.tide_healpix
+# astronomical arguments and nodal corrections for pangeo_fish.tide_healpix (needed by the
+# Complete demo). PyPI has no wheels: prefer `conda install -c conda-forge pyfes`.
 tide = ["pyfes>=2026.10"]
 
 [project.urls]

@@ -144,4 +144,6 @@ jobs:
             demo-results/${{ matrix.notebook }}/before.json
             demo-results/${{ matrix.notebook }}/after.json
             demo-results/${{ matrix.notebook }}/comparison.json
+            demo-results/${{ matrix.notebook }}/conda-changes.txt
+            demo-results/${{ matrix.notebook }}/install-pyfes.log
             demo-results/${{ matrix.notebook }}/executed.ipynb
