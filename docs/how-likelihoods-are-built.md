@@ -77,10 +77,10 @@ If the tag has no `acoustic` or no `stations`, `emission_probability` returns an
 
 In a time bin without any detection, `nondetections` decides:
 
-| Value      | Weight in a time bin without detection                                                                                                                    |
-| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Value      | Weight in a time bin without detection                                                                                                                                                                                     |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `"mask"`   | Cells inside the buffer of a receiver that was active during the whole bin get `NaN`, so they are removed when the terms are combined (section 4). Other cells share the weight equally. `compute_acoustic_pdf` uses this. |
-| `"ignore"` | All cells have the same weight.                                                                                                                           |
+| `"ignore"` | All cells have the same weight.                                                                                                                                                                                            |
 
 A receiver is active in a bin when the whole bin lies between its `deploy_time` and `recover_time`.
 A receiver that never covers a whole bin is handled separately in `create_masked_fill_map`.
