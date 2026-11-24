@@ -728,6 +728,7 @@ def tide_windows(
     rmse=None,
     window_hours=25.0,
     time_step="1D",
+    max_overlap_hours=1.0,
 ):
     """Tidal windows selected from the detection flags, with their daily labels.
 
@@ -740,13 +741,19 @@ def tide_windows(
     The windows of the whole record are taken in increasing ``rmse`` (best sine fit
     first, as ``td.tideBestfit`` in the MATLAB ``tidebehavextr.m``; time order when
     ``rmse`` is None, and for equal ``rmse``). A window is skipped when its label
-    already has one, or when its centre is closer than
-    ``min(window_hours, time_step)`` to the centre of a window already taken, in any
-    label. The likelihood uses a correlated covariance, so samples counted in two
-    days would overstate the evidence. Windows no longer than ``time_step`` never
-    share samples; longer ones share at most ``window_hours - time_step`` (1 h for
-    the default 25 h windows and daily labels). A day can be left without a window
-    when the best windows of its neighbours are close to it.
+    already has one, or when it would share more than ``max_overlap_hours`` with a
+    window already taken, in any label (centres closer than
+    ``window_hours - max_overlap_hours``). The likelihood uses a correlated
+    covariance, so samples counted in two days would overstate the evidence. With
+    the default 25 h windows, daily labels and 1 h, consecutive days can each have a
+    window (centres 24 h apart); longer windows are spread further apart, so that
+    they cover several days each, and ``max_overlap_hours=0`` forbids any shared
+    sample. A day can be left without a window when the best windows of its
+    neighbours are close to it.
+
+    Pass only the flags of windows with enough samples (see
+    :func:`pedersen_tide_likelihood`): a selected window that is dropped later
+    would leave its day empty although another candidate was usable.
 
     The MATLAB toolbox takes, per calendar day, the best of the 10 h windows that
     start that day, without checking overlaps with the next day (at most 10 h with
@@ -766,7 +773,10 @@ def tide_windows(
     if rmse is not None:
         err = _as_series(rmse).reindex(centres).values
     labels = _window_labels(centres, time_step) if len(centres) else centres
-    separation = int(min(_hours_ns(window_hours), _step_ns(time_step)).astype(np.int64))
+    if max_overlap_hours < 0:
+        raise ValueError("max_overlap_hours must be >= 0")
+    separation = max(float(window_hours) - float(max_overlap_hours), 0.0)
+    separation = int(_hours_ns(separation).astype(np.int64))
     positions = centres.as_unit("ns").asi8
     order = np.lexsort((positions, np.where(np.isnan(err), np.inf, err)))
     taken_positions = []  # sorted
@@ -784,6 +794,26 @@ def tide_windows(
         taken.append(i)
     rows = [(centres[i], labels[i], err[i]) for i in sorted(taken)]
     return pd.DataFrame(rows, columns=["centre", "label", "rmse"])
+
+
+def _window_counts(index, centres, window_hours, freq=None):
+    """Samples (or non-empty ``freq`` bins) of ``index`` in each window around ``centres``.
+
+    A window is ``[c - window_hours / 2, c + window_hours / 2)``, as in
+    :func:`pedersen_tide_likelihood`; bins are closed on the right, as in
+    :func:`_bin_average`.
+    """
+    positions = index.as_unit("ns").asi8
+    half = int(_hours_ns(window_hours).astype(np.int64)) // 2
+    c = pd.DatetimeIndex(centres).as_unit("ns").asi8
+    lo = np.searchsorted(positions, c - half, side="left")
+    hi = np.searchsorted(positions, c + half, side="left")
+    if freq is None:
+        return hi - lo
+    bins = index.ceil(freq).as_unit("ns").asi8
+    new = np.r_[0, np.cumsum(bins[1:] != bins[:-1])]  # bin number of each sample
+    last = new[np.maximum(hi - 1, 0)]
+    return np.where(hi > lo, last - new[np.minimum(lo, len(new) - 1)] + 1, 0)
 
 
 def pedersen_covariance(
@@ -877,6 +907,7 @@ def pedersen_tide_likelihood(
     z_off_bottom=0.0,
     non_tidal="uniform",
     min_fraction=0.8,
+    max_overlap_hours=1.0,
     ocean_mask=None,
     modulations=None,
 ):
@@ -935,10 +966,12 @@ def pedersen_tide_likelihood(
       or another sampling interval keeps the same 6.67 h memory.
     - The windows come from the sliding-window flags of ``detect_tide`` (centre
       flags; 25 h by default, ``tideFL = 10 h`` in the MATLAB defaults) and a label
-      keeps at most one window, the best fit as ``td.tideBestfit``, at least
-      ``min(window_hours, time_step)`` away from the windows of the other labels so
-      that the same samples are not counted twice (see :func:`tide_windows`). A window with fewer than ``min_fraction`` of its
-      expected samples is dropped.
+      keeps at most one window, the best fit as ``td.tideBestfit``, sharing at most
+      ``max_overlap_hours`` with the windows of the other labels, so that the same
+      samples are not counted twice (see :func:`tide_windows`). Only windows with
+      at least ``min_fraction`` of their expected samples (or hourly bins with
+      ``freq``) are candidates, so a sparse window with a low rmse cannot take the
+      place of a complete one.
     - The roughness ``s_eta`` of the bathymetry-only likelihood is ``bathy_variance``
       (m^2, scalar or per cell) instead of the database variable ``db.bathro``. The
       default 20 m^2 is the debug value of the MATLAB source (``s_eta = 20*ones``),
@@ -982,7 +1015,11 @@ def pedersen_tide_likelihood(
         Pdf of days without a tidal window: uniform, or the MATLAB bathymetry-only
         likelihood (counts the bathymetry twice when ``pdf_bathy`` is also used).
     min_fraction : float, default 0.8
-        Minimum fraction of the expected samples of a window.
+        Minimum fraction of the expected samples (bins with ``freq``) of a window
+        for it to be a candidate.
+    max_overlap_hours : float, default 1.0
+        Maximum duration shared by the windows of two labels (see
+        :func:`tide_windows`).
     ocean_mask : array-like of bool, optional
         Additional allowed cells.
     modulations : xarray.Dataset, optional
@@ -1046,17 +1083,23 @@ def pedersen_tide_likelihood(
     sample_labels = starts.get_indexer(_window_labels(series.index, time_step))
     n_win = len(starts)
 
-    windows = tide_windows(
-        series.index,
-        tide_found,
-        rmse=rmse,
-        window_hours=window_hours,
-        time_step=time_step,
-    )
     dt_hours = float(np.median(np.diff(series.index.as_unit("ns").asi8)) / 3.6e12)
     expected = window_hours / dt_hours
     if freq is not None:
         expected = window_hours * 3600 / (_step_ns(freq) / np.timedelta64(1, "s"))
+    # candidates: flagged centres whose window has enough samples (or bins)
+    flags = _as_series(tide_found).fillna(0).astype(bool)
+    flags = flags[flags.values]
+    counts = _window_counts(series.index, flags.index, window_hours, freq)
+    flags = flags[counts >= max(2, min_fraction * expected)]
+    windows = tide_windows(
+        series.index,
+        flags,
+        rmse=rmse,
+        window_hours=window_hours,
+        time_step=time_step,
+        max_overlap_hours=max_overlap_hours,
+    )
 
     loglik = np.full((n_win, n_cells), np.nan)
     n_windows = np.zeros(n_win, dtype=int)

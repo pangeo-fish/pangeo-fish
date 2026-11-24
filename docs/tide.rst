@@ -132,10 +132,12 @@ corrections of pyfes. The covariance does not depend on the cell: white noise
 memory of 6.67 h, and a constant 10 m standard deviation on the mean depth.
 A day labelled ``T`` uses the best-fitting tidal window whose centre lies in
 ``(T - 12 h, T + 12 h]``. The windows are chosen over the whole record, best fit
-first, with their centres at least 24 h apart, so that two days share at most
-1 h of samples (the MATLAB takes the best 10 h window of each calendar day and
-does not check overlaps). A day can thus be left without a window when the
-best windows of the days around it are close to it. A day without a tidal
+first, among the windows with at least ``min_fraction`` of their samples, and
+two days share at most ``max_overlap_hours`` (1 h) of samples: with 25 h
+windows the centres are at least 24 h apart (the MATLAB takes the best 10 h
+window of each calendar day and does not check overlaps). A day can thus be
+left without a window when the best windows of the days around it are close
+to it. A day without a tidal
 window gets a uniform tide PDF:
 the bathymetry PDF of the demo already says that the fish cannot be where the
 seabed is shallower than its deepest depth. ``non_tidal="bathymetry"`` restores

@@ -242,10 +242,68 @@ def test_windows_do_not_overlap_across_labels():
     assert (win["centre"].diff().dropna() >= pd.Timedelta("24h")).all()
     assert win["centre"].is_monotonic_increasing
     assert rmse.idxmin() in set(win["centre"])
-    # windows shorter than a day: no shared sample at all
+    # windows shorter than a day: at most 1 h shared as well
     win = th.tide_windows(idx, pd.Series(True, idx), rmse=rmse, window_hours=10.0)
     assert win["label"].is_unique
-    assert (win["centre"].diff().dropna() >= pd.Timedelta("10h")).all()
+    assert (win["centre"].diff().dropna() >= pd.Timedelta("9h")).all()
+
+
+def test_long_windows_share_at_most_max_overlap():
+    """Re-review of #344: 96 h windows 24 h apart shared 432 of 576 samples."""
+    idx = pd.date_range("2023-08-01", "2023-08-31", freq="10min")
+    rng = np.random.default_rng(1)
+    rmse = pd.Series(rng.uniform(0.05, 0.5, len(idx)), idx)
+    flags = pd.Series(True, idx)
+    win = th.tide_windows(idx, flags, rmse=rmse, window_hours=96.0)
+    assert len(win) > 1
+    assert (win["centre"].diff().dropna() >= pd.Timedelta("95h")).all()
+    win = th.tide_windows(idx, flags, rmse=rmse, max_overlap_hours=0.0)
+    assert (win["centre"].diff().dropna() >= pd.Timedelta("25h")).all()
+    with pytest.raises(ValueError, match="max_overlap_hours"):
+        th.tide_windows(idx, flags, max_overlap_hours=-1.0)
+
+
+def test_sparse_window_does_not_displace_a_complete_one(setup):
+    """Re-review of #344: the lowest-rmse candidate of a day had 75 samples, was
+    selected, then dropped by min_fraction, leaving the day without tide evidence."""
+    cells, const = setup
+    series = record(const, days=5)
+    # remove 11.5 h: the window centred at 02:00 keeps 80 of 150 samples, the one
+    # centred at 10:00 (same label 2023-08-03) keeps 128
+    gap = (series.index >= "2023-08-02 13:30") & (series.index <= "2023-08-03 01:00")
+    series = series[~gap]
+    sparse, complete = pd.Timestamp("2023-08-03 02:00"), pd.Timestamp(
+        "2023-08-03 10:00"
+    )
+    tide_found = pd.Series(False, series.index)
+    tide_found[[sparse, complete]] = True
+    rmse = pd.Series(0.3, series.index)
+    rmse[sparse] = 0.1
+    counts = th._window_counts(series.index, [sparse, complete], 25.0)
+    assert counts.tolist() == [80, 128]
+    out = run(const, cells, series, tide_found, rmse=rmse)
+    day = pd.DatetimeIndex(out.time.values).get_loc(pd.Timestamp("2023-08-03"))
+    assert out["tide_found"].values[day] == 1
+    assert out["tide_found"].sum() == 1
+
+
+def test_window_counts_match_bin_average():
+    idx = pd.date_range("2023-08-01", "2023-08-04", freq="10min")
+    idx = idx[(idx.minute != 20) | (idx.hour % 3 != 0)].delete(slice(100, 140))
+    centres = idx[::37]
+    expected = [
+        len(
+            th._bin_average(
+                pd.Series(1.0, idx)[
+                    (idx >= c - pd.Timedelta("12.5h"))
+                    & (idx < c + pd.Timedelta("12.5h"))
+                ],
+                "1h",
+            )
+        )
+        for c in centres
+    ]
+    assert th._window_counts(idx, centres, 25.0, "1h").tolist() == expected
 
 
 def test_pedersen_windows_share_at_most_one_hour(setup):

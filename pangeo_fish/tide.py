@@ -828,6 +828,13 @@ def tide_to_healpix(
 ):
     """Regrid the tide likelihood to HEALPix, resample daily and save as zarr.
 
+    The daily window is ``(T - 12 h, T + 12 h]`` like the temperature emission, but
+    the hourly pdf of :func:`tide_pdf` is binned by ``floor("h")``, so the day of
+    each hour is set by the centre of its bin. Known limitation: a sample at
+    exactly 12:00 is in the 12:00-12:59 bin and goes to day ``T + 1``, while the
+    temperature emission counts it in day ``T``. The ``healpix`` and ``pedersen``
+    methods (:mod:`pangeo_fish.tide_healpix`) do not have this offset.
+
     Parameters
     ----------
     target_root : str or Path
