@@ -185,6 +185,69 @@ class GaussianHealpixAnalyse(Predictor):
 
 
 @dataclass
+class GaussianMixedHealpixAnalyse(Predictor):
+    """Mass-conserving Gaussian transition over a mixed-level water graph."""
+
+    cell_ids: np.ndarray
+    cell_levels: np.ndarray
+    sigma: float
+    radius_m: float
+    ellipsoid: str = "WGS84"
+    truncate: float = 4.0
+    blocked_cells: np.ndarray | None = None
+    wet_fraction: np.ndarray | None = None
+    water_contacts: tuple | None = None
+    device: str | torch.device = "cpu"
+
+    def __post_init__(self):
+        from healpix_analyse import multiorder_filter_operator
+        from scipy.sparse import csr_matrix
+
+        self.operator = multiorder_filter_operator(
+            self.cell_levels,
+            self.cell_ids,
+            sigma_m=self.sigma * self.radius_m,
+            truncate=self.truncate,
+            normalization="source",
+            correction="none",
+            blocked=self.blocked_cells,
+            wet_fraction=self.wet_fraction,
+            water_contacts=self.water_contacts,
+            ellipsoid=self.ellipsoid,
+        )
+        rows, columns, weights, size = self.operator
+        self._adjoint = csr_matrix(
+            (weights, columns, rows), shape=(size, size)
+        ).T.tocsr()
+        self._device = torch.device(self.device)
+
+    def _apply(self, X, operator, mask):
+        from healpix_analyse import apply_filter_operator
+
+        values = np.asarray(X)
+        if self._device.type == "cuda":
+            with torch.inference_mode():
+                batch = torch.as_tensor(
+                    np.ascontiguousarray(values), device=self._device
+                )
+                filtered = apply_filter_operator(batch, *operator).cpu().numpy()
+        else:
+            filtered = apply_filter_operator(values, *operator)
+        if np.issubdtype(values.dtype, np.floating):
+            filtered = filtered.astype(values.dtype, copy=False)
+        return filtered if mask is None else np.where(mask, filtered, 0)
+
+    def predict(self, X, *, mask=None):
+        return self._apply(X, self.operator, mask)
+
+    def predict_backward(self, X, *, mask=None):
+        adjoint = self._adjoint
+        return self._apply(
+            X, (adjoint.indptr, adjoint.indices, adjoint.data, adjoint.shape[1]), mask
+        )
+
+
+@dataclass
 @dataclass
 class OldUpDownGaussian1DHealpix(Predictor):
     cell_ids: _ArrayLike
@@ -409,7 +472,6 @@ class UpDownGaussian1DHealpix(Predictor):
         return x_rad * nside / np.sqrt(np.pi / 3)
 
     def _build_layer(self, max_k):
-
         return LargeConv(
             level=self.grid_info.level,
             in_channels=1,

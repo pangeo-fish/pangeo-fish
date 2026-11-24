@@ -102,9 +102,25 @@ For `FFTConv`, `projection="conservative"` keeps the total at 1.00000 in the bou
 - Long-distance migrants. `FFTConv` stops at 10 degrees radius. The accuracy of `HealpixAnalyseLargeConv` was measured only up to the sigma above. Splitting the domain into smaller patches is not implemented.
 - Islands combined with large steps. The direct sum runs out of memory, and no method does both today.
 
-## 3. In development
+## Rivers and estuaries with mixed HEALPix levels
 
-Fish that enter rivers narrower than one cell need a mixed-level operator (`multiorder_filter_operator` in `healpix-analyse`). It is not yet connected to `pangeo-fish`.
+Use `conv_method="HealpixAnalyseMixedConv"` for a prepared grid with finer cells in the river and coarser cells in open water. The cells are non-overlapping NESTED leaves. Adjacent leaves may differ by at most one level, so a larger change in resolution needs intermediate levels.
+
+Supply these variables alongside the usual emission (`pdf`, `initial` and `time`):
+
+| Variable | Dimension | Meaning |
+| --- | --- | --- |
+| `cell_ids` | `cells` | NESTED identifier at each leaf's own level. The optional `ellipsoid` attribute defaults to `WGS84`. |
+| `cell_level` | `cells` | HEALPix level of each leaf. |
+| `mask` | `cells` | Static boolean mask with `True` for water and `False` for land. Places without leaves are outside the water network. |
+| `wet_fraction` | `cells` | Optional water fraction of each wet cell. It scales the cell's area; the default is 1. |
+| `water_contact_from` and `water_contact_to` | `water_contacts` | Optional undirected pairs of water-connected leaves. Use NUNIQ IDs, `4 * 4**level + cell_id`, so the links survive cell reordering. |
+
+For narrow channels and peninsulas, derive explicit water contacts from the same high-resolution water mask used to build the grid. Two geometrically adjacent cells can hold disconnected water. With explicit contacts, the kernel measures distance only along the supplied links. The kernel uses source normalization to conserve probability mass.
+
+Pass the prepared dataset to `optimize_pdf` and then to `compute_states`. Set `conv_method="HealpixAnalyseMixedConv"` in `optimize_pdf`, or use `create_parameters(class_name="GaussianMixedHealpixAnalyse", ...)` for a fixed sigma. The parameters file stores the fitted model, and the input dataset carries the grid and water contacts. Set `device="cuda"` on each computation for CUDA. Construction of the water graph runs on the CPU.
+
+`decode_trajectories(track_modes=["viterbi_healpix"], ...)` uses the same transition weights on mixed grids. Each decoded step has an allowed water route within the kernel radius. A straight line drawn between successive points can still cut across that route. Mean and modal tracks summarize the state probabilities at each time independently.
 
 ## Running on a GPU (`device`)
 
@@ -115,6 +131,7 @@ Fish that enter rivers narrower than one cell need a mixed-level operator (`mult
 | `FFTConv`                 | yes                         |
 | `LargeHealpixConv`        | yes                         |
 | `HealpixAnalyseLargeConv` | yes                         |
+| `HealpixAnalyseMixedConv` | yes, operator application  |
 | `HealpixAnalyseConv`      | no: CPU only (numpy, scipy) |
 | `HealpixConv`             | no: CPU only (numpy)        |
 

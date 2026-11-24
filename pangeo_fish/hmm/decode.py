@@ -566,3 +566,60 @@ def viterbi_healpix(emission, sigmas, truncate=4.0, ellipsoid="sphere", level=No
         },
         coords={"time": emission["time"].values},
     )
+
+
+@numba.njit
+def _viterbi_csr_step(previous, row_offsets, columns, log_weights):
+    best = np.full(previous.size, -np.inf)
+    sources = np.zeros(previous.size, dtype=np.int32)
+    for target in range(previous.size):
+        for k in range(row_offsets[target], row_offsets[target + 1]):
+            source = columns[k]
+            score = previous[source] + log_weights[k]
+            if score > best[target]:
+                best[target] = score
+                sources[target] = source
+    return best, sources
+
+
+def viterbi_mixed_healpix(emission, predictor_factory, sigmas):
+    """Most probable sequence of mixed-level cells using the fitted water graph."""
+    pdf = emission["pdf"].transpose("time", "cells").fillna(0).to_numpy()
+    initial = emission["initial"].transpose("cells").fillna(0).to_numpy()
+    wet = emission["mask"].to_numpy()
+    indices = emission["predictor_index"].to_numpy()
+    steps, size = pdf.shape
+    if np.any(indices[: steps - 1] < 0) or np.any(indices[: steps - 1] >= len(sigmas)):
+        raise ValueError("predictor_index is out of range of the sigma list")
+
+    with np.errstate(divide="ignore"):
+        log_pdf = np.log(pdf)
+        score = np.where(wet, np.log(initial), -np.inf)
+        transitions = {}
+        for index in np.unique(indices[: steps - 1]):
+            operator = predictor_factory(sigma=sigmas[index]).operator
+            transitions[index] = (
+                operator.row_offsets,
+                operator.column_indices,
+                np.log(operator.weights),
+            )
+
+    back = np.zeros((steps, size), dtype=np.int32)
+    for step in range(1, steps):
+        score, back[step] = _viterbi_csr_step(score, *transitions[indices[step - 1]])
+        score = np.where(wet, score + log_pdf[step], -np.inf)
+    if not np.isfinite(score).any():
+        raise ValueError("no feasible path through the mixed-level water graph")
+
+    path = np.empty(steps, dtype=np.int64)
+    path[-1] = score.argmax()
+    for step in range(steps - 1, 0, -1):
+        path[step - 1] = back[step, path[step]]
+
+    return xr.Dataset(
+        {
+            name: ("time", emission[name].to_numpy()[path])
+            for name in ("cell_ids", "cell_level", "longitude", "latitude")
+        },
+        coords={"time": emission["time"]},
+    )

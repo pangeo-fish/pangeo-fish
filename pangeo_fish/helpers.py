@@ -47,6 +47,7 @@ from pangeo_fish.hmm.prediction import (
     FFTGaussian1DHealpix,
     Gaussian1DHealpix,
     GaussianHealpixAnalyse,
+    GaussianMixedHealpixAnalyse,
     LargeGaussianHealpixAnalyse,
     UpDownGaussian1DHealpix,
 )
@@ -193,7 +194,14 @@ def _update_params_dict(factory, params: dict):
     kwargs = {
         k: str(v)
         for k, v in _inspect_curry_obj(factory).items()
-        if k not in ("cell_ids", "blocked_cells")
+        if k
+        not in (
+            "cell_ids",
+            "blocked_cells",
+            "cell_levels",
+            "wet_fraction",
+            "water_contacts",
+        )
     }
 
     return params | {"predictor_factory": {"class": str(factory), "kwargs": kwargs}}
@@ -2005,7 +2013,7 @@ def _check_device(device: str | torch.device, conv_method: str | None = None) ->
             f'conv_method="{conv_method}" runs on the CPU only (numpy/scipy), so '
             f'device={device!r} cannot be used. Use device="cpu", or one of the '
             'PyTorch methods: "FFTConv", "LargeHealpixConv" or '
-            '"HealpixAnalyseLargeConv".'
+            '"HealpixAnalyseLargeConv" or "HealpixAnalyseMixedConv".'
         )
     if not torch.cuda.is_available():
         raise RuntimeError(
@@ -2021,6 +2029,108 @@ def _check_device(device: str | torch.device, conv_method: str | None = None) ->
         )
 
 
+def _prepare_movement_grid(ds, mixed):
+    if not mixed:
+        if "cell_level" in ds:
+            raise ValueError(
+                'Mixed HEALPix grids require conv_method="HealpixAnalyseMixedConv".'
+            )
+        return to_healpix(ds)
+
+    cells = ds.get("cell_ids")
+    levels = ds.get("cell_level")
+    if (
+        cells is None
+        or levels is None
+        or cells.dims != ("cells",)
+        or levels.dims != ("cells",)
+    ):
+        raise ValueError(
+            'Mixed HEALPix grids require "cell_ids" and "cell_level" on "cells".'
+        )
+    if cells.attrs.get("indexing_scheme", "nested") != "nested":
+        raise ValueError("Mixed HEALPix grids require NESTED cell IDs.")
+    if not np.issubdtype(levels.dtype, np.integer) or not np.issubdtype(
+        cells.dtype, np.integer
+    ):
+        raise ValueError("Mixed HEALPix cell levels and IDs must be integers.")
+    values = levels.to_numpy().astype(np.int64)
+    ids = cells.to_numpy()
+    if np.any((values < 0) | (values > 29)) or np.any(ids < 0):
+        raise ValueError(
+            "Mixed HEALPix cell levels must be in [0, 29] and IDs must be nonnegative."
+        )
+    if np.any(ids >= (12 << (2 * values))):
+        raise ValueError("A mixed HEALPix cell ID is out of range for its level.")
+    mask = ds.get("mask")
+    if mask is None or mask.dims != ("cells",) or mask.dtype != np.bool_:
+        raise ValueError(
+            'A mixed HEALPix grid requires a static boolean "mask" on "cells".'
+        )
+
+    ds = ds.set_coords(["cell_ids", "cell_level"])
+    if "initial" in ds:
+        if ds["initial"].dims != ("cells",):
+            raise ValueError('A mixed HEALPix grid requires "initial" on "cells".')
+        initial = ds["initial"].where(mask, 0).fillna(0)
+        total = initial.sum("cells")
+        if not bool(np.isfinite(total) & (total > 0)):
+            raise ValueError(
+                "The mixed HEALPix initial distribution has no water mass."
+            )
+        ds["initial"] = initial / total
+    ds["cell_ids"].attrs = {
+        k: v for k, v in cells.attrs.items() if k not in ("level", "grid_name")
+    } | {
+        "indexing_scheme": "nested",
+        "ellipsoid": cells.attrs.get("ellipsoid") or "WGS84",
+    }
+    if {"longitude", "latitude"} <= set(ds.coords):
+        return ds
+
+    lon, lat = np.empty(ids.size), np.empty(ids.size)
+    for level in np.unique(values):
+        selected = values == level
+        lon[selected], lat[selected] = hg.nested.healpix_to_lonlat(
+            ids[selected].astype(np.uint64),
+            int(level),
+            ellipsoid=ds["cell_ids"].attrs["ellipsoid"],
+        )
+    return ds.assign_coords(
+        longitude=("cells", lon, {"standard_name": "longitude"}),
+        latitude=("cells", lat, {"standard_name": "latitude"}),
+    )
+
+
+def _mixed_water_contacts(ds, levels, ids):
+    names = ("water_contact_from", "water_contact_to")
+    if not any(name in ds for name in names):
+        return None
+    if not all(name in ds for name in names):
+        raise ValueError(
+            f"Provide both {names[0]} and {names[1]} for mixed water contacts."
+        )
+
+    uniq = ids.astype(np.int64) + (4 << (2 * levels))
+    order = np.argsort(uniq)
+    sorted_ids = uniq[order]
+    positions = []
+    for name in names:
+        contacts = ds[name]
+        if contacts.dims != ("water_contacts",) or not np.issubdtype(
+            contacts.dtype, np.integer
+        ):
+            raise ValueError(
+                f'{name} must contain integer NUNIQ IDs on "water_contacts".'
+            )
+        target = contacts.to_numpy()
+        indices = np.searchsorted(sorted_ids, target)
+        if np.any(indices >= uniq.size) or np.any(sorted_ids[indices] != target):
+            raise ValueError(f"{name} references a NUNIQ cell absent from this grid.")
+        positions.append(order[indices])
+    return tuple(positions)
+
+
 def _get_predictor_factory(
     ds: xr.Dataset,
     truncate: float | None,
@@ -2029,7 +2139,7 @@ def _get_predictor_factory(
     device: str | torch.device = "cpu",
     ellipsoid=None,
     max_sigma: float | None = None,
-    normalization: str = "full_disc",
+    normalization: str | None = None,
     land_barrier: bool = False,
     projection: str = "conservative",
 ):
@@ -2040,6 +2150,38 @@ def _get_predictor_factory(
         _check_device(device, conv_method)
         if ellipsoid is None:
             ellipsoid = ds["cell_ids"].attrs.get("ellipsoid")
+        if conv_method == "HealpixAnalyseMixedConv":
+            if normalization not in (None, "source"):
+                raise ValueError(
+                    'HealpixAnalyseMixedConv requires normalization="source".'
+                )
+            levels = ds["cell_level"].to_numpy().astype(np.int64)
+            ids = ds["cell_ids"].to_numpy()
+            wet_fraction = ds.get("wet_fraction")
+            if wet_fraction is not None and wet_fraction.dims != ("cells",):
+                raise ValueError('Mixed-grid "wet_fraction" must be on "cells".')
+            blocked = ~ds["mask"].to_numpy()
+            grid_ellipsoid = ds["cell_ids"].attrs["ellipsoid"]
+            if ellipsoid is not None and _ellipsoid_params(
+                ellipsoid
+            ) != _ellipsoid_params(grid_ellipsoid):
+                raise ValueError("ellipsoid must match the mixed HEALPix grid.")
+            return curry(
+                GaussianMixedHealpixAnalyse,
+                cell_ids=ids,
+                cell_levels=levels,
+                radius_m=_authalic_radius(grid_ellipsoid).to("m").magnitude,
+                ellipsoid=grid_ellipsoid,
+                truncate=4.0 if truncate is None else truncate,
+                blocked_cells=blocked,
+                wet_fraction=None
+                if wet_fraction is None
+                else np.where(blocked, 1.0, wet_fraction.to_numpy()),
+                water_contacts=_mixed_water_contacts(ds, levels, ids),
+                device=device,
+            )
+        if normalization is None:
+            normalization = "full_disc"
         if conv_method == "HealpixConv":
             if truncate is None:
                 raise ValueError(
@@ -2098,7 +2240,7 @@ def _get_predictor_factory(
                 else ""
             )
             raise ValueError(
-                f'Unknown helper "{conv_method}". Expected "HealpixConv", "LargeHealpixConv", "FFTConv", "HealpixAnalyseConv" or "HealpixAnalyseLargeConv".'
+                f'Unknown helper "{conv_method}". Expected "HealpixConv", "LargeHealpixConv", "FFTConv", "HealpixAnalyseConv" "HealpixAnalyseLargeConv" or "HealpixAnalyseMixedConv".'
                 + hint
             )
     else:
@@ -2213,14 +2355,13 @@ def _get_max_sigma(
     earth_radius_ = xr.DataArray(earth_radius, dims=None)
 
     timedelta = temporal_resolution(ds["time"]).pint.quantify().pint.to("h")
-    grid_resolution = earth_radius_ * _grid_resolution_radians(ds)
-
     maximum_speed_ = xr.DataArray(maximum_speed, dims=None).pint.to("km / h")
     if as_radians:
         max_grid_displacement = (
             maximum_speed_ * timedelta * adjustment_factor / earth_radius_
         )
     else:  # in pixels
+        grid_resolution = earth_radius_ * _grid_resolution_radians(ds)
         max_grid_displacement = (
             maximum_speed_ * timedelta * adjustment_factor / grid_resolution
         )
@@ -2305,7 +2446,7 @@ def optimize_pdf(
     save_parameters=False,
     storage_options: dict = None,
     target_root=".",
-    normalization: str = "full_disc",
+    normalization: str | None = None,
     land_barrier: bool = False,
     projection: str = "conservative",
     device: str | torch.device = "cpu",
@@ -2338,9 +2479,10 @@ def optimize_pdf(
          -"FFTConv"=>"FFTGaussian1DHealpix": Default, very fast, multiplies in fft space then comes back to real space,
          -"HealpixAnalyseConv"=>"GaussianHealpixAnalyse": sparse operator from healpix-analyse (WGS84 only),
          -"HealpixAnalyseLargeConv"=>"LargeGaussianHealpixAnalyse": large sigma, LargeConv.from_gaussian (WGS84 only),
-
-     normalization : {"full_disc", "source"}, default "full_disc"
-         Only for conv_method="HealpixAnalyseConv".
+         -"HealpixAnalyseMixedConv"=> mixed-level, mass-conserving water-path kernel.
+     normalization : {"full_disc", "source"}, optional
+         Defaults to "full_disc" for "HealpixAnalyseConv" and to "source" for
+         "HealpixAnalyseMixedConv", which requires "source".
      land_barrier : bool, default False
          Only for conv_method="HealpixAnalyseConv": the non-ocean cells of ``mask``
          are passed as blocked cells.
@@ -2349,7 +2491,8 @@ def optimize_pdf(
      device : str or torch.device, default "cpu"
          Device that runs the convolution, e.g. ``"cuda"`` for a GPU (this needs
          the CUDA build of PyTorch). Only the PyTorch methods can use a GPU:
-         ``"FFTConv"``, ``"LargeHealpixConv"`` and ``"HealpixAnalyseLargeConv"``.
+         ``"FFTConv"``, ``"LargeHealpixConv"``, ``"HealpixAnalyseLargeConv"`` and
+         ``"HealpixAnalyseMixedConv"``.
          ``"HealpixConv"`` and ``"HealpixAnalyseConv"`` run on the CPU only and
          raise a ValueError for another device. The predictions are returned as
          numpy arrays on the CPU whatever the device.
@@ -2395,39 +2538,42 @@ def optimize_pdf(
     ds = ds.compute()
     _check_emission_mass(ds)
 
-    if "cells" in ds.dims:
-        ds = to_healpix(ds)
-        as_radians = True
-    else:
+    if "cells" not in ds.dims:
         raise ValueError("dims must be ['cells'], ['x','y'] is not used anymore")
-        as_radians = False
+    mixed = conv_method == "HealpixAnalyseMixedConv"
+    ds = _prepare_movement_grid(ds, mixed)
+    as_radians = True
     if ellipsoid is None:
-        info = getattr(ds.dggs, "grid_info", None)
-        ellipsoid = getattr(info, "ellipsoid", None) or ds["cell_ids"].attrs.get(
-            "ellipsoid"
-        )
+        ellipsoid = ds["cell_ids"].attrs.get("ellipsoid")
+        if not mixed:
+            info = getattr(ds.dggs, "grid_info", None)
+            ellipsoid = getattr(info, "ellipsoid", None) or ellipsoid
 
     max_sigma = _get_max_sigma(
         ds, earth_radius, adjustment_factor, maximum_speed, as_radians
     )
     if final:
         max_sigma = 0.01
-    if "predictor_index" in ds:
-        speed_bounds_dict = ds.attrs.get("sigma_bounds", None)
-        if speed_bounds_dict is None:
-            pass
-        else:
-            sigma_bounds_dict = {}
-            for i in speed_bounds_dict.keys():
-                maximum_speed_i = speed_bounds_dict[i][1]
-                max_sigma_i = _get_max_sigma(
-                    ds, earth_radius, adjustment_factor, maximum_speed_i, as_radians
-                )
-                sigma_bounds_dict[i] = (1e-4, max_sigma_i)
-            print(f"dictionnaire des vitesses:{speed_bounds_dict}")
-            print(f"dictionnaire des sigma:{sigma_bounds_dict}")
-    else:
-        sigma_bounds_dict = None
+    min_sigma = 1e-8 if mixed else 1e-4
+    sigma_bounds_dict = None
+    speed_bounds_dict = ds.attrs.get("sigma_bounds") if predictor_index in ds else None
+    if speed_bounds_dict is not None:
+        sigma_bounds_dict = {}
+        for index, speed_bounds in speed_bounds_dict.items():
+            maximum_speed_i = speed_bounds[1]
+            max_sigma_i = _get_max_sigma(
+                ds, earth_radius, adjustment_factor, maximum_speed_i, as_radians
+            )
+            sigma_bounds_dict[index] = (min_sigma, max_sigma_i)
+
+    if mixed and any(
+        not np.isfinite(bound) or bound <= min_sigma
+        for bound in [max_sigma]
+        + [upper for _, upper in (sigma_bounds_dict or {}).values()]
+    ):
+        raise ValueError(
+            "Mixed HEALPix speed bounds must allow a positive movement scale."
+        )
 
     # The largest sigma the optimiser can try bounds the convolution kernel.
     largest_sigma = max(
@@ -2451,7 +2597,7 @@ def optimize_pdf(
 
     optimizer = EagerBoundsSearch(
         estimator,
-        (1e-4, max_sigma),
+        (min_sigma, max_sigma),
         optimizer_kwargs={"disp": 3, "xtol": tolerance},
         sigma_bounds=sigma_bounds_dict,
     )
@@ -2642,8 +2788,9 @@ def _build_estimator(
         )
     # after the checks above, so that a removed predictor is reported first
     if "cells" in emission.dims:
-        emission = to_healpix(emission)
-        if ellipsoid is None:
+        mixed = "GaussianMixedHealpixAnalyse" in factory_class
+        emission = _prepare_movement_grid(emission, mixed)
+        if ellipsoid is None and not mixed:
             info = getattr(emission.dggs, "grid_info", None)
             ellipsoid = getattr(info, "ellipsoid", None) or emission[
                 "cell_ids"
@@ -2704,7 +2851,16 @@ def _build_estimator(
     projection = predictor_kwargs.get("projection") or "conservative"
 
     cls_name = params["predictor_factory"]["class"]  # type: str
-    if "LargeGaussianHealpixAnalyse" in cls_name:
+    if "GaussianMixedHealpixAnalyse" in cls_name:
+        predictor_factory = _get_predictor_factory(
+            emission,
+            truncate=truncate,
+            conv_method="HealpixAnalyseMixedConv",
+            dims=["cells"],
+            ellipsoid=ellipsoid,
+            device=device,
+        )
+    elif "LargeGaussianHealpixAnalyse" in cls_name:
         predictor_factory = _get_predictor_factory(
             emission,
             truncate=truncate,
@@ -2953,6 +3109,8 @@ def decode_trajectories(
         t = mpd.Trajectory(gdf, traj.id)
         return tracks.additional_quantities(t, quantities=additional_track_quantities)
 
+    if isinstance(trajectories, mpd.Trajectory):
+        trajectories = mpd.TrajectoryCollection([trajectories])
     trajectories = mpd.TrajectoryCollection(
         [_wrap_lon(t) for t in trajectories.trajectories]
     )
@@ -3649,7 +3807,8 @@ def create_parameters(
         "Gaussian1DHealpix",
         "FFTGaussian1DHealpix",
         "GaussianHealpixAnalyse",
-        "LargeGaussianHealpixAnalyse"
+        "LargeGaussianHealpixAnalyse",
+        "GaussianMixedHealpixAnalyse"
     single_behav : bool, default=True
         Only used when ``sigma_indices`` is None. If False, one list of time
         indices per continuous segment. If True, one list per predictor value.
@@ -3688,15 +3847,22 @@ def create_parameters(
         "FFTGaussian1DHealpix",
         "GaussianHealpixAnalyse",
         "LargeGaussianHealpixAnalyse",
+        "GaussianMixedHealpixAnalyse",
     ]:
         raise ValueError(
-            f'Unknown class_name "{class_name}". Expected "Gaussian1DHealpix", "FFTGaussian1DHealpix", "UpDownGaussian1DHealpix", "GaussianHealpixAnalyse" or "LargeGaussianHealpixAnalyse".'
+            f'Unknown class_name "{class_name}". Expected "Gaussian1DHealpix", "FFTGaussian1DHealpix", "UpDownGaussian1DHealpix", "GaussianHealpixAnalyse", "LargeGaussianHealpixAnalyse" or "GaussianMixedHealpixAnalyse".'
         )
     if predictor_factory is None:
         predictor_factory = {
             "class": class_name,
             "kwargs": {
-                "grid_info": "HealpixInfo(level=11, ellipsoid=None, indexing_scheme='nested')",
+                **(
+                    {}
+                    if class_name == "GaussianMixedHealpixAnalyse"
+                    else {
+                        "grid_info": "HealpixInfo(level=11, ellipsoid=None, indexing_scheme='nested')"
+                    }
+                ),
                 "sigma": None,
                 "truncate": 4.0 if class_name == "Gaussian1DHealpix" else None,
                 "kernel_size": None,
