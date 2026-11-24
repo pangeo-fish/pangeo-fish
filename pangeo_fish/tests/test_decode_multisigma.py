@@ -8,6 +8,29 @@ import xdggs  # noqa: F401
 
 from pangeo_fish.hmm import decode
 from pangeo_fish.hmm.decode import build_transitions, viterbi_healpix
+from pangeo_fish.hmm.filter import forward
+
+
+def sigma_indices_used_by_the_filter(predictor_index, n):
+    """Index of the sigma that ``hmm.filter.forward`` applies to each transition."""
+    calls = []
+
+    class Recorder:
+        def __init__(self, index):
+            self.index = index
+
+        def predict(self, X, *, mask=None):
+            calls.append(self.index)
+            return X
+
+    steps = len(predictor_index)
+    forward(
+        np.ones((steps, n)),
+        [Recorder(0), Recorder(1)],
+        predictor_index,
+        np.full(n, 1 / n),
+    )
+    return calls
 
 
 @pytest.mark.parametrize("dtype", [np.float64, np.float32])
@@ -28,9 +51,10 @@ def test_multisigma_transitions_and_exact_viterbi(dtype):
     initial[5] = 1
     mask = np.ones(len(cells), dtype=bool)
     mask[6] = False
-    # The transition from step t to step t + 1 uses the index of step t (the
-    # convention of the HMM filter), so the index of the last step is unused.
     indices = np.array([1, 0, 0], dtype=np.int32)
+    # the sigma of each transition is the one the HMM filter applies
+    transition_indices = sigma_indices_used_by_the_filter(indices, len(cells))
+    assert transition_indices == [1, 0]
     # Favour a cell that the wide kernel reaches from the first cell and the
     # narrow one does not: the two possible conventions then give different paths.
     reach = [
@@ -63,7 +87,7 @@ def test_multisigma_transitions_and_exact_viterbi(dtype):
             candidates.append((score, (5, second, last)))
         return max(candidates)
 
-    best_score, best_path = best(indices[:-1])
+    best_score, best_path = best(transition_indices)
     assert np.isfinite(best_score)
     # using the index of the step a transition ends at would give another path
     assert best(indices[1:])[1] != best_path
@@ -112,3 +136,22 @@ def test_viterbi_skips_sigma_used_only_at_final_step(
 
     assert built_sigmas == expected_sigmas
     np.testing.assert_array_equal(actual.cell_ids, [5] * len(indices))
+
+
+def test_viterbi_rejects_out_of_range_final_index():
+    level = 2
+    cells = np.arange(12 * 4**level, dtype=np.uint64)
+    initial = np.zeros(len(cells))
+    initial[5] = 1
+    emission = xr.Dataset(
+        {
+            "pdf": (("time", "cells"), np.ones((3, len(cells)))),
+            "initial": ("cells", initial),
+            "mask": ("cells", np.ones(len(cells), dtype=bool)),
+            # no transition uses the last index, but it must still be valid
+            "predictor_index": ("time", [0, 0, 2]),
+        },
+        coords={"cell_ids": ("cells", cells), "time": np.arange(3)},
+    )
+    with pytest.raises(ValueError, match="out of range"):
+        viterbi_healpix(emission, [0.02, 0.15], level=level)

@@ -494,12 +494,15 @@ def viterbi_healpix(emission, sigmas, truncate=4.0, ellipsoid="sphere", level=No
     pdf = emission["pdf"].transpose("time", "cells").values
     initial = emission["initial"].transpose("cells").values
     ocean = np.asarray(emission["mask"].transpose("cells").values, dtype=bool)
-    sig_idx = np.asarray(emission["predictor_index"].values[:-1], dtype=int)
+    predictor_index = np.asarray(emission["predictor_index"].values, dtype=int)
 
     T, n = pdf.shape
     print(f"T={T},n={n}")
-    if np.any((sig_idx < 0) | (sig_idx >= len(sigmas))):
+    # validate every index, including the last one that no transition uses
+    if np.any((predictor_index < 0) | (predictor_index >= len(sigmas))):
         raise ValueError("predictor_index is out of range of the sigma list")
+    # the transition t - 1 -> t uses the index of step t - 1
+    sig_idx = predictor_index[:-1]
 
     # emissions in log space; the first step uses the initial distribution
     with np.errstate(divide="ignore"):
