@@ -467,7 +467,7 @@ def _grid_ellipsoid(emission):
         ellipsoid = emission["cell_ids"].attrs.get("ellipsoid")
     if ellipsoid is None:
         return "sphere"
-    return getattr(ellipsoid, "name", ellipsoid)
+    return ellipsoid
 
 
 def viterbi_healpix(emission, sigmas, truncate=4.0, ellipsoid=None, level=None):
@@ -485,7 +485,7 @@ def viterbi_healpix(emission, sigmas, truncate=4.0, ellipsoid=None, level=None):
         Standard deviations in radians.
     truncate : float, default 4.0
         Truncation radius in units of sigma.
-    ellipsoid : str, optional
+    ellipsoid : ellipsoid-like, optional
         Reference ellipsoid of the HEALPix grid. By default, the ellipsoid
         recorded with the grid of ``emission`` (``"sphere"`` if there is none):
         the cell ids only give the right positions on the ellipsoid they were

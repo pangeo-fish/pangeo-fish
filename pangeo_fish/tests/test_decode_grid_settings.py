@@ -5,16 +5,11 @@ import pytest
 import xarray as xr
 import xdggs  # noqa: F401
 from tlz.functoolz import curry
+from xdggs.ellipsoid import Ellipsoid
 
 from pangeo_fish.hmm import decode
-from pangeo_fish.hmm.estimator import eager
 from pangeo_fish.hmm.estimator.eager import EagerEstimator
-from pangeo_fish.hmm.prediction import (
-    FFTGaussian1DHealpix,
-    Gaussian1DHealpix,
-    LargeGaussianHealpixAnalyse,
-    UpDownGaussian1DHealpix,
-)
+from pangeo_fish.hmm.prediction import FFTGaussian1DHealpix, UpDownGaussian1DHealpix
 
 level = 6
 sigma = 0.02
@@ -85,6 +80,21 @@ def test_viterbi_healpix_positions_differ_between_ellipsoids():
     assert np.all(np.abs(on_ellipsoid - on_sphere) > 0.05)
 
 
+@pytest.mark.parametrize("name", [None, "custom"])
+def test_viterbi_healpix_uses_custom_ellipsoid_parameters(name):
+    ellipsoid = Ellipsoid(
+        semimajor_axis=6_378_137, inverse_flattening=298.257223563, name=name
+    )
+    emission, cell_path = create_emission(ellipsoid.to_dict())
+
+    actual = decode.viterbi_healpix(emission, [sigma])
+
+    np.testing.assert_array_equal(actual["cell_ids"], cell_path)
+    lon, lat = hgn.healpix_to_lonlat(cell_path, level, ellipsoid=ellipsoid)
+    np.testing.assert_allclose(actual["longitude"], lon)
+    np.testing.assert_allclose(actual["latitude"], lat)
+
+
 def test_viterbi_healpix_explicit_ellipsoid_takes_precedence():
     emission, cell_path = create_emission("WGS84")
 
@@ -97,40 +107,36 @@ def test_viterbi_healpix_explicit_ellipsoid_takes_precedence():
 @pytest.mark.parametrize(
     ["factory", "expected"],
     (
-        (curry(FFTGaussian1DHealpix), {"truncate": 5.0}),
-        (
-            curry(FFTGaussian1DHealpix, truncate=3, ellipsoid="WGS84"),
-            {"truncate": 3, "ellipsoid": "WGS84"},
-        ),
-        (curry(UpDownGaussian1DHealpix, ellipsoid="WGS84"), {"ellipsoid": "WGS84"}),
-        (curry(Gaussian1DHealpix, truncate=4.0), {"truncate": 4.0}),
-        (curry(LargeGaussianHealpixAnalyse), {}),
-        (lambda sigma: None, {}),
+        (curry(FFTGaussian1DHealpix), None),
+        (curry(FFTGaussian1DHealpix, ellipsoid="WGS84"), "WGS84"),
+        (curry(UpDownGaussian1DHealpix, ellipsoid="WGS84"), "WGS84"),
+        (lambda sigma: None, None),
     ),
 )
-def test_viterbi_healpix_settings(factory, expected):
+def test_viterbi_ellipsoid_from_predictor_factory(factory, expected):
     estimator = EagerEstimator(predictor_factory=factory, sigma=[sigma])
 
-    assert estimator._viterbi_healpix_settings() == expected
+    assert estimator._viterbi_ellipsoid() == expected
 
 
-def test_decode_passes_the_predictor_settings_to_viterbi_healpix(monkeypatch):
+def test_decode_uses_four_sigma_with_an_fft_predictor(monkeypatch):
     emission, cell_path = create_emission("WGS84")
     received = {}
+    build_transitions = decode.build_transitions
 
-    def viterbi_healpix(emission, sigmas, **kwargs):
+    def record_transitions(cell_ids, level, sigmas, **kwargs):
         received.update(kwargs)
-        return decode.viterbi_healpix(emission, sigmas, **kwargs)
+        return build_transitions(cell_ids, level, sigmas, **kwargs)
 
-    monkeypatch.setattr(eager, "viterbi_healpix", viterbi_healpix)
+    monkeypatch.setattr(decode, "build_transitions", record_transitions)
     estimator = EagerEstimator(
-        predictor_factory=curry(FFTGaussian1DHealpix, truncate=3, ellipsoid="WGS84"),
+        predictor_factory=curry(FFTGaussian1DHealpix, truncate=5, ellipsoid="WGS84"),
         sigma=[sigma],
     )
 
     trajectory = estimator.decode(emission, mode="viterbi_healpix")
 
-    assert received == {"truncate": 3, "ellipsoid": "WGS84"}
+    assert received == {"truncate": 4.0, "ellipsoid": "WGS84"}
     _, lat = hgn.healpix_to_lonlat(cell_path, level, ellipsoid="WGS84")
     np.testing.assert_allclose(trajectory.df.geometry.y, lat)
 

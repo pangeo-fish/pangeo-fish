@@ -47,28 +47,17 @@ class EagerEstimator:
         """
         return replace(self, **params)
 
-    def _viterbi_healpix_settings(self) -> dict:
-        """Settings the Viterbi decoding shares with the predictors.
-
-        The kernel truncation and the ellipsoid given to the predictor factory
-        (or the defaults of the predictor class) are passed on, so that the
-        decoding uses the same transition radius and the same grid geometry as
-        the HMM filter. A setting the predictor does not have is left to the
-        default of :py:func:`pangeo_fish.hmm.decode.viterbi_healpix`.
-        """
+    def _viterbi_ellipsoid(self):
+        """Return the predictor's ellipsoid, or None to use the emission grid."""
         factory = self.predictor_factory
         keywords = getattr(factory, "keywords", None) or {}
-        fields = getattr(getattr(factory, "func", factory), "__dataclass_fields__", {})
+        ellipsoid = keywords.get("ellipsoid")
+        if ellipsoid is not None:
+            return ellipsoid
 
-        settings = {}
-        for name in ("truncate", "ellipsoid"):
-            value = keywords.get(name)
-            if value is None and name in fields:
-                default = fields[name].default
-                value = None if default is MISSING else default
-            if value is not None:
-                settings[name] = value
-        return settings
+        fields = getattr(getattr(factory, "func", factory), "__dataclass_fields__", {})
+        default = getattr(fields.get("ellipsoid"), "default", MISSING)
+        return None if default is MISSING else default
 
     ####New
     def _get_predictors(self) -> list[Predictor]:
@@ -307,6 +296,8 @@ class EagerEstimator:
             - ``"mean"``: use the centroid of the state probabilities as decoded state.
             - ``"mode"``: use the maximum of the state probabilities as decoded state.
             - ``"viterbi"``: use the Viterbi algorithm to determine the most probable states.
+            - ``"viterbi_healpix"``: decode the most probable HEALPix track with transitions
+              truncated at four standard deviations.
 
             If a list of methods is given, decode using all methods in sequence.
 
@@ -341,7 +332,7 @@ class EagerEstimator:
                 curry(
                     viterbi_healpix,
                     sigmas=self.sigma,
-                    **self._viterbi_healpix_settings(),
+                    ellipsoid=self._viterbi_ellipsoid(),
                 ),
             ),
         }
