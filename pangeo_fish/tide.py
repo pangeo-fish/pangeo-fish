@@ -1,3 +1,5 @@
+import warnings
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -19,6 +21,76 @@ from pangeo_fish.storage import write_time_blocks
 M2_PERIOD_H = 12.42  # h, principal lunar semi-diurnal tide
 DEFAULT_TIDE_WINDOW_H = 25.0  # h, about two M2 cycles
 MAX_TIDE_AMPLITUDE_M = 5.0  # m, largest plausible M2 amplitude in pressure
+
+DEPTH_UNITS = {"dbar", "decibar", "decibars", "db", "m", "meter", "meters", "metre", "metres"}
+MAX_PLAUSIBLE_DEPTH = 3000.0  # fish tags: far deeper than any tagged fish dives
+MIN_PLAUSIBLE_DEPTH = -50.0
+
+
+def check_pressure_units(values, units=None, name="pressure"):
+    """Check that a pressure/depth record is in dbar or metres of water.
+
+    The tide routines treat the record as a depth in metres (1 dbar is about 1 m).
+    A record in Pa, hPa, mbar, ... would otherwise be accepted and silently
+    wipe out all the tidal evidence.
+
+    Parameters
+    ----------
+    values : array-like
+        The record. NaN are ignored.
+    units : str, optional
+        The ``units`` attribute of the record, if any. It must be one of
+        ``dbar``, ``db``, ``decibar`` or ``m`` (case-insensitive) when given.
+        When it is missing, only the plausibility check below is done.
+    name : str, optional
+        Name of the record, used in error messages.
+
+    Raises
+    ------
+    ValueError
+        If ``units`` is not dbar or m, or the values are impossible for a depth
+        in metres (above 3000 or below -50).
+    """
+    if units is not None and str(units).strip().lower() not in DEPTH_UNITS:
+        raise ValueError(
+            f"{name} has units {units!r}, but the tide routines need dbar or m "
+            "(depth below the surface). Convert the record first, e.g. divide Pa "
+            "by 1e4 for dbar (and subtract the atmospheric pressure), and set "
+            "its 'units' attribute accordingly."
+        )
+    arr = np.asarray(values, dtype=float)
+    arr = arr[np.isfinite(arr)]
+    if arr.size == 0:
+        return
+    vmin, vmax = float(arr.min()), float(arr.max())
+    if vmax > MAX_PLAUSIBLE_DEPTH or vmin < MIN_PLAUSIBLE_DEPTH:
+        raise ValueError(
+            f"{name} values range from {vmin:g} to {vmax:g}, which is impossible "
+            f"for a depth in dbar or m (expected {MIN_PLAUSIBLE_DEPTH:g} to "
+            f"{MAX_PLAUSIBLE_DEPTH:g}). The record is probably in another unit "
+            "(Pa, hPa, mbar, cm, ...): convert it to dbar or m first."
+        )
+
+
+def check_tide_sigma(tide_method, tide_sigma_m, default=2.0):
+    """Warn when ``tide_sigma_m`` is set but the legacy tide method ignores it.
+
+    The legacy method (``tide_pdf``) estimates the observation error from the
+    data and uses a fixed 2 m fallback; only ``tide_method="healpix"`` reads
+    ``tide_sigma_m``. A value equal to the demo default (2.0) is not reported.
+    """
+    if (
+        tide_method == "legacy"
+        and tide_sigma_m is not None
+        and float(tide_sigma_m) != default
+    ):
+        warnings.warn(
+            f"tide_sigma_m={tide_sigma_m} is ignored by tide_method='legacy' "
+            "(it uses a fixed fallback of 2.0 m). Use tide_method='healpix' to "
+            "set the model error.",
+            UserWarning,
+            stacklevel=2,
+        )
 
 
 def lssinfit(time, depth, periods_h=(M2_PERIOD_H,), trend_order=1):
@@ -174,6 +246,7 @@ def tide_behav_extr(
     )  # in days
     time = time.to_numpy()
     depth = df["pressure"].to_numpy()
+    check_pressure_units(depth, df.attrs.get("units"))
     n = len(depth)
     tide_window = int(round(60 / dt * tideFL))
     behav_window = int(round(60 / dt * behavFL))
@@ -244,6 +317,14 @@ def convert_lon_360_to_180(ds, bbox=None):
     bbox : dict or None
         Exemple :
         bbox = {"latitude": [lat_min, lat_max], "longitude": [lon_min, lon_max]}
+
+    Raises
+    ------
+    ValueError
+        If the requested range does not overlap the file coverage in latitude or
+        longitude (e.g. the demo TPXO subset only covers the North Sea and the
+        Channel). A range only partly covered is clipped to the file with a
+        warning giving the clipped extent.
     """
 
     ds = ds.copy()
@@ -252,46 +333,34 @@ def convert_lon_360_to_180(ds, bbox=None):
     lon_new = ((ds.lon + 180) % 360) - 180
     ds = ds.assign_coords(lon=lon_new)
     ds = ds.sortby("lon")
+    ds = ds.sortby("lat")  # latitudes croissantes
 
     # --- 2. bbox ---
     if bbox is not None:
-        # -------- LATITUDE --------
-        if "latitude" in bbox:
-            lat_min, lat_max = bbox["latitude"]
-            print(lat_min, lat_max)
-            # Vérifie si les valeurs existent
-            lat_vals = ds.lat.values
-            # min
-            if lat_min in lat_vals:
-                print("here")
-                lat_min_sel = lat_min
-            else:
-                lat_min_sel = ds.lat.sel(lat=lat_min, method="nearest").item()
-            # max
-            if lat_max in lat_vals:
-                print("HERE")
-                lat_max_sel = lat_max
-            else:
-                lat_max_sel = ds.lat.sel(lat=lat_max, method="nearest").item()
-                print(lat_max_sel)
-            print(slice(lat_min_sel, lat_max_sel))
-            ds = ds.sortby("lat")  # latitudes croissantes
-            ds = ds.sel(lat=slice(lat_min_sel, lat_max_sel))
-        # -------- LONGITUDE --------
-        if "longitude" in bbox:
-            lon_min, lon_max = bbox["longitude"]
-            lon_vals = ds.lon.values
-            # min
-            if lon_min in lon_vals:
-                lon_min_sel = lon_min
-            else:
-                lon_min_sel = ds.lon.sel(lon=lon_min, method="nearest").item()
-            # max
-            if lon_max in lon_vals:
-                lon_max_sel = lon_max
-            else:
-                lon_max_sel = ds.lon.sel(lon=lon_max, method="nearest").item()
-            ds = ds.sel(lon=slice(lon_min_sel, lon_max_sel))
+        for key, dim in (("latitude", "lat"), ("longitude", "lon")):
+            if key not in bbox:
+                continue
+            vmin, vmax = sorted(float(v) for v in bbox[key])
+            cmin, cmax = float(ds[dim].min()), float(ds[dim].max())
+            if vmax < cmin or vmin > cmax:
+                raise ValueError(
+                    f"Requested {key} range [{vmin}, {vmax}] is outside the tide "
+                    f"file coverage [{cmin}, {cmax}]. Use a tide file that covers "
+                    "the study area (the demo TPXO subset only covers the North "
+                    "Sea and the Channel) or change the bbox."
+                )
+            if vmin < cmin or vmax > cmax:
+                warnings.warn(
+                    f"Requested {key} range [{vmin}, {vmax}] is only partly covered "
+                    f"by the tide file [{cmin}, {cmax}]: clipped to "
+                    f"[{max(vmin, cmin)}, {min(vmax, cmax)}]. Cells outside get no "
+                    "tide information.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+            sel_min = ds[dim].sel({dim: vmin}, method="nearest").item()
+            sel_max = ds[dim].sel({dim: vmax}, method="nearest").item()
+            ds = ds.sel({dim: slice(sel_min, sel_max)})
 
     return ds
 
@@ -388,7 +457,8 @@ def tide_pdf(tide_behav, data):
     The function resamples the depth record into hourly groups, builds a matrix of
     measurements (one row per hour, padded with NaN) and a binary hourly indicator of tide
     detection. These are compared with the tidal model ``data`` through
-    ``datalikelihood_tide_only_full_normalized`` (with ``sigma_tid=2.0``) to obtain, for each
+    ``datalikelihood_tide_only_full_normalized`` (with a fixed ``sigma_tid=2.0`` fallback; the demo's ``tide_sigma_m`` is ignored here,
+    see ``check_tide_sigma``) to obtain, for each
     hour and each grid cell, the likelihood of the observations. The output is re-indexed on
     the hourly datetimes of the tag record.
 
@@ -548,6 +618,7 @@ def prepare_pressure(
 ):
     """Resample to dt_target if needed, optionally smooth, return a DataFrame."""
     da = tag_log[var]
+    check_pressure_units(da.values, da.attrs.get("units"), name=var)
     dt = time_step_min(da)
 
     if dt < dt_target:
@@ -749,7 +820,21 @@ def tide_to_healpix(
 
 
 def merge_tide_with_total(target_root, storage_options=None):
-    """Merge the daily tide likelihood with the other likelihoods on their common cells and days.
+    """Merge the daily tide likelihood into the total emission, keeping all its cells and days.
+
+    The result has exactly the cells and days of ``total_pdf.zarr``; ``initial``,
+    ``final``, ``mask`` and the other variables of the total are kept untouched.
+    Cells or days for which the tide store has no value (outside its grid or
+    period, or NaN) receive a neutral tide factor and a warning gives the counts.
+
+    The neutral factor is the one that leaves the product ``pdf * pdf_tide``
+    unchanged in shape after normalisation, i.e. a constant over cells:
+
+    - for a day with no tide information at all: ``1 / n_cells`` everywhere
+      (same as the uniform pdf the tide methods give when no tide is detected);
+    - for a day where only some cells are missing: the mean of the tide
+      likelihood over that day's available cells, so that unknown cells are
+      neither favoured nor penalised against the known ones.
 
     Parameters
     ----------
@@ -761,10 +846,19 @@ def merge_tide_with_total(target_root, storage_options=None):
     Returns
     -------
     emission_with_bathy_tide : xarray.Dataset
-        Merged dataset restricted to the common ``cell_ids`` and ``time``, with the tide
-        likelihood stored as ``pdf_tide`` (``tide_found`` and ``ocean_mask`` removed).
+        Merged dataset on the ``cell_ids`` and ``time`` of the total emission, with the
+        tide likelihood stored as ``pdf_tide`` (``tide_found`` and ``ocean_mask``
+        removed).
     tide_mask : xarray.DataArray
-        Daily ``tide_found`` on the common time steps.
+        Daily ``tide_found`` (0 on days filled with the neutral factor),
+        broadcast over the cells.
+    behav_mask : xarray.DataArray
+        Same for ``behav_found``.
+
+    Warns
+    -----
+    UserWarning
+        If some cells or days of the total emission had to be filled.
     """
     open_kw = dict(engine="zarr", chunks={}, storage_options=storage_options)
     total = xr.open_dataset(f"{target_root}/total_pdf.zarr", **open_kw).load()
@@ -781,26 +875,55 @@ def merge_tide_with_total(target_root, storage_options=None):
                 f"HEALPix grid mismatch for {name}: {tide_value} vs {total_value}"
             )
 
-    # Keep the HMM cell order and match the tide values by ID.
+    # Keep the HMM cell order and match the tide values by ID and by day.
     daily = daily.groupby("time").mean()
-    total_ids = total.cell_ids.to_index()
-    common_pix = total_ids.intersection(daily.cell_ids.to_index())
-    common_time = daily.time.to_index().intersection(total.time.to_index())
+    n_time, n_cells = total.sizes["time"], total.sizes["cells"]
+    cell_idx = pd.Index(daily.cell_ids.values).get_indexer(total.cell_ids.values)
+    time_idx = daily.time.to_index().get_indexer(total.time.to_index())
+    has_cell, has_time = cell_idx >= 0, time_idx >= 0
 
-    def restrict(ds):
-        selected = ds.isel(cells=ds.cell_ids.to_index().get_indexer(common_pix))
-        return selected.sel(time=common_time)
+    values = np.full((n_time, n_cells), np.nan)
+    source = daily["pdf"].transpose("time", "cells").values
+    values[np.ix_(has_time, has_cell)] = source[np.ix_(time_idx[has_time], cell_idx[has_cell])]
 
-    merged = (
-        restrict(daily)
-        .rename({"pdf": "pdf_tide"})
-        .merge(restrict(total), compat="override", join="exact")
+    missing = ~np.isfinite(values)
+    if missing.any():
+        empty_days = missing.all(axis=1)
+        partial_days = missing.any(axis=1) & ~empty_days
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)  # all-NaN rows
+            day_mean = np.nanmean(np.where(missing, np.nan, values), axis=1)
+        day_mean[empty_days] = 1.0 / n_cells
+        values = np.where(missing, day_mean[:, None], values)
+        warnings.warn(
+            "merge_tide_with_total: the tide likelihood does not cover the whole total "
+            f"emission. Filled with a neutral (constant) factor: {int((~has_cell).sum())}"
+            f" of {n_cells} cells absent from the tide grid, {int(empty_days.sum())} of "
+            f"{n_time} days without tide information, {int(partial_days.sum())} days "
+            f"with some cells missing ({int(missing.sum())} cell-days in total). "
+            "The tide term has no effect there.",
+            UserWarning,
+            stacklevel=2,
+        )
+
+    def daily_flag(name):
+        flag = np.zeros(n_time)
+        if name in daily:
+            flag[has_time] = np.nan_to_num(daily[name].values[time_idx[has_time]])
+        return ("time", flag)
+
+    merged = total.assign(
+        pdf_tide=(("time", "cells"), values),
+        tide_found=daily_flag("tide_found"),
+        behav_found=daily_flag("behav_found"),
     )
     merged.attrs = total.attrs.copy()
 
     tide_mask = merged["tide_found"].broadcast_like(merged["pdf_tide"])
     behav_mask = merged["behav_found"].broadcast_like(merged["pdf_tide"])
-    merged = merged.drop_vars(["tide_found", "ocean_mask", "behav_found"])
+    merged = merged.drop_vars(
+        [v for v in ("tide_found", "ocean_mask", "behav_found") if v in merged]
+    )
 
     # Rechunk for Zarr writes and discard the source stores' chunk encodings.
     merged = merged.chunk({"time": 3, "cells": -1})
