@@ -9,14 +9,14 @@ Choose ``tide_method`` in **Study settings** at the top of the
 
 .. code-block:: python
 
-    tide_method = "pedersen"  # Pedersen et al. (2008) tide likelihood (default)
-    # tide_method = "healpix"  # Tide shape only, with a model error tide_sigma_m
+    tide_method = "healpix"  # Tide shape on each cell, model error tide_sigma_m (default)
+    # tide_method = "pedersen"  # Pedersen et al. (2008) tide likelihood
 
 Both methods predict the tide on the HMM cells from local harmonic constants and
-use the existing depth-based flags. TPXO9 is the default tide
-model. Section 7 downloads it from Ifremer, and ``tide_model_source`` can
-point to a local copy of the same TMD3 NetCDF file. Install the optional tide
-dependency in the notebook kernel's environment to use either method.
+use the depth-based tide flags of :func:`pangeo_fish.tide.detect_tide`. TPXO9 is
+the default tide model. Section 7 downloads it from Ifremer, and
+``tide_model_source`` can point to a local copy of the same TMD3 NetCDF file.
+Install the optional tide dependency in the notebook kernel's environment.
 
 .. code-block:: console
 
@@ -30,7 +30,7 @@ the Complete demo's Study settings.
 
 .. code-block:: python
 
-    tide_method = "pedersen"  # or "healpix"
+    tide_method = "healpix"  # or "pedersen"
     tide_model = "fes2022b"
     tide_model_source = "/path/to/FES2022b_OceanTide_NSgrid.nc"
     ellipsoid = "WGS84"
@@ -62,7 +62,7 @@ and set the HEALPix level to match your store.
 
 .. code-block:: python
 
-    tide_method = "pedersen"  # or "healpix"
+    tide_method = "healpix"  # or "pedersen"
     tide_model = "fes2022b"
     ellipsoid = "WGS84"
     refinement_level = 10
@@ -82,13 +82,30 @@ result with ``write_harmonic_constants``. Set ``chunk_constituents=1`` for
 independent reads by constituent. Include the AVISO citation, licence,
 product version and interpolation method in the store metadata.
 
-The Pedersen et al. likelihood
-------------------------------
+The ``healpix`` likelihood
+--------------------------
+
+:func:`pangeo_fish.tide_healpix.still_tag_tide_likelihood` obtains the complex
+harmonic constants at the HMM cell centres by interpolation or by reading
+precomputed FES2022b constants. PyFES supplies the astronomical arguments and
+nodal corrections at the observation times. The observations and the tide
+predictions are averaged over the same sample times within each hour, and one
+likelihood per day is computed on the HMM grid. A day labelled ``T`` covers
+``[T - 12 h, T + 12 h)``, as in the temperature emission.
+
+The likelihood fits an unknown mean depth per cell and per day, so it uses the
+shape of the tide in the depth record and not the absolute depth. The demo
+supplies absolute depth evidence through its separate bathymetry PDF. The errors
+are independent with the standard deviation ``tide_sigma_m`` (the error of the
+tide model, surge and sensor, not the variability of the depth within an hour).
+``tide_min_samples`` sets the minimum number of valid hourly means for a day to
+contribute; a day with fewer gets a uniform tide PDF.
+
+The ``pedersen`` likelihood
+---------------------------
 
 ``tide_method = "pedersen"`` is a port of the tide likelihood of the HMM
-geolocation toolbox of DTU (Pedersen, Righton, Thygesen, Andersen and Madsen,
-2008, *Can. J. Fish. Aquat. Sci.* 65:2367,
-`doi:10.1139/f08-144 <https://doi.org/10.1139/f08-144>`_). The MATLAB source is
+geolocation toolbox of DTU [Pedersen2008]_. The MATLAB source is
 in ``datalik/datalikelihood.m`` and ``datalik/datalikparam.m`` of
 `cliu3/hmm_smast <https://github.com/cliu3/hmm_smast/blob/dev/datalik/datalikelihood.m>`_
 (ver. 0.52, 2008). The implementation is
@@ -97,60 +114,112 @@ every departure from the MATLAB.
 
 For each window of the depth record in which the tide detection finds a tide,
 the depth samples ``y`` are one Gaussian vector around the depth predicted at
-cell ``c``, ``mu_c(t) = D_c + eta_c(t)``. ``D_c`` is the mean water depth
-(positive down, referenced to mean sea level) and ``eta_c`` the tide elevation
-from the harmonic constants of the cell with the nodal corrections of pyfes.
-The covariance does not depend on the cell: white noise (0.2 m), a correlated
-term with the rmse of the tide fit of the window and a memory of 6.67 h, and a
-constant 10 m standard deviation on the mean depth. A day labelled ``T``
-combines the windows whose centre lies in ``[T - 12 h, T + 12 h)``. A day without
-a tidal window gets a uniform tide pdf: the bathymetry PDF of the demo already
-says that the fish cannot be where the seabed is shallower than its deepest
-depth. ``non_tidal="bathymetry"`` restores the bathymetry-only likelihood of the
-MATLAB, which then counts the bathymetry twice.
+cell ``c``, ``mu_c(t) = D_c + eta_c(t)``. ``D_c`` is the mean water depth of the
+cell from GEBCO (positive down, referenced to mean sea level) and ``eta_c`` the
+tide elevation from the harmonic constants of the cell with the nodal
+corrections of pyfes. The covariance does not depend on the cell: white noise
+(0.2 m), a correlated term with the rmse of the tide fit of the window and a
+memory of 6.67 h, and a constant 10 m standard deviation on the mean depth.
+A day labelled ``T`` combines the windows whose centre lies in
+``[T - 12 h, T + 12 h)``. A day without a tidal window gets a uniform tide PDF:
+the bathymetry PDF of the demo already says that the fish cannot be where the
+seabed is shallower than its deepest depth. ``non_tidal="bathymetry"`` restores
+the bathymetry-only likelihood of the MATLAB, which then counts the bathymetry
+twice.
 
-Comparing with the ``healpix`` method
--------------------------------------
+The error parameters are those of the MATLAB code and have not been calibrated
+for this package:
+
+- the 10 m standard deviation on the mean depth (``depth_offset_sd``) makes the
+  absolute depth almost uninformative inside a tidal window, as in the MATLAB;
+- the correlated error uses the rmse of the window fit of ``detect_tide``, which
+  the detection thresholds keep below 0.42 m;
+- ``bathy_variance`` (only used with ``non_tidal="bathymetry"``) defaults to
+  the 20 m\ :sup:`2` debug value of the MATLAB source;
+- ``D_c`` assumes that GEBCO refers to mean sea level, which may not hold near
+  the coast.
+
+Comparing the two methods
+-------------------------
 
 .. list-table::
    :header-rows: 1
    :widths: 20 40 40
 
-   * - Step
+   * -
+     - ``healpix`` (default)
      - ``pedersen``
-     - ``healpix``
-   * - Depth reference
-     - Compares the depth to the water depth of the cell plus the tide
-       (absolute depth evidence, with a 10 m standard deviation on the mean
-       depth). Days without tide get a uniform pdf (the MATLAB's
-       bathymetry-only likelihood with ``non_tidal="bathymetry"``).
-     - Fits an unknown mean depth per cell and per day. The tide term uses the
-       shape of the depth record during candidate near-bed intervals. The demo
-       supplies absolute depth evidence through its separate bathymetry PDF.
+   * - Data used
+     - Hourly means of the depth and of the predicted tide.
+     - Raw samples of the flagged windows (one 25 h window per day).
+   * - Mean depth
+     - Unknown, fitted for every cell and day. Absolute depth comes from the
+       bathymetry PDF only.
+     - Mean water depth of the cell from GEBCO, with a 10 m standard deviation:
+       weak absolute depth evidence.
    * - Errors
-     - Time-correlated Gaussian errors (full covariance, one Cholesky factor
-       per window, log space).
-     - Independent errors with standard deviation ``tide_sigma_m``;
-       ``tide_min_samples`` sets the minimum number of valid hourly means.
-   * - Time aggregation
-     - Raw samples of the flagged windows. Day ``T`` covers
-       ``[T - 12 h, T + 12 h)``, as in the temperature emission.
-     - Hourly means of the observations and of the predicted tide, one
-       likelihood per day on the HMM grid (same day convention).
+     - Independent, standard deviation ``tide_sigma_m``.
+     - Time-correlated (white noise, AR(1) with a 6.67 h memory, constant
+       offset). One Cholesky factor per window, log space.
+   * - Days without a flagged window
+     - Uniform.
+     - Uniform (``non_tidal="bathymetry"``: the MATLAB bathymetry-only
+       likelihood).
+   * - Origin
+     - Written for this package.
+     - Published method [Pedersen2008]_, ported from its MATLAB code.
+   * - Known weaknesses
+     - Biased towards cells with a small tidal amplitude when the fish is not
+       lying still on the bottom (the observed amplitude is then smaller than
+       the predicted one).
+     - Sensitive to the datum of the bathymetry; error parameters not
+       calibrated. Memory grows with (samples per window) x (cells).
 
-The HEALPix likelihood assumes the tag is lying still on the seabed during the
-selected intervals. The demo uses the tide-detection flag to identify
-candidate intervals. :func:`pangeo_fish.tide.detect_tide` slides a window of
-25 h (about two M2 cycles; never shorter than 12.42 h) along the pressure record.
-In each window it removes a linear trend, fits an M2 harmonic, and flags the
-window when the R² on the detrended series is above 0.85, the residual RMS is
-below 0.42 m and the amplitude lies between 0.6 and 5 m. Each flag is stored at
-the centre of its window, so the first and last 12.5 h have no flag. Ascents,
-descents and diel vertical migration are not flagged. The ``behav_found``
-variable is the same fit with relaxed thresholds, not a separate behaviour
-classifier. Check the assumption of a still tag when adapting the method to
-another tag. Days with too few valid hourly means get uniform weight over the cells
-with usable harmonic constants.
+Which method should I use?
+--------------------------
+
+- Use ``healpix`` (the default) when the bathymetry is uncertain, for example
+  near the coast or in estuaries: it does not depend on the datum of the
+  bathymetry, because it fits the mean depth.
+- Use ``pedersen`` when you want results that can be compared with the published
+  method or with the MATLAB toolbox, and the bathymetry is reliable.
+- Neither method has been validated against a tag with a known track. When you
+  rely on the tide evidence, run both and compare them (see
+  `Comparing the outputs`_).
+- Both methods rely on ``detect_tide`` to find the windows in which the fish is
+  lying still on the bottom. For a fish that does not do so, no window is
+  flagged, the tide PDF is uniform on every day, and the choice of method makes
+  no difference. Check ``tide_found`` first.
+
+Tide detection
+--------------
+
+:func:`pangeo_fish.tide.detect_tide` slides a window of 25 h (about two M2
+cycles; never shorter than 12.42 h) along the pressure record. In each window it
+removes a linear trend, fits an M2 harmonic, and flags the window when the R² on
+the detrended series is above 0.85, the residual RMS is below 0.42 m and the
+amplitude lies between 0.6 and 5 m. The thresholds are those of the MATLAB
+``tidebehavextr.m`` [Pedersen2008]_. Each flag is stored at the centre of its
+window, so the first and last 12.5 h have no flag. Gaps in the record are kept
+as gaps, so a window always spans 25 h, and a window with fewer than 80 % of its
+samples is not flagged. The ``behav_found`` variable is the same fit with
+relaxed thresholds, not a separate behaviour classifier.
+
+Limits of the detection:
+
+- **Micro-tidal areas are not detected.** The amplitude must be at least 0.6 m,
+  so an M2 amplitude below that (for example in the Baltic or the
+  Mediterranean) gives no flag.
+- **Only a fish lying still on the bottom is flagged.** In synthetic records,
+  a still fish under M2 and S2 is flagged in every window, whereas a linear
+  ascent, a sine or square diel migration and noise are never flagged. These
+  tests do not cover real tags: a fish that follows the tide in the water
+  column, or rarely touches the bottom, may get no flagged window.
+- **Results of earlier versions differ.** The detection window was 10 h
+  (16 h for ``behav_found``) and flags were stored at the start of the window,
+  and the tide PDF of day ``T`` used ``[T, T + 24 h)``. The window is now 25 h,
+  flags are centred, and the day is ``[T - 12 h, T + 12 h)`` like the
+  temperature emission, so a run made before this change is not reproduced.
 
 Comparing the outputs
 ---------------------
@@ -171,17 +240,32 @@ Checks that fail loudly
 The tide helpers stop or warn instead of silently changing the evidence:
 
 - ``merge_tide_with_total`` keeps every cell and day of the total emission.
-  Cells or days without tide information get a neutral constant factor (the
-  mean of the day's available tide values, or ``1 / n_cells`` for a day with
-  none) and a warning reports the counts. ``initial``, ``final`` and ``mask``
-  are not modified.
+  Cells without harmonic constants (or, for ``pedersen``, without a water
+  depth), cells absent from the tide grid and days absent from the tide store
+  get a neutral constant factor, and so do days without a flagged window
+  (``1 / n_cells``). They are unknown, not impossible. The neutral factor of a
+  day with only some cells missing is the mean of its available tide values.
+  A warning reports the counts. ``initial``, ``final`` and ``mask`` are not
+  modified.
 - ``convert_lon_360_to_180`` raises ``ValueError`` when the ``bbox`` lies outside
   the tide file (the demo TPXO subset only covers the North Sea and the
   Channel), and warns with the clipped extent when it is only partly covered.
-- The pressure record must be in dbar or m: ``prepare_pressure`` and
-  ``tide_behav_extr`` raise if the ``units`` attribute says otherwise (Pa, hPa,
-  mbar, ...) or if the values are impossible for a depth (above 3000 or below
-  -50).
+- The pressure record must be in dbar or m: ``prepare_pressure`` (and so
+  ``detect_tide``) raises if the ``units`` attribute of the variable says
+  otherwise (Pa, hPa, mbar, ...). Both ``prepare_pressure`` and
+  ``tide_behav_extr`` raise if the values are impossible for a depth (above
+  3000 or below -50). ``tide_behav_extr`` only sees a ``units`` attribute when
+  it is set on the DataFrame passed to it (``df.attrs["units"]``). A record
+  without a ``units`` attribute in a unit of a similar magnitude (for example
+  kPa) is not detected.
 - ``tide_sigma_m`` is only used by ``tide_method = "healpix"``. With
   ``"pedersen"`` the demo warns (via ``check_tide_sigma``) when it differs from
   the default of 2.0, which that method does not read.
+
+References
+----------
+
+.. [Pedersen2008] Pedersen, M. W., Righton, D., Thygesen, U. H., Andersen, K. H.
+   and Madsen, H. (2008). Geolocation of North Sea cod (*Gadus morhua*) using
+   hidden Markov models and behavioural switching. *Can. J. Fish. Aquat. Sci.*
+   65, 2367-2377. `doi:10.1139/f08-144 <https://doi.org/10.1139/f08-144>`_

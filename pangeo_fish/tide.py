@@ -581,6 +581,11 @@ def tide_pdf(tide_behav, data):
         },
         index=time,
     )
+    # Samples without a depth (gaps kept as NaN by detect_tide) carry no evidence:
+    # an hour without any observation must not enter the daily mean as a uniform pdf.
+    tmp_df = tmp_df[np.isfinite(tmp_df["depth"].to_numpy(dtype=float))]
+    if tmp_df.empty:
+        raise ValueError("the depth record has no finite samples")
     # Mean column for an hour
     tmp_df["hour"] = tmp_df.index.floor("h")
 
@@ -639,12 +644,15 @@ def plot_tide(tag_test):
     depth = tag_test["depth"].values
     tide_found = tag_test["tide_found"].values  # 0 or 1
     behav_found = tag_test["behav_found"].values
+    # gaps are NaN: take the shading range from the finite depths only
+    finite = np.isfinite(depth)
+    dmin, dmax = (depth[finite].min(), depth[finite].max()) if finite.any() else (0, 1)
     fig, ax = plt.subplots(figsize=(15, 4))
 
     ax.fill_between(
         time,
-        depth.min(),
-        depth.max(),
+        dmin,
+        dmax,
         where=(tide_found == 1),
         color="green",
         alpha=0.3,
@@ -652,8 +660,8 @@ def plot_tide(tag_test):
     )
     ax.fill_between(
         time,
-        depth.min(),
-        depth.max(),
+        dmin,
+        dmax,
         where=(behav_found == 1),
         color="red",
         alpha=0.3,

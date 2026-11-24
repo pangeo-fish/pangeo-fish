@@ -167,3 +167,58 @@ def test_flags_stay_in_the_tidal_chunks_across_a_gap():
         # windows may overlap a gap by up to 20 % (5 h) of their 25 h
         in_chunk |= (flagged >= a + 12.5 - 5.2) & (flagged <= b - 12.5 + 5.2)
     assert in_chunk.all()
+
+
+def _tag_with_one_hour_gap():
+    """10-min still fish under M2 with one hour of NaN, as detect_tide leaves it."""
+    time = pd.Timestamp("2020-01-01") + pd.to_timedelta(
+        np.arange(HOURS.size) * DT_MIN, "min"
+    )
+    depth = 50 + 1.5 * np.cos(2 * np.pi * HOURS / 12.42)
+    gap = (HOURS >= 72) & (HOURS < 73)
+    depth[gap] = np.nan
+    flag = np.ones(HOURS.size, dtype=int)  # flags may cover the gap
+    return xr.Dataset(
+        {
+            "depth": ("time", depth),
+            "tide_found": ("time", flag),
+            "behav_found": ("time", flag),
+        },
+        coords={"time": time},
+        attrs={"tagno": "gap"},
+    ), time[gap][0]
+
+
+def test_tide_pdf_skips_hours_without_observations(monkeypatch):
+    tag, gap_hour = _tag_with_one_hour_gap()
+    seen = {}
+
+    def fake_likelihood(td_depth, td_time, data, tide_found, sigma_tid=2.0):
+        seen["depth"], seen["time"] = td_depth, td_time
+        raise RuntimeError("stop")
+
+    monkeypatch.setattr(
+        tide, "datalikelihood_tide_only_full_normalized", fake_likelihood
+    )
+    with pytest.raises(RuntimeError, match="stop"):
+        tide.tide_pdf(tag, None)
+    # the empty hour is not a row of the likelihood, and no row is all NaN
+    t0 = tag.time.to_index()[0]
+    assert (gap_hour - t0) / pd.Timedelta(hours=1) not in seen["time"]
+    assert np.isfinite(seen["depth"]).any(axis=1).all()
+    assert len(seen["time"]) == HOURS.size * DT_MIN // 60 - 1
+
+
+def test_plot_tide_shades_with_gaps(monkeypatch):
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    tag, _ = _tag_with_one_hour_gap()
+    monkeypatch.setattr(plt, "show", lambda: None)
+    tide.plot_tide(tag)
+    ax = plt.gcf().axes[0]
+    shaded = [c for c in ax.collections if len(c.get_paths()) > 0]
+    assert len(shaded) == 2  # tide and behaviour bands are both drawn
+    plt.close("all")

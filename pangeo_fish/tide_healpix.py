@@ -1066,7 +1066,7 @@ def pedersen_tide_likelihood(
         ok = allowed & np.isfinite(ll)
         if not ok.any() or not np.isfinite(ll[ok]).any():
             pdf[w] = uniform
-            loglik[w] = np.where(allowed, np.nan, np.nan)
+            loglik[w] = np.nan
             continue
         p = np.where(ok, np.exp(ll - np.nanmax(ll[ok])), 0.0)
         pdf[w] = p / p.sum()
