@@ -19,7 +19,7 @@ The defaults shared by the demos are identical except for their output folders:
 
 In the Complete demo's **Study settings**, `tide_method = "pedersen"` (default)
 uses the tide likelihood of [Pedersen et al. (2008)](https://doi.org/10.1139/f08-144)
-(*Can. J. Fish. Aquat. Sci.* 65:2367), ported from the
+(_Can. J. Fish. Aquat. Sci._ 65:2367), ported from the
 [DTU / HMM geolocation MATLAB code](https://github.com/cliu3/hmm_smast/blob/dev/datalik/datalikelihood.m).
 `tide_method = "healpix"` compares the tide shape only, with a model error
 `tide_sigma_m`. Both predict tides from local harmonic constants directly on the
