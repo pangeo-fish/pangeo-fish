@@ -9,7 +9,9 @@ Choose ``tide_method`` in **Study settings** at the top of the
 
 .. code-block:: python
 
-    tide_method = "healpix"  # Tide shape on each cell, model error tide_sigma_m (default)
+    tide_method = (
+        "healpix"  # Tide shape on each cell, model error tide_sigma_m (default)
+    )
     # tide_method = "pedersen"  # Pedersen et al. (2008) tide likelihood
 
 Both methods predict the tide on the HMM cells from local harmonic constants and

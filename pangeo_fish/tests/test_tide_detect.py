@@ -178,15 +178,18 @@ def _tag_with_one_hour_gap():
     gap = (HOURS >= 72) & (HOURS < 73)
     depth[gap] = np.nan
     flag = np.ones(HOURS.size, dtype=int)  # flags may cover the gap
-    return xr.Dataset(
-        {
-            "depth": ("time", depth),
-            "tide_found": ("time", flag),
-            "behav_found": ("time", flag),
-        },
-        coords={"time": time},
-        attrs={"tagno": "gap"},
-    ), time[gap][0]
+    return (
+        xr.Dataset(
+            {
+                "depth": ("time", depth),
+                "tide_found": ("time", flag),
+                "behav_found": ("time", flag),
+            },
+            coords={"time": time},
+            attrs={"tagno": "gap"},
+        ),
+        time[gap][0],
+    )
 
 
 def test_tide_pdf_skips_hours_without_observations(monkeypatch):
