@@ -285,7 +285,7 @@ class EagerBoundsSearch:
         sigma_indices = group_sigma_indices(predictor_indices, single_behav=True)
 
         unique_values = sorted(set(predictor_indices.tolist()))
-        bounds = [self.sigma_bounds[v] for v in unique_values]
+        bounds = [self._get_bounds_for_group(v) for v in unique_values]
         if x0 is None:
             x0 = [np.mean(b) for b in bounds]
 

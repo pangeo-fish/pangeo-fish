@@ -171,3 +171,35 @@ def test_emission_probability(detections, dummy_tag, dummy_grid):
 
     actual_ = actual.compute()
     assert actual_["acoustic"].notnull().any()
+
+
+@pytest.mark.parametrize("detection_unit", ["s", "us", "ns"])
+@pytest.mark.parametrize("bins_unit", ["us", "ns"])
+def test_count_detections_mixed_time_units(detection_unit, bins_unit):
+    """Detections are counted whatever the time units of detections and bins.
+
+    pandas >= 3 reads CSV times as ``datetime64[us]`` while model times are
+    usually ``datetime64[ns]``; the counts must not depend on that.
+    """
+    from pangeo_fish.acoustic import count_detections
+
+    times = pd.to_datetime(
+        ["2022-06-13T10:00:00", "2022-06-13T11:00:00", "2022-06-14T10:00:00"]
+    ).as_unit(detection_unit)
+    detections = xr.Dataset(
+        {"deployment_id": ("time", [1, 1, 2])}, coords={"time": times}
+    )
+    grid = xr.Dataset(
+        coords={
+            "time": pd.date_range("2022-06-13", periods=2, freq="D").as_unit(
+                bins_unit
+            )
+        }
+    )
+    by = grid[["time"]].cf.add_bounds(keys="time")
+
+    actual = count_detections(detections, by=by)
+
+    counts = actual["count"].transpose("deployment_id", "time")
+    assert counts.sel(deployment_id=1).values.tolist() == [2, 0]
+    assert counts.sel(deployment_id=2).values.tolist() == [0, 1]

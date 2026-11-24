@@ -77,6 +77,22 @@ def count_detections(detections, by):
         bins_var = f"{bounds_var.removesuffix('_bounds')}_bins"
         by = bounds_to_bins(by)[bins_var]
 
+    # flox compares the raw integer values of the times with the bin edges, so
+    # times in another unit (pandas >= 3 reads CSV times as datetime64[us],
+    # model times are usually datetime64[ns]) would silently fall in no bin.
+    bins_index = by.to_index() if isinstance(by, xr.DataArray) else by
+    if isinstance(bins_index, pd.IntervalIndex) and np.issubdtype(
+        bins_index.dtype.subtype, np.datetime64
+    ):
+        bins_dtype = bins_index.dtype.subtype
+        if (
+            np.issubdtype(detections["time"].dtype, np.datetime64)
+            and detections["time"].dtype != bins_dtype
+        ):
+            detections = detections.assign_coords(
+                time=detections["time"].astype(bins_dtype)
+            )
+
     count_on = (
         detections[["deployment_id"]]
         .assign(count=lambda ds: xr.ones_like(ds["deployment_id"], dtype=int))
