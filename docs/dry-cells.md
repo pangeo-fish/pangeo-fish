@@ -27,7 +27,8 @@ show no dry cells.
 ## What `compute_diff` does
 
 - `min_water_depth="auto"` (default): if the model has dry cells (`H0 + XE <= 0`),
-  their `diff` becomes NaN, which gives them a probability of 0 later on, and a
+  their `diff` becomes NaN, which removes them from the combined probability
+  later on (the likelihood is NaN there, see {doc}`how-likelihoods-are-built`), and a
   `DryCellWarning` (a `UserWarning`) reports how many. **In practice this happens
   only with the North-West Shelf hourly product, so with NWS the dry cells are
   excluded automatically.** IBI (hourly and daily) and the global products have no
@@ -65,15 +66,16 @@ With daily products and IBI this is a no-op (no dry cells).
   Western Scheldt at low spring tide, the wet HEALPix cells drop by about 20 % at
   level 12 and more at levels 11 and 13). Level 12 (about 1.5 km) is closest to
   the native NWS grid.
-- `count_dry_cells` on a regridded dataset does not detect dry cells, because the
-  regridding clips negative values.
+- `count_dry_cells` on a regridded dataset does not detect dry cells. Run it on
+  the native model grid.
 - If another likelihood (for example an acoustic detection buffer) only covers dry
-  cells at some time step, the product of the probabilities is zero there. Check
-  `combined["pdf"].sum(spatial_dims)` before running the HMM.
+  cells at some time step, the product of the probabilities is `NaN` in every cell
+  there. Check `combined["pdf"].sum(spatial_dims)` before running the HMM.
 - Wet cells shallower than 10 m are also interpolated from the model's 10 m water
   column, and the NWS manual advises against using them directly where they are
   widespread. Use a positive `min_water_depth` to be stricter.
-- Levels above the instantaneous surface (`depth + XE < 0`) are kept as before.
+- Levels above the instantaneous surface (`depth + XE < 0`) are not removed: their
+  depth is set to 0 (see {doc}`how-likelihoods-are-built`).
 
 `pangeo_fish.drycells.count_dry_cells(model)` gives the number of dry cells per
 time step for a loaded model.

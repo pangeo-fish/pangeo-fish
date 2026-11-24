@@ -7,6 +7,7 @@ Welcome to pangeo-fish's documentation!
     installation
     pangeo-notebook
     format
+    how-likelihoods-are-built
     copernicus-models
     choosing-conv-method
     depth-diagnostics
