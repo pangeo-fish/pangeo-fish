@@ -132,3 +132,38 @@ def test_detect_tide_defaults_and_return_type():
     assert {"tide_found", "behav_found", "rsq_tide"} <= set(ds.data_vars)
     assert ds.attrs["tideFL"] == tide.DEFAULT_TIDE_WINDOW_H >= 12.42
     assert valid_fraction(ds) > 0.95
+
+
+def _gappy_df(chunks_h):
+    """Records of ``chunks_h`` = [(start_h, stop_h), ...] on the 10 min grid."""
+    hours = np.concatenate([HOURS[(HOURS >= a) & (HOURS < b)] for a, b in chunks_h])
+    time = pd.Timestamp("2020-01-01") + pd.to_timedelta(
+        np.round(hours * 60).astype(int), "min"
+    )
+    return hours, pd.DataFrame(
+        {"time": time, "pressure": 20 + np.sin(2 * np.pi * hours / 12.42)}
+    )
+
+
+def test_gap_does_not_join_two_short_chunks():
+    # two 12.5 h chunks 7 days apart used to make one 25 h window
+    hours, df = _gappy_df([(0, 12.5), (12.5 + 7 * 24, 25 + 7 * 24)])
+    with contextlib.redirect_stdout(io.StringIO()):
+        ds = tide.tide_behav_extr(df, "gap", dt=DT_MIN)
+    assert ds.tide_found.sum() == 0
+    assert np.isnan(ds.rsq_tide.values).all()
+
+
+def test_flags_stay_in_the_tidal_chunks_across_a_gap():
+    chunks = [(0, 72), (72 + 3 * 24, 72 + 3 * 24 + 72)]
+    hours, df = _gappy_df(chunks)
+    with contextlib.redirect_stdout(io.StringIO()):
+        ds = tide.tide_behav_extr(df, "gap", dt=DT_MIN)
+    t_h = (ds.time.values - ds.time.values[0]) / np.timedelta64(1, "h")
+    flagged = t_h[ds.tide_found.values > 0]
+    assert flagged.size > 0
+    in_chunk = np.zeros(flagged.size, bool)
+    for a, b in chunks:
+        # windows may overlap a gap by up to 20 % (5 h) of their 25 h
+        in_chunk |= (flagged >= a + 12.5 - 5.2) & (flagged <= b - 12.5 + 5.2)
+    assert in_chunk.all()

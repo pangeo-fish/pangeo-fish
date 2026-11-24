@@ -223,3 +223,28 @@ def test_tide_writer(tmp_path, monkeypatch, step):
     xr.testing.assert_allclose(actual.behav_found, behavior)
     assert actual.cell_ids.attrs["grid_name"] == "healpix"
     assert actual.cell_ids.attrs["level"] == 0
+
+
+def test_complete_demo_behaviour_mask_tolerates_days_missing_from_tide_store():
+    import json
+    from pathlib import Path
+
+    path = Path(__file__).parents[2] / "notebooks" / "pangeo-fish-complete-demo.ipynb"
+    sources = [
+        "".join(cell["source"])
+        for cell in json.loads(path.read_text())["cells"]
+        if cell["cell_type"] == "code"
+    ]
+    cell = next(s for s in sources if "tide_daily.behav_found" in s)
+    assert "tide_daily.behav_found.sel(time=emission.time)" not in cell
+    assert "reindex(" in cell and "fill_value=0" in cell
+
+    flags = xr.DataArray(
+        [1, 1], dims="time", coords={"time": pd.date_range("2024-01-01", periods=2)}
+    )
+    target = pd.date_range("2024-01-01", periods=3)
+    with pytest.raises(KeyError):
+        flags.sel(time=target)
+    np.testing.assert_array_equal(
+        flags.reindex(time=target, fill_value=0).values, [1, 1, 0]
+    )
