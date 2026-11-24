@@ -2174,9 +2174,11 @@ def _get_predictor_factory(
                 ellipsoid=grid_ellipsoid,
                 truncate=4.0 if truncate is None else truncate,
                 blocked_cells=blocked,
-                wet_fraction=None
-                if wet_fraction is None
-                else np.where(blocked, 1.0, wet_fraction.to_numpy()),
+                wet_fraction=(
+                    None
+                    if wet_fraction is None
+                    else np.where(blocked, 1.0, wet_fraction.to_numpy())
+                ),
                 water_contacts=_mixed_water_contacts(ds, levels, ids),
                 device=device,
             )
