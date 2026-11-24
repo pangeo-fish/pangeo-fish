@@ -16,11 +16,16 @@ Both methods predict the tide on the HMM cells from local harmonic constants and
 use the depth-based tide flags of :func:`pangeo_fish.tide.detect_tide`. TPXO9 is
 the default tide model. Section 7 downloads it from Ifremer, and
 ``tide_model_source`` can point to a local copy of the same TMD3 NetCDF file.
-Install the optional tide dependency in the notebook kernel's environment.
+Both methods need `pyfes <https://github.com/CNES/aviso-fes>`_ in the notebook
+kernel's environment. Install it from conda-forge:
 
 .. code-block:: console
 
-   python -m pip install -e '.[notebooks,tide]'
+   conda install -c conda-forge pyfes
+
+PyPI only has a source distribution of pyfes, so
+``python -m pip install -e '.[notebooks,tide]'`` compiles it; use it only when a
+C++ build toolchain is available.
 
 Using FES2022b
 --------------

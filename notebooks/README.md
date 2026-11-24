@@ -34,11 +34,13 @@ large transition tables.
 
 ## Run with Papermill
 
-Install the optional notebook tools in the same environment as your kernel
-(the Complete demo also needs the tide extra):
+Install the optional notebook tools in the same environment as your kernel.
+The Complete demo also needs pyfes: install it from conda-forge first (PyPI has
+no wheels, so `pip install -e '.[notebooks,tide]'` compiles it).
 
 ```bash
-python -m pip install -e '.[notebooks,tide]'
+conda install -c conda-forge pyfes
+python -m pip install -e '.[notebooks]'
 mkdir -p executed
 papermill notebooks/pangeo-fish-base-demo.ipynb executed/base-A19124.ipynb \
   -k python3 -p tag_name A19124 -p scratch_root ./results/base
