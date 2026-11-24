@@ -141,6 +141,8 @@ def test_non_tidal_day_uses_bathymetry_only(setup):
         non_tidal="bathymetry",
     )
     assert (out["tide_found"] == 0).all()
+    # evidence without a tidal window: kept by merge_tide_with_total
+    assert (out["has_likelihood"] == 1).all()
     pdf = out["pdf"].values[1]
     depth = wc
     assert pdf[depth < 12].max() < 1e-6 * pdf.max()
@@ -149,7 +151,7 @@ def test_non_tidal_day_uses_bathymetry_only(setup):
     # formula: normcdf(d; mu, s) / (eps + normcdf(0; mu, s)) in depth-negative-up form
     label = out.time.values[1]
     lo = pd.Timestamp(label) - np.timedelta64(12, "h")
-    sel = series[(series.index >= lo) & (series.index < lo + np.timedelta64(1, "D"))]
+    sel = series[(series.index > lo) & (series.index <= lo + np.timedelta64(1, "D"))]
     t = sel.idxmax()
     eta = th.predict_tide(const, np.array([t.to_datetime64()])).values[0]
     mu = wc + eta
@@ -193,10 +195,10 @@ def test_window_label_alignment():
         pd.Timestamp("2023-08-02"),
         pd.Timestamp("2023-08-04"),
     ]
-    # [T - 12 h, T + 12 h): 11:59:59 -> T, 12:00 -> T + 1 day
+    # (T - 12 h, T + 12 h], as the temperature: 12:00 -> T, 12:10 -> T + 1 day
     found[:] = False
-    found[pd.Timestamp("2023-08-02 11:50")] = True
-    found[pd.Timestamp("2023-08-04 12:00")] = True
+    found[pd.Timestamp("2023-08-02 12:00")] = True
+    found[pd.Timestamp("2023-08-04 12:10")] = True
     win = th.tide_windows(idx, found, window_hours=25.0)
     assert list(win["label"]) == [
         pd.Timestamp("2023-08-02"),
@@ -214,9 +216,60 @@ def test_overlapping_windows_keep_best_fit():
     win = th.tide_windows(idx, found, rmse=rmse, window_hours=25.0)
     assert len(win) == 1
     assert win["centre"][0] == pd.Timestamp("2023-08-02 03:00")
-    # short windows do not overlap: both are kept
+    # at most one window per label, even when short windows do not overlap
     win = th.tide_windows(idx, found, rmse=rmse, window_hours=2.0)
-    assert len(win) == 2
+    assert list(win["centre"]) == [pd.Timestamp("2023-08-02 03:00")]
+
+
+def test_windows_do_not_overlap_across_labels():
+    """Review of #344: 11:50 (label T) and 12:10 (label T + 1) shared 149 of 150 samples."""
+    idx = pd.date_range("2023-08-01", "2023-08-06", freq="10min")
+    found = pd.Series(False, idx)
+    rmse = pd.Series(0.4, idx)
+    for t, r in (("2023-08-02 11:50", 0.2), ("2023-08-02 12:10", 0.1)):
+        found[pd.Timestamp(t)] = True
+        rmse[pd.Timestamp(t)] = r
+    win = th.tide_windows(idx, found, rmse=rmse, window_hours=25.0)
+    assert list(win["centre"]) == [pd.Timestamp("2023-08-02 12:10")]
+    assert list(win["label"]) == [pd.Timestamp("2023-08-03")]
+
+    # every centre flagged: one window per label, centres at least 24 h apart
+    # (25 h windows share at most 1 h), best fits first over the whole record
+    rng = np.random.default_rng(0)
+    rmse = pd.Series(rng.uniform(0.05, 0.5, len(idx)), idx)
+    win = th.tide_windows(idx, pd.Series(True, idx), rmse=rmse, window_hours=25.0)
+    assert win["label"].is_unique
+    assert (win["centre"].diff().dropna() >= pd.Timedelta("24h")).all()
+    assert win["centre"].is_monotonic_increasing
+    assert rmse.idxmin() in set(win["centre"])
+    # windows shorter than a day: no shared sample at all
+    win = th.tide_windows(idx, pd.Series(True, idx), rmse=rmse, window_hours=10.0)
+    assert win["label"].is_unique
+    assert (win["centre"].diff().dropna() >= pd.Timedelta("10h")).all()
+
+
+def test_pedersen_windows_share_at_most_one_hour(setup):
+    cells, const = setup
+    series = record(const, days=6)
+    out = run(const, cells, series, flags(series))
+    assert (out["n_windows"] <= 1).all()
+    assert out["tide_found"].sum() >= 3
+
+
+def test_freq_uses_precomputed_modulations(setup, monkeypatch):
+    """Review of #344: freq="1h" called pyfes even when modulations were given."""
+    cells, const = setup
+    series = record(const)
+    modulations = th.nodal_modulations(series.index.values, list(CONSTITUENTS))
+    expected = run(const, cells, series, flags(series), freq="1h")
+
+    def no_pyfes(times, constituents):
+        raise ImportError("pyfes must not be called")
+
+    monkeypatch.setattr(th, "nodal_modulations", no_pyfes)
+    out = run(const, cells, series, flags(series), freq="1h", modulations=modulations)
+    np.testing.assert_allclose(out["pdf"], expected["pdf"])
+    np.testing.assert_array_equal(out["tide_found"], expected["tide_found"])
 
 
 def test_tidal_labels_follow_flags(setup):
@@ -236,7 +289,7 @@ def test_output_structure(setup):
     cells, const = setup
     series = record(const)
     out = run(const, cells, series, flags(series))
-    ref = {"pdf", "log_likelihood", "tide_found", "ocean_mask"}
+    ref = {"pdf", "log_likelihood", "tide_found", "has_likelihood", "ocean_mask"}
     assert ref <= set(out.data_vars)
     assert out["pdf"].dims == ("time", "cells")
     assert out["cell_ids"].attrs["level"] == LEVEL

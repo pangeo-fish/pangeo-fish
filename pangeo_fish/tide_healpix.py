@@ -335,15 +335,22 @@ def predict_tide(constants, times=None, modulations=None):
             raise ValueError("give times or modulations")
         modulations = nodal_modulations(times, list(constants[CONSTITUENT_DIM].values))
     else:
-        available = {str(c).lower(): c for c in modulations[CONSTITUENT_DIM].values}
-        wanted = [str(c) for c in constants[CONSTITUENT_DIM].values]
-        missing = [c for c in wanted if c.lower() not in available]
-        if missing:
-            raise KeyError(f"constituents missing from the modulations: {missing}")
-        modulations = modulations.sel(
-            {CONSTITUENT_DIM: [available[c.lower()] for c in wanted]}
-        ).assign_coords({CONSTITUENT_DIM: constants[CONSTITUENT_DIM].values})
+        modulations = _select_modulations(
+            modulations, constants[CONSTITUENT_DIM].values
+        )
     return _tide_from_basis(constants, _tidal_basis(modulations))
+
+
+def _select_modulations(modulations, constituents):
+    """Precomputed modulations in the order of ``constituents`` (case-insensitive)."""
+    available = {str(c).lower(): c for c in modulations[CONSTITUENT_DIM].values}
+    wanted = [str(c) for c in constituents]
+    missing = [c for c in wanted if c.lower() not in available]
+    if missing:
+        raise KeyError(f"constituents missing from the modulations: {missing}")
+    return modulations.sel(
+        {CONSTITUENT_DIM: [available[c.lower()] for c in wanted]}
+    ).assign_coords({CONSTITUENT_DIM: np.asarray(constituents)})
 
 
 def _tidal_basis(modulations):
@@ -386,6 +393,18 @@ def _step_ns(freq):
     return np.timedelta64(int(ns), "ns")
 
 
+def _window_labels(times, time_step):
+    """Label ``T`` of the period ``(T - time_step / 2, T + time_step / 2]`` holding each time.
+
+    This is the closure of the temperature emission: its daily bins are the
+    ``cf_xarray`` time bounds turned into a ``pandas.IntervalIndex`` (closed on the
+    right) by :func:`pangeo_fish.cf.bounds_to_bins`. For daily labels, a sample at
+    exactly 12:00 on day D closes the period of label D (not D + 1), for the
+    temperature and the tide alike.
+    """
+    return (times - _step_ns(time_step) / 2).ceil(time_step)
+
+
 def _hours_ns(hours):
     """``hours`` (float) as ``numpy.timedelta64[ns]`` (see :func:`_step_ns`)."""
     return np.timedelta64(int(round(float(hours) * 3.6e12)), "ns")
@@ -403,29 +422,43 @@ def _bin_average(series, freq):
     pandas labels a resampled mean with the start of its interval; predicting the
     tide at that label would shift it by half an interval (15 degrees of M2 for
     hourly means). The mean sample time is exact for any sampling (e.g. 10 min
-    samples at :00..:50 average at :25). Tide predictions are averaged separately
-    at those sample times. ``freq=None`` keeps the samples as they are.
+    samples at :10..:00 average at :35). Tide predictions are averaged separately
+    at those sample times. The intervals are closed on the right, like the daily
+    windows (:func:`_window_labels`), so that a mean never mixes two days when
+    ``freq`` divides 12 h (e.g. ``"1h"``).
+    ``freq=None`` keeps the samples as they are.
     """
     series = series.dropna()
     if freq is None or series.empty:
         return series
     t0 = series.index[0]
     seconds = pd.Series(_seconds_since(series.index, t0), index=series.index)
-    values = series.resample(freq).mean()
+    values = series.resample(freq, closed="right").mean()
     keep = values.notna().values
-    mean_seconds = seconds.resample(freq).mean().values[keep]
+    mean_seconds = seconds.resample(freq, closed="right").mean().values[keep]
     index = pd.DatetimeIndex(t0 + pd.to_timedelta(mean_seconds, unit="s"))
     return pd.Series(values.values[keep], index=index)
 
 
-def _bin_nodal_basis(series, binned, freq, constituents):
-    """Average the harmonic basis at exactly the timestamps used for each depth mean."""
-    basis = _tidal_basis(nodal_modulations(series.index.values, constituents))
+def _bin_nodal_basis(series, binned, freq, constituents, modulations=None):
+    """Average the harmonic basis at exactly the timestamps used for each depth mean.
+
+    ``modulations`` (precomputed :func:`nodal_modulations` covering the times of
+    ``series``) avoids calling pyfes.
+    """
+    if modulations is None:
+        modulations = nodal_modulations(series.index.values, constituents)
+    else:
+        modulations = _select_modulations(
+            modulations.sel(time=series.index.values), constituents
+        )
+    basis = _tidal_basis(modulations)
     if freq is not None:
         # Use the original timestamps for bin membership, even if pyfes rounded them.
         basis = basis.assign_coords(time=series.index)
-        counts = series.resample(freq).count()
-        basis = basis.resample(time=freq).mean().sel(time=counts.index[counts > 0])
+        counts = series.resample(freq, closed="right").count()
+        basis = basis.resample(time=freq, closed="right").mean()
+        basis = basis.sel(time=counts.index[counts > 0])
     return basis.assign_coords(time=binned.index)
 
 
@@ -481,7 +514,7 @@ def still_tag_tide_likelihood(
 
     ``sigma`` is the model error (tide model, surge, sensor), not the variability of
     the depth within an hour. For each window of length ``time_step``, centred on its
-    label ``T`` (``[T - 12 h, T + 12 h)`` for one day, like the temperature emission)::
+    label ``T`` (``(T - 12 h, T + 12 h]`` for one day, like the temperature emission)::
 
         log L_c = -0.5 * n_eff * mean(r_c^2) / sigma^2
 
@@ -578,13 +611,12 @@ def still_tag_tide_likelihood(
         starts = pd.DatetimeIndex([record_start.floor("D")])
         labels = np.zeros(len(hourly), dtype=int)
     else:
-        # windows centred on their label T: [T - time_step/2, T + time_step/2),
+        # windows centred on their label T: (T - time_step/2, T + time_step/2],
         # the convention of the temperature emission (cf_xarray time bounds)
-        half = _step_ns(time_step) / 2
-        first = (record_start + half).floor(time_step)
-        last = (record_end + half).floor(time_step)
+        first = _window_labels(record_start, time_step)
+        last = _window_labels(record_end, time_step)
         starts = pd.date_range(first, last, freq=time_step)
-        labels = starts.get_indexer((hourly.index + half).floor(time_step))
+        labels = starts.get_indexer(_window_labels(hourly.index, time_step))
     if time_step is not None and freq is not None:
         # integer nanoseconds: no timedelta division (NumPy generic-unit deprecation)
         window = np.diff(pd.date_range("2000-01-01", periods=2, freq=time_step).asi8)
@@ -702,37 +734,55 @@ def tide_windows(
     ``tide_found`` is the output of :func:`pangeo_fish.tide.detect_tide`: a flag at
     the CENTRE of every window of ``window_hours`` explained by a tide. A flagged
     centre ``c`` stands for the samples in ``[c - window_hours / 2, c + window_hours / 2)``.
-    The window belongs to the label ``T`` whose period ``[T - time_step / 2,
-    T + time_step / 2)`` contains ``c``. Within a label, windows are taken in
-    increasing ``rmse`` (best sine fit first, as ``td.tideBestfit`` in the MATLAB
-    ``tidebehavextr.m``; time order when ``rmse`` is None) and a window that
-    overlaps one already taken is skipped, so that the same samples never count
-    twice. For a 25 h window and a daily label this leaves exactly one window per day.
+    The window belongs to the label ``T`` whose period ``(T - time_step / 2,
+    T + time_step / 2]`` contains ``c``.
+
+    The windows of the whole record are taken in increasing ``rmse`` (best sine fit
+    first, as ``td.tideBestfit`` in the MATLAB ``tidebehavextr.m``; time order when
+    ``rmse`` is None, and for equal ``rmse``). A window is skipped when its label
+    already has one, or when its centre is closer than
+    ``min(window_hours, time_step)`` to the centre of a window already taken, in any
+    label. The likelihood uses a correlated covariance, so samples counted in two
+    days would overstate the evidence. Windows no longer than ``time_step`` never
+    share samples; longer ones share at most ``window_hours - time_step`` (1 h for
+    the default 25 h windows and daily labels). A day can be left without a window
+    when the best windows of its neighbours are close to it.
+
+    The MATLAB toolbox takes, per calendar day, the best of the 10 h windows that
+    start that day, without checking overlaps with the next day (at most 10 h with
+    its windows); with 25 h windows that check is needed.
 
     Returns
     -------
     pandas.DataFrame
-        One row per window: ``centre`` (Timestamp), ``label`` (Timestamp), ``rmse``
-        (NaN when unknown).
+        One row per window, in time order: ``centre`` (Timestamp), ``label``
+        (Timestamp), ``rmse`` (NaN when unknown).
     """
+    import bisect
+
     flags = _as_series(tide_found).fillna(0).astype(bool)
     centres = flags.index[flags.values]
     err = np.full(len(centres), np.nan)
     if rmse is not None:
         err = _as_series(rmse).reindex(centres).values
-    half = _step_ns(time_step) / 2
-    labels = ((centres + half).floor(time_step)) if len(centres) else centres
-    width = _hours_ns(window_hours)
-    rows = []
-    for label in pd.unique(labels):
-        idx = np.flatnonzero(labels == label)
-        order = idx[np.lexsort((idx, np.where(np.isnan(err[idx]), np.inf, err[idx])))]
-        taken = []
-        for i in order:
-            if all(abs(centres[i] - centres[j]) >= width for j in taken):
-                taken.append(i)
-        for i in sorted(taken):
-            rows.append((centres[i], label, err[i]))
+    labels = _window_labels(centres, time_step) if len(centres) else centres
+    separation = int(min(_hours_ns(window_hours), _step_ns(time_step)).astype(np.int64))
+    positions = centres.as_unit("ns").asi8
+    order = np.lexsort((positions, np.where(np.isnan(err), np.inf, err)))
+    taken_positions = []  # sorted
+    taken_labels = set()
+    taken = []
+    for i in order:
+        if labels[i] in taken_labels:
+            continue
+        k = bisect.bisect_left(taken_positions, positions[i])
+        neighbours = taken_positions[max(k - 1, 0) : k + 1]
+        if any(abs(positions[i] - q) < separation for q in neighbours):
+            continue
+        taken_positions.insert(k, positions[i])
+        taken_labels.add(labels[i])
+        taken.append(i)
+    rows = [(centres[i], labels[i], err[i]) for i in sorted(taken)]
     return pd.DataFrame(rows, columns=["centre", "label", "rmse"])
 
 
@@ -850,8 +900,8 @@ def pedersen_tide_likelihood(
     is ``mu = -sum(f A cos(w t + G - phase)) + db.depth``. ``S`` is the covariance of
     :func:`pedersen_covariance` and does not depend on the cell: one Cholesky factor
     per window serves all cells, and everything is computed in log space.
-    A daily label ``T`` combines the windows whose centre lies in ``[T - 12 h,
-    T + 12 h)`` by adding their log-likelihoods.
+    A daily label ``T`` uses at most one window, the best fit among those whose
+    centre lies in ``(T - 12 h, T + 12 h]`` (see :func:`tide_windows`).
 
     **Days without a tidal window.** By default (``non_tidal="uniform"``) the pdf
     is uniform: the bathymetry is already in the total emission (``pdf_bathy``) and
@@ -885,8 +935,9 @@ def pedersen_tide_likelihood(
       or another sampling interval keeps the same 6.67 h memory.
     - The windows come from the sliding-window flags of ``detect_tide`` (centre
       flags; 25 h by default, ``tideFL = 10 h`` in the MATLAB defaults) and a label
-      keeps the non-overlapping windows with the best fits (one for 25 h windows),
-      like ``td.tideBestfit``. A window with fewer than ``min_fraction`` of its
+      keeps at most one window, the best fit as ``td.tideBestfit``, at least
+      ``min(window_hours, time_step)`` away from the windows of the other labels so
+      that the same samples are not counted twice (see :func:`tide_windows`). A window with fewer than ``min_fraction`` of its
       expected samples is dropped.
     - The roughness ``s_eta`` of the bathymetry-only likelihood is ``bathy_variance``
       (m^2, scalar or per cell) instead of the database variable ``db.bathro``. The
@@ -916,7 +967,7 @@ def pedersen_tide_likelihood(
     window_hours : float, default 25
         Length of the window of one flag (``tideFL`` of ``detect_tide``).
     time_step : str, default "1D"
-        Label spacing; label ``T`` covers ``[T - time_step/2, T + time_step/2)``.
+        Label spacing; label ``T`` covers ``(T - time_step/2, T + time_step/2]``.
     freq : str or None
         Average the depth record (and the predicted tide at the same times) over
         this period first. None (default, as the MATLAB): use the samples.
@@ -943,7 +994,9 @@ def pedersen_tide_likelihood(
     xarray.Dataset
         Same structure as :func:`still_tag_tide_likelihood`: ``pdf`` (time, cells),
         ``log_likelihood``, ``tide_found`` (1 when at least one tidal window is used),
-        ``ocean_mask``, plus ``n_windows`` and ``n_samples``, with ``cell_ids`` and
+        ``has_likelihood`` (1 when ``pdf`` carries evidence: a tidal window, or the
+        bathymetry-only likelihood with ``non_tidal="bathymetry"``), ``ocean_mask``,
+        plus ``n_windows`` and ``n_samples``, with ``cell_ids`` and
         its grid attributes. ``time`` is the label ``T`` (centre of the window).
     """
     if non_tidal not in {"bathymetry", "uniform"}:
@@ -987,11 +1040,10 @@ def pedersen_tide_likelihood(
         return predict_tide(constants, times=index.values, modulations=mod).values
 
     # ---- labels -------------------------------------------------------------
-    half = _step_ns(time_step) / 2
-    first = (series.index.min() + half).floor(time_step)
-    last = (series.index.max() + half).floor(time_step)
+    first = _window_labels(series.index.min(), time_step)
+    last = _window_labels(series.index.max(), time_step)
     starts = pd.date_range(first, last, freq=time_step)
-    sample_labels = starts.get_indexer((series.index + half).floor(time_step))
+    sample_labels = starts.get_indexer(_window_labels(series.index, time_step))
     n_win = len(starts)
 
     windows = tide_windows(
@@ -1017,14 +1069,16 @@ def pedersen_tide_likelihood(
         lo = row.centre - _hours_ns(window_hours) / 2
         hi = row.centre + _hours_ns(window_hours) / 2
         sel = series[(series.index >= lo) & (series.index < hi)]
-        if len(sel) < max(2, min_fraction * expected):
+        # ``expected`` counts samples, or bins when ``freq`` is set: compare like with like
+        used = sel if freq is None else _bin_average(sel, freq)
+        if len(used) < max(2, min_fraction * expected):
             continue
         if freq is None:
-            used = sel
             eta = eta_at(sel.index)
         else:
-            used = _bin_average(sel, freq)
-            basis = _bin_nodal_basis(sel, used, freq, constituents)
+            basis = _bin_nodal_basis(
+                sel, used, freq, constituents, modulations=modulations
+            )
             eta = _tide_from_basis(constants, basis).values
         hours = _seconds_since(used.index, used.index[0]) / 3600.0
         eps_w = epsilon if not np.isfinite(row.rmse) else float(row.rmse)
@@ -1077,6 +1131,9 @@ def pedersen_tide_likelihood(
             "pdf": (dims, pdf),
             "log_likelihood": (dims, loglik),
             "tide_found": ("time", tidal.astype(int)),
+            # the day carries evidence: a tidal window or, with
+            # non_tidal="bathymetry", the bathymetry-only likelihood
+            "has_likelihood": ("time", np.isfinite(loglik).any(axis=1).astype(int)),
             "n_windows": ("time", n_windows),
             "n_samples": ("time", n_samples),
             "ocean_mask": (CELL_DIM, allowed),
@@ -1306,14 +1363,22 @@ def write_tide_pdf_healpix(likelihood, target_root, behav_found, step=200):
 
     Notes
     -----
-    ``tide_found`` is written as 0/1 per window (the window is or is not used as
-    evidence), a special case of the daily fraction written by ``tide_to_healpix``.
+    ``tide_found`` is written as 0/1 per window (a tidal window is or is not used),
+    a special case of the daily fraction written by ``tide_to_healpix``.
+    ``has_likelihood`` is 1 when ``pdf`` carries evidence on that day: a tidal window,
+    or the bathymetry-only likelihood of ``pedersen_tide_likelihood(...,
+    non_tidal="bathymetry")`` on a day without one. ``merge_tide_with_total`` replaces
+    only the days with ``has_likelihood == 0`` by the neutral factor.
     """
     import zarr
 
     from pangeo_fish.storage import _with_dggs_attrs, write_time_blocks
 
     ds = likelihood[["pdf", "ocean_mask", "tide_found"]].copy()
+    if "has_likelihood" in likelihood:
+        ds["has_likelihood"] = likelihood["has_likelihood"].astype(float)
+    else:  # still_tag_tide_likelihood: only tidal windows carry evidence
+        ds["has_likelihood"] = (ds["tide_found"] > 0).astype(float)
     if isinstance(behav_found, xr.DataArray) and "time" in behav_found.coords:
         if behav_found.dims != ("time",):
             raise ValueError("behav_found must have only the time dimension")

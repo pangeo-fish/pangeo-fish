@@ -208,8 +208,9 @@ def test_timezone_aware_times(synthetic_astronomy):
 
 
 def _synthetic_record(
-    const, cell, start="2023-08-01T12:00", days=4, depth=19.0, noise=0.05
+    const, cell, start="2023-08-01T12:10", days=4, depth=19.0, noise=0.05
 ):
+    # 12:10 to 12:00: whole days (T - 12 h, T + 12 h], like the temperature emission
     times = pd.date_range(start, periods=days * 24 * 6, freq="10min")
     eta = th.predict_tide(const.isel(cells=[cell]), times.values).values[:, 0]
     rng = np.random.default_rng(3)
@@ -242,7 +243,7 @@ def test_likelihood_uniform_without_evidence(synthetic_astronomy):
     const["tide_real"] = (const["tide_real"].dims, real)
     record = _synthetic_record(const, 50, days=2)
     valid = pd.Series(
-        record.index < pd.Timestamp("2023-08-02T12:00"), index=record.index
+        record.index <= pd.Timestamp("2023-08-02T12:00"), index=record.index
     )
     lik = th.still_tag_tide_likelihood(record, const, sigma=0.3, valid=valid)
     assert lik["tide_found"].values.tolist() == [1, 0]
@@ -255,7 +256,7 @@ def test_likelihood_time_reference(synthetic_astronomy):
     const = random_constants(region_cells(), seed=7)
     record = _synthetic_record(const, 77, days=5)
     full = th.still_tag_tide_likelihood(record, const, sigma=0.3)
-    late = th.still_tag_tide_likelihood(record["2023-08-03T12:00":], const, sigma=0.3)
+    late = th.still_tag_tide_likelihood(record["2023-08-03T12:10":], const, sigma=0.3)
     xr.testing.assert_allclose(
         full["pdf"].sel(time=late.time), late["pdf"], rtol=1e-10, atol=1e-300
     )
@@ -560,8 +561,8 @@ def test_model_based_detection(synthetic_astronomy):
     record = _synthetic_record(const, 60, days=4, noise=0.03)
     # day 2: flat record (no tide), day 3: noise only (no tide of any cell)
     rng = np.random.default_rng(0)
-    day2 = (record.index >= "2023-08-02T12:00") & (record.index < "2023-08-03T12:00")
-    day3 = (record.index >= "2023-08-03T12:00") & (record.index < "2023-08-04T12:00")
+    day2 = (record.index > "2023-08-02T12:00") & (record.index <= "2023-08-03T12:00")
+    day3 = (record.index > "2023-08-03T12:00") & (record.index <= "2023-08-04T12:00")
     record[day2] = 19.0
     record[day3] = 19.0 + rng.normal(0, 0.5, day3.sum())
     lik = th.still_tag_tide_likelihood(record, const, sigma=0.3, detection_ratio=0.5)
@@ -645,12 +646,15 @@ def test_hourly_means_at_mean_sample_time():
     times = pd.date_range("2023-08-01", periods=24 * 6, freq="10min")
     series = pd.Series(np.arange(times.size, dtype=float), index=times)
     out = th._bin_average(series, "1h")
-    assert out.index[0] == pd.Timestamp("2023-08-01 00:25")  # samples :00..:50
-    assert out.iloc[0] == 2.5
+    # intervals closed on the right, like the days: 00:00 alone, then 00:10..01:00
+    assert out.index[0] == pd.Timestamp("2023-08-01 00:00")
+    assert out.iloc[0] == 0.0
+    assert out.index[1] == pd.Timestamp("2023-08-01 00:35")
+    assert out.iloc[1] == 3.5
     tz = series.copy()
     tz.index = tz.index.tz_localize("UTC")
-    assert th._bin_average(th._as_series(tz), "1h").index[0] == pd.Timestamp(
-        "2023-08-01 00:25"
+    assert th._bin_average(th._as_series(tz), "1h").index[1] == pd.Timestamp(
+        "2023-08-01 00:35"
     )
 
 
@@ -848,7 +852,7 @@ def test_fes2022b_native_mesh_roundtrip(tmp_path, longitude):
 
 
 def test_window_is_centred_on_label(synthetic_astronomy):
-    """Label T covers [T - 12 h, T + 12 h), like the temperature emission."""
+    """Label T covers (T - 12 h, T + 12 h], like the temperature emission."""
     const = random_constants(region_cells()[:5], seed=5)
     record = _synthetic_record(const, 1, start="2023-08-01", days=3)
     # starts at a label (T): partial first and last windows
@@ -856,9 +860,10 @@ def test_window_is_centred_on_label(synthetic_astronomy):
     times = pd.DatetimeIndex(lik.time.values)
     assert times[0] == pd.Timestamp("2023-08-01")
     assert times[-1] == pd.Timestamp("2023-08-04")
-    # 10 min samples: 72 in each partial edge window, 144 per full day
-    np.testing.assert_array_equal(lik.n_samples.values, [72, 144, 144, 72])
+    # 10 min samples: 00:00..12:00 (73) and 12:10..23:50 (71) in the partial edge
+    # windows, 144 per full day
+    np.testing.assert_array_equal(lik.n_samples.values, [73, 144, 144, 71])
     day = record[
-        (record.index >= "2023-08-01 12:00") & (record.index < "2023-08-02 12:00")
+        (record.index > "2023-08-01 12:00") & (record.index <= "2023-08-02 12:00")
     ]
     assert len(day) == lik.n_samples.sel(time="2023-08-02").item()

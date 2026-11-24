@@ -195,3 +195,31 @@ def test_merge_uncovered_cells_are_neutral_not_zero(tmp_path, recwarn):
     p = merged["pdf_tide"].values
     np.testing.assert_allclose(p[0], [0.5, 0.5])  # no tide: neutral everywhere
     np.testing.assert_allclose(p[1], [0.4, 0.4])  # tide: day's mean for the cell
+
+
+def test_merge_keeps_bathymetry_only_days(tmp_path):
+    """Review of #344: days with tide_found == 0 but a bathymetry-only likelihood
+    (pedersen non_tidal="bathymetry") must not be replaced by the neutral factor."""
+    times = pd.date_range("2024-01-01", periods=3)
+    cells = th.make_cell_ids([1, 2], 2, "WGS84")
+    pdf = [[7.6e-24, 1.0], [0.2, 0.8], [0.5, 0.5]]
+    likelihood = xr.Dataset(
+        {
+            "pdf": (("time", "cells"), pdf),
+            "ocean_mask": ("cells", [True, True]),
+            "tide_found": ("time", [0, 1, 0]),
+            "has_likelihood": ("time", [1, 1, 0]),
+        },
+        coords={"time": times, "cell_ids": cells},
+    )
+    th.write_tide_pdf_healpix(likelihood, tmp_path, behav_found=[1, 1, 1])
+    total = xr.Dataset(
+        {"pdf": (("time", "cells"), np.full((3, 2), 0.5))},
+        coords={"time": times, "cell_ids": cells},
+    )
+    total.to_zarr(tmp_path / "total_pdf.zarr", zarr_format=2, consolidated=True)
+    merged, tide_mask, _ = tide.merge_tide_with_total(tmp_path)
+    np.testing.assert_allclose(merged["pdf_tide"].values, pdf)
+    # tide_mask still says where a tidal window was used
+    np.testing.assert_array_equal(tide_mask.values[:, 0], [0, 1, 0])
+    assert "has_likelihood" not in merged

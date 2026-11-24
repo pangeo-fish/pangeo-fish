@@ -101,7 +101,7 @@ precomputed FES2022b constants. PyFES supplies the astronomical arguments and
 nodal corrections at the observation times. The observations and the tide
 predictions are averaged over the same sample times within each hour, and one
 likelihood per day is computed on the HMM grid. A day labelled ``T`` covers
-``[T - 12 h, T + 12 h)``, as in the temperature emission.
+``(T - 12 h, T + 12 h]``, as in the temperature emission.
 
 The likelihood fits an unknown mean depth per cell and per day, so it uses the
 shape of the tide in the depth record and not the absolute depth. The demo
@@ -130,12 +130,17 @@ tide elevation from the harmonic constants of the cell with the nodal
 corrections of pyfes. The covariance does not depend on the cell: white noise
 (0.2 m), a correlated term with the rmse of the tide fit of the window and a
 memory of 6.67 h, and a constant 10 m standard deviation on the mean depth.
-A day labelled ``T`` combines the windows whose centre lies in
-``[T - 12 h, T + 12 h)``. A day without a tidal window gets a uniform tide PDF:
+A day labelled ``T`` uses the best-fitting tidal window whose centre lies in
+``(T - 12 h, T + 12 h]``. The windows are chosen over the whole record, best fit
+first, with their centres at least 24 h apart, so that two days share at most
+1 h of samples (the MATLAB takes the best 10 h window of each calendar day and
+does not check overlaps). A day can thus be left without a window when the
+best windows of the days around it are close to it. A day without a tidal
+window gets a uniform tide PDF:
 the bathymetry PDF of the demo already says that the fish cannot be where the
 seabed is shallower than its deepest depth. ``non_tidal="bathymetry"`` restores
 the bathymetry-only likelihood of the MATLAB, which then counts the bathymetry
-twice.
+twice; ``merge_tide_with_total`` keeps it on those days (``has_likelihood``).
 
 The error parameters are those of the MATLAB code and have not been calibrated
 for this package:
@@ -228,7 +233,7 @@ Limits of the detection:
 - **Results of earlier versions differ.** The detection window was 10 h
   (16 h for ``behav_found``) and flags were stored at the start of the window,
   and the tide PDF of day ``T`` used ``[T, T + 24 h)``. The window is now 25 h,
-  flags are centred, and the day is ``[T - 12 h, T + 12 h)`` like the
+  flags are centred, and the day is ``(T - 12 h, T + 12 h]`` like the
   temperature emission, so a run made before this change is not reproduced.
 
 Comparing the outputs

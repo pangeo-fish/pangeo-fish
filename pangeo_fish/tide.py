@@ -11,7 +11,7 @@ from tqdm import tqdm
 
 from pangeo_fish.helpers import _with_dggs_attrs, regrid_dataset_hpresample
 from pangeo_fish.storage import write_time_blocks
-from pangeo_fish.tide_healpix import _step_ns
+from pangeo_fish.tide_healpix import _step_ns, _window_labels
 
 #####################################################################
 #  First part : extraction of a tidal signal
@@ -795,15 +795,27 @@ def detect_tide(tag_log, tag_name, smooth=False, **kwargs):
 VARS_NO_TIME = ["cell_ids", "latitude", "longitude", "resolution", "ocean_mask"]
 
 
-def _centered_daily_mean(obj):
-    """Daily mean over [T - 12 h, T + 12 h), labelled T (midnight).
+def _centered_daily_mean(obj, bin_centre=None):
+    """Daily mean over (T - 12 h, T + 12 h], labelled T (midnight).
 
     This is the window of the temperature emission (``cf_xarray`` time bounds of a
-    daily axis), unlike ``resample(time="1D")`` which covers [T, T + 24 h).
+    daily axis turned into right-closed intervals by ``pangeo_fish.cf.bounds_to_bins``),
+    unlike ``resample(time="1D")`` which covers [T, T + 24 h).
+
+    ``bin_centre`` (a timedelta) is added to the times before they are assigned to a
+    day: values labelled by the start of a bin (the hourly pdf of
+    :func:`tide_pdf`, ``floor("h")``) then go to the day holding the centre of
+    their bin, so the hour 12:00-12:59 belongs to the next day.
     """
+    if bin_centre is not None:
+        obj = obj.assign_coords(time=obj.time + bin_centre)
     half = _step_ns("12h")
-    out = obj.resample(time="1D", offset=half).mean(skipna=True)
+    out = obj.resample(time="1D", offset=half, closed="right").mean(skipna=True)
     return out.assign_coords(time=out.time + half)
+
+
+# hourly pdf of the legacy method: each value is labelled by the start of its hour
+_HOURLY_BIN_CENTRE = _step_ns("30min")
 
 
 def tide_to_healpix(
@@ -856,8 +868,9 @@ def tide_to_healpix(
     # Regrid by temporal chunks to limit memory
     times = lik_full.time.to_index()
     n_time = len(times)
-    # chunks are cut at 12:00 so that no centred daily window (label +- 12 h) is split
-    days = (times - _step_ns("12h")).normalize()
+    # chunks are cut just after 12:00 so that no centred daily window
+    # (T - 12 h, T + 12 h] is split
+    days = _window_labels(times + _HOURLY_BIN_CENTRE, "1D")
 
     day_starts = np.flatnonzero(np.r_[True, days[1:] != days[:-1]])
 
@@ -884,7 +897,7 @@ def tide_to_healpix(
         mask = reshaped["ocean_mask"].compute()
         if isinstance(mask.data, sparse.SparseArray):
             reshaped["ocean_mask"] = mask.copy(data=mask.data.todense())
-        chunks.append(_centered_daily_mean(reshaped))
+        chunks.append(_centered_daily_mean(reshaped, _HOURLY_BIN_CENTRE))
 
     print("Concatenating chunks...")
     ds = xr.concat(chunks, dim="time")
@@ -893,11 +906,11 @@ def tide_to_healpix(
     store_path = f"{target_root}/tide_pdf_healpix.zarr"
     write_time_blocks(ds.chunk({"cells": -1}), store_path, step=step)
 
-    tide_found_resampled = _centered_daily_mean(tide_found)
+    tide_found_resampled = _centered_daily_mean(tide_found, _HOURLY_BIN_CENTRE)
     tide_found_resampled.sel(time=ds.time).to_zarr(
         store_path, mode="a", zarr_format=2, consolidated=False
     )
-    behav_found_resampled = _centered_daily_mean(behav_found)
+    behav_found_resampled = _centered_daily_mean(behav_found, _HOURLY_BIN_CENTRE)
     behav_found_resampled.sel(time=ds.time).to_zarr(
         store_path, mode="a", zarr_format=2, consolidated=False
     )
@@ -934,11 +947,11 @@ def merge_tide_with_total(target_root, storage_options=None):
     -------
     emission_with_bathy_tide : xarray.Dataset
         Merged dataset on the ``cell_ids`` and ``time`` of the total emission, with the
-        tide likelihood stored as ``pdf_tide`` (``tide_found`` and ``ocean_mask``
-        removed).
+        tide likelihood stored as ``pdf_tide`` (``tide_found``, ``has_likelihood``
+        and ``ocean_mask`` removed).
     tide_mask : xarray.DataArray
-        Daily ``tide_found`` (0 on days filled with the neutral factor),
-        broadcast over the cells.
+        Daily ``tide_found`` (0 on days without a tidal window, including days that
+        carry only the bathymetry-only likelihood), broadcast over the cells.
     behav_mask : xarray.DataArray
         Same for ``behav_found``.
 
@@ -984,10 +997,15 @@ def merge_tide_with_total(target_root, storage_options=None):
         covered = np.zeros(n_cells, dtype=bool)
         covered[has_cell] = ocean.values[cell_idx[has_cell]] >= 0.5
         values[:, ~covered] = np.nan
-    if "tide_found" in daily:
-        # days without detected tide: the same neutral factor in every cell
+    # Days without evidence: the same neutral factor in every cell. ``has_likelihood``
+    # (written by ``write_tide_pdf_healpix``) is separate from ``tide_found``: a day
+    # without a tidal window can still carry the bathymetry-only likelihood of
+    # ``pedersen_tide_likelihood(..., non_tidal="bathymetry")``. Stores without it
+    # (``tide_to_healpix``) have evidence only on tidal days.
+    evidence = "has_likelihood" if "has_likelihood" in daily else "tide_found"
+    if evidence in daily:
         stored = np.full(n_time, np.nan)
-        stored[has_time] = daily["tide_found"].values[time_idx[has_time]]
+        stored[has_time] = daily[evidence].values[time_idx[has_time]]
         values[stored == 0, :] = 1.0 / n_cells
 
     missing = ~np.isfinite(values)
@@ -1026,7 +1044,11 @@ def merge_tide_with_total(target_root, storage_options=None):
     tide_mask = merged["tide_found"].broadcast_like(merged["pdf_tide"])
     behav_mask = merged["behav_found"].broadcast_like(merged["pdf_tide"])
     merged = merged.drop_vars(
-        [v for v in ("tide_found", "ocean_mask", "behav_found") if v in merged]
+        [
+            v
+            for v in ("tide_found", "has_likelihood", "ocean_mask", "behav_found")
+            if v in merged
+        ]
     )
 
     # Rechunk for Zarr writes and discard the source stores' chunk encodings.
