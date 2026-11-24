@@ -84,7 +84,11 @@ It must have four columns: `event_name`, `time`, `latitude`, and `longitude`.
 
 The valid values for `event_name` are: `release`, `recapture` and `fish_death` (more are possible but will be ignored).
 
-The file must contain two entries: `release` and one of `recapture` or `fish_death`.
+The file must contain two entries: `release` and `fish_death`.
+The temperature step (`compute_emission_pdf`) reads the end position from the `fish_death` row only.
+A `recapture` row is not used as a position constraint.
+If the fish was recaptured at a known place, store that time and position in a `fish_death` row.
+If the end position is unknown, set `latitude` and `longitude` of `fish_death` to `NA`: no final constraint is applied.
 
 `latitude` and `longitude` are fixed-point representations of the position in degree, with a `.` as separator.
 `latitude` must be in a range of `-90°` to `90°`, while `longitude` may be given in either `0°` to `360°` or `-180°` to `180°`.
