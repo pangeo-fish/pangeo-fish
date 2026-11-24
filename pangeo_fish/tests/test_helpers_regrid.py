@@ -192,8 +192,10 @@ def test_regrid_keeps_negative_values_of_signed_fields():
 
 
 @pytest.mark.parametrize("dims", [("yi", "xi"), ("xi", "yi")])
-def test_resolution_2d_ignores_the_other_dimensions(dims):
-    lon, lat = np.meshgrid(np.linspace(-7, 0, 5), np.linspace(46, 51.5, 3))
+def test_resolution_2d_uses_named_axes_on_a_skewed_grid(dims):
+    yi, xi = np.indices((3, 5))
+    lon = -7 + 0.1 * xi + 0.2 * yi
+    lat = 46 + 0.1 * yi
     source = xr.Dataset(
         {"diff": (("time", "yi", "xi"), np.zeros((11, 3, 5)))},
         coords={

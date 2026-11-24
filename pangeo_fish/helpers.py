@@ -1150,16 +1150,7 @@ def _resolution_2d(ds: xr.Dataset) -> list[int]:
     if longitude.ndim == 1 and latitude.ndim == 1:
         return [int(longitude.size), int(latitude.size)]
 
-    values = np.asarray(longitude.values, dtype="float64")
-    # the longitude changes along x and is (nearly) constant along y
-    steps = [
-        np.nanmean(np.abs(np.diff(values, axis=axis))) if values.shape[axis] > 1 else 0
-        for axis in (0, 1)
-    ]
-    n_first, n_second = values.shape
-    if steps[1] >= steps[0]:
-        return [int(n_second), int(n_first)]
-    return [int(n_first), int(n_second)]
+    return [ds.sizes["xi"], ds.sizes["yi"]]
 
 
 def regrid_dataset_hpresample(
