@@ -21,7 +21,9 @@ SEEDS = range(4)
 
 
 def make_df(y):
-    time = pd.Timestamp("2020-01-01") + pd.to_timedelta(np.arange(HOURS.size) * DT_MIN, "min")
+    time = pd.Timestamp("2020-01-01") + pd.to_timedelta(
+        np.arange(HOURS.size) * DT_MIN, "min"
+    )
     return pd.DataFrame({"time": time, "pressure": y})
 
 
@@ -117,9 +119,13 @@ def test_window_shorter_than_m2_is_rejected():
 
 def test_detect_tide_defaults_and_return_type():
     rng = np.random.default_rng(0)
-    time = pd.Timestamp("2020-01-01") + pd.to_timedelta(np.arange(HOURS.size) * DT_MIN, "min")
-    tag_log = xr.Dataset({"pressure": ("time", tidal(rng) + rng.normal(0, 0.15, time.size))},
-                         coords={"time": time})
+    time = pd.Timestamp("2020-01-01") + pd.to_timedelta(
+        np.arange(HOURS.size) * DT_MIN, "min"
+    )
+    tag_log = xr.Dataset(
+        {"pressure": ("time", tidal(rng) + rng.normal(0, 0.15, time.size))},
+        coords={"time": time},
+    )
     with contextlib.redirect_stdout(io.StringIO()):
         ds = tide.detect_tide(tag_log, "tag")
     assert isinstance(ds, xr.Dataset)

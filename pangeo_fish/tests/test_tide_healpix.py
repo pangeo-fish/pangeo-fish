@@ -207,7 +207,9 @@ def test_timezone_aware_times(synthetic_astronomy):
 # --------------------------------------------------------------------------
 
 
-def _synthetic_record(const, cell, start="2023-08-01T12:00", days=4, depth=19.0, noise=0.05):
+def _synthetic_record(
+    const, cell, start="2023-08-01T12:00", days=4, depth=19.0, noise=0.05
+):
     times = pd.date_range(start, periods=days * 24 * 6, freq="10min")
     eta = th.predict_tide(const.isel(cells=[cell]), times.values).values[:, 0]
     rng = np.random.default_rng(3)
@@ -239,7 +241,9 @@ def test_likelihood_uniform_without_evidence(synthetic_astronomy):
     real[:, :10] = np.nan  # land cells
     const["tide_real"] = (const["tide_real"].dims, real)
     record = _synthetic_record(const, 50, days=2)
-    valid = pd.Series(record.index < pd.Timestamp("2023-08-02T12:00"), index=record.index)
+    valid = pd.Series(
+        record.index < pd.Timestamp("2023-08-02T12:00"), index=record.index
+    )
     lik = th.still_tag_tide_likelihood(record, const, sigma=0.3, valid=valid)
     assert lik["tide_found"].values.tolist() == [1, 0]
     day2 = lik["pdf"].isel(time=1).values
@@ -854,5 +858,7 @@ def test_window_is_centred_on_label(synthetic_astronomy):
     assert times[-1] == pd.Timestamp("2023-08-04")
     # 10 min samples: 72 in each partial edge window, 144 per full day
     np.testing.assert_array_equal(lik.n_samples.values, [72, 144, 144, 72])
-    day = record[(record.index >= "2023-08-01 12:00") & (record.index < "2023-08-02 12:00")]
+    day = record[
+        (record.index >= "2023-08-01 12:00") & (record.index < "2023-08-02 12:00")
+    ]
     assert len(day) == lik.n_samples.sel(time="2023-08-02").item()

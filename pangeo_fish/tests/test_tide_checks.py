@@ -21,13 +21,14 @@ def _write_stores(path, tide_cells, tide_times, total_cells, total_times):
         },
         coords={"time": tide_times, "cell_ids": tide_ids},
     )
-    th.write_tide_pdf_healpix(
-        likelihood, path, behav_found=[1] * len(tide_times)
-    )
+    th.write_tide_pdf_healpix(likelihood, path, behav_found=[1] * len(tide_times))
     n = len(total_times)
     total = xr.Dataset(
         {
-            "pdf": (("time", "cells"), np.full((n, len(total_cells)), 1.0 / len(total_cells))),
+            "pdf": (
+                ("time", "cells"),
+                np.full((n, len(total_cells)), 1.0 / len(total_cells)),
+            ),
             "initial": ("cells", np.arange(len(total_cells), dtype=float)),
             "final": ("cells", np.arange(len(total_cells), dtype=float)[::-1].copy()),
             "mask": ("time", np.arange(n) % 2),

@@ -7,7 +7,6 @@ import sparse
 import xarray as xr
 import zarr
 from numpy.linalg import lstsq
-from scipy.signal import savgol_filter
 from tqdm import tqdm
 
 from pangeo_fish.helpers import _with_dggs_attrs, regrid_dataset_hpresample
@@ -22,7 +21,17 @@ M2_PERIOD_H = 12.42  # h, principal lunar semi-diurnal tide
 DEFAULT_TIDE_WINDOW_H = 25.0  # h, about two M2 cycles
 MAX_TIDE_AMPLITUDE_M = 5.0  # m, largest plausible M2 amplitude in pressure
 
-DEPTH_UNITS = {"dbar", "decibar", "decibars", "db", "m", "meter", "meters", "metre", "metres"}
+DEPTH_UNITS = {
+    "dbar",
+    "decibar",
+    "decibars",
+    "db",
+    "m",
+    "meter",
+    "meters",
+    "metre",
+    "metres",
+}
 MAX_PLAUSIBLE_DEPTH = 3000.0  # fish tags: far deeper than any tagged fish dives
 MIN_PLAUSIBLE_DEPTH = -50.0
 
@@ -247,7 +256,6 @@ def tide_behav_extr(
     time = time.to_numpy()
     depth = df["pressure"].to_numpy()
     check_pressure_units(depth, df.attrs.get("units"))
-    n = len(depth)
     tide_window = int(round(60 / dt * tideFL))
     behav_window = int(round(60 / dt * behavFL))
     fit_kwargs = dict(periods_h=tuple(periods_h), trend_order=trend_order)
@@ -884,7 +892,9 @@ def merge_tide_with_total(target_root, storage_options=None):
 
     values = np.full((n_time, n_cells), np.nan)
     source = daily["pdf"].transpose("time", "cells").values
-    values[np.ix_(has_time, has_cell)] = source[np.ix_(time_idx[has_time], cell_idx[has_cell])]
+    values[np.ix_(has_time, has_cell)] = source[
+        np.ix_(time_idx[has_time], cell_idx[has_cell])
+    ]
 
     missing = ~np.isfinite(values)
     if missing.any():
