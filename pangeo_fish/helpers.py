@@ -1140,6 +1140,19 @@ def open_diff_dataset(*, target_root: str, storage_options: dict, **kwargs):
     return ds
 
 
+def _resolution_2d(ds: xr.Dataset) -> list[int]:
+    """Number of points ``[nx, ny]`` of the source grid along longitude and latitude.
+
+    `open_distributions` draws the distributions on a regular grid of this
+    size, so it must not depend on the other dimensions of ``ds`` (time, depth).
+    """
+    longitude, latitude = ds["longitude"], ds["latitude"]
+    if longitude.ndim == 1 and latitude.ndim == 1:
+        return [int(longitude.size), int(latitude.size)]
+
+    return [ds.sizes["xi"], ds.sizes["yi"]]
+
+
 def regrid_dataset_hpresample(
     *,
     ds: xr.Dataset,
@@ -1332,7 +1345,7 @@ def regrid_dataset_hpresample(
     if save:
         print("you can save outside of the function")
     return new_ds, {
-        "resolution_2D": list(ds.sizes.values())[0:2],
+        "resolution_2D": _resolution_2d(ds),
         "refinement_level": refinement_level,
         "ellipsoid": ellipsoid,
     }

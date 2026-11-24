@@ -24,7 +24,8 @@ def load_demo(name):
 def test_common_defaults_are_identical():
     base, _ = demo_settings(load_demo("base"))
     complete, _ = demo_settings(load_demo("complete"))
-    assert base.pop("scratch_root") != complete.pop("scratch_root")
+    assert base.pop("scratch_root") == "./test/wgs84/level10"
+    assert complete.pop("scratch_root") == "./test/wgs84"
     assert complete.pop("tide_method") == "legacy"
     assert complete.pop("tide_model") == "tpxo9"
     assert complete.pop("tide_model_source") is None
@@ -34,6 +35,7 @@ def test_common_defaults_are_identical():
     assert complete.pop("tide_sigma_m") == 2.0
     assert complete.pop("tide_min_samples") == 6
     assert base == complete
+    assert base["ellipsoid"] == "WGS84"
     assert base["bbox"] == {"latitude": [46, 51.5], "longitude": [-7, 0]}
     assert base["refinement_level"] == 10
     assert base["tolerance"] == 1e-6
