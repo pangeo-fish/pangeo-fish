@@ -64,14 +64,14 @@ def setup(synthetic_astronomy):
 
 
 def record(const, cell=0, days=4, depth_m=20.0, noise=0.05, freq="10min", seed=0):
-    times = pd.date_range(START, START + pd.Timedelta(days=days), freq=freq)
+    times = pd.date_range(START, START + np.timedelta64(days, "D"), freq=freq)
     eta = th.predict_tide(const, times.values).values[:, cell]
     rng = np.random.default_rng(seed)
     return pd.Series(depth_m + eta + noise * rng.standard_normal(len(times)), times)
 
 
 def flags(series, window_hours=25.0, found=True):
-    half = pd.Timedelta(hours=window_hours) / 2
+    half = np.timedelta64(int(round(window_hours * 3600)), "s") / 2
     inside = (series.index >= series.index[0] + half) & (
         series.index <= series.index[-1] - half
     )
@@ -148,8 +148,8 @@ def test_non_tidal_day_uses_bathymetry_only(setup):
     np.testing.assert_allclose(pdf.sum(), 1.0)
     # formula: normcdf(d; mu, s) / (eps + normcdf(0; mu, s)) in depth-negative-up form
     label = out.time.values[1]
-    lo = pd.Timestamp(label) - pd.Timedelta("12h")
-    sel = series[(series.index >= lo) & (series.index < lo + pd.Timedelta("1D"))]
+    lo = pd.Timestamp(label) - np.timedelta64(12, "h")
+    sel = series[(series.index >= lo) & (series.index < lo + np.timedelta64(1, "D"))]
     t = sel.idxmax()
     eta = th.predict_tide(const, np.array([t.to_datetime64()])).values[0]
     mu = wc + eta

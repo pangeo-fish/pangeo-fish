@@ -386,6 +386,11 @@ def _step_ns(freq):
     return np.timedelta64(int(ns), "ns")
 
 
+def _hours_ns(hours):
+    """``hours`` (float) as ``numpy.timedelta64[ns]`` (see :func:`_step_ns`)."""
+    return np.timedelta64(int(round(float(hours) * 3.6e12)), "ns")
+
+
 def _seconds_since(index, t0):
     """Seconds from ``t0`` as floats (integer nanoseconds, no timedelta division)."""
     ns = pd.DatetimeIndex(index).as_unit("ns").asi8
@@ -715,9 +720,9 @@ def tide_windows(
     err = np.full(len(centres), np.nan)
     if rmse is not None:
         err = _as_series(rmse).reindex(centres).values
-    half = pd.Timedelta(time_step) / 2
+    half = _step_ns(time_step) / 2
     labels = ((centres + half).floor(time_step)) if len(centres) else centres
-    width = pd.Timedelta(hours=window_hours)
+    width = _hours_ns(window_hours)
     rows = []
     for label in pd.unique(labels):
         idx = np.flatnonzero(labels == label)
@@ -982,7 +987,7 @@ def pedersen_tide_likelihood(
         return predict_tide(constants, times=index.values, modulations=mod).values
 
     # ---- labels -------------------------------------------------------------
-    half = pd.Timedelta(time_step) / 2
+    half = _step_ns(time_step) / 2
     first = (series.index.min() + half).floor(time_step)
     last = (series.index.max() + half).floor(time_step)
     starts = pd.date_range(first, last, freq=time_step)
@@ -999,7 +1004,7 @@ def pedersen_tide_likelihood(
     dt_hours = float(np.median(np.diff(series.index.as_unit("ns").asi8)) / 3.6e12)
     expected = window_hours / dt_hours
     if freq is not None:
-        expected = window_hours / (pd.Timedelta(freq) / pd.Timedelta(hours=1))
+        expected = window_hours * 3600 / (_step_ns(freq) / np.timedelta64(1, "s"))
 
     loglik = np.full((n_win, n_cells), np.nan)
     n_windows = np.zeros(n_win, dtype=int)
@@ -1009,8 +1014,8 @@ def pedersen_tide_likelihood(
 
     for row in windows.itertuples(index=False):
         w = starts.get_loc(row.label)
-        lo = row.centre - pd.Timedelta(hours=window_hours) / 2
-        hi = row.centre + pd.Timedelta(hours=window_hours) / 2
+        lo = row.centre - _hours_ns(window_hours) / 2
+        hi = row.centre + _hours_ns(window_hours) / 2
         sel = series[(series.index >= lo) & (series.index < hi)]
         if len(sel) < max(2, min_fraction * expected):
             continue
