@@ -191,9 +191,7 @@ def test_count_detections_mixed_time_units(detection_unit, bins_unit):
     )
     grid = xr.Dataset(
         coords={
-            "time": pd.date_range("2022-06-13", periods=2, freq="D").as_unit(
-                bins_unit
-            )
+            "time": pd.date_range("2022-06-13", periods=2, freq="D").as_unit(bins_unit)
         }
     )
     by = grid[["time"]].cf.add_bounds(keys="time")
