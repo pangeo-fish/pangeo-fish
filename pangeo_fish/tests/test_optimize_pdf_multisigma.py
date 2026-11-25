@@ -165,9 +165,7 @@ FIT_MODES = [{"single_behav": True}, {"single_behav": False}, {"multivariate": T
 
 
 @pytest.mark.parametrize("kwargs", FIT_MODES)
-@pytest.mark.parametrize(
-    "keys", [[0], [5, 6]], ids=["missing-behaviour", "wrong-keys"]
-)
+@pytest.mark.parametrize("keys", [[0], [5, 6]], ids=["missing-behaviour", "wrong-keys"])
 def test_sigma_bounds_must_cover_every_behaviour(emission, kwargs, keys):
     ds = stamp_parameter_indices_from_mask(
         pdf=emission,
