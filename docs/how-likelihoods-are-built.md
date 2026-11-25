@@ -65,6 +65,7 @@ If the tag has no `acoustic` or no `stations`, `emission_probability` returns an
 
 1. Detections are counted per receiver (`deployment_id`) in each time bin of the emission grid (`count_detections`).
    A `deployment_id` that is missing from `stations` raises a `ValueError`.
+   The detection times and the bins are first converted to `datetime64[ns]` (pandas 3 reads the CSV times as `datetime64[us]`).
 2. The centre of a receiver is `deploy_longitude`, `deploy_latitude`.
    The recover position is not used.
 3. The buffer of a receiver is the set of cells covered by a disc of radius `receiver_buffer` around that centre.
@@ -83,8 +84,9 @@ In a time bin without any detection, `nondetections` decides:
 | `"ignore"` | All cells have the same weight.                                                                                                                                                                                            |
 
 A receiver is active in a bin when the whole bin lies between its `deploy_time` and `recover_time`.
-A receiver that never covers a whole bin is treated as active in every bin (`create_masked_fill_map`).
-Its buffer then gets `NaN` in every bin without detection, even outside its deployment period.
+A bin where the receiver was deployed or recovered only part of the time does not count, so its buffer is not removed there.
+A receiver that never covers a whole bin is left out of the mask (`create_masked_fill_map`), so its buffer is never removed.
+This includes a receiver whose `recover_time` is missing (`NaT`), for example one still in the water at the end of the study.
 
 ## 3. Bathymetry likelihood
 
@@ -183,8 +185,11 @@ When, in every cell of a time step, the acoustic value is 0 or the temperature `
 Multi-sigma mode starts when the dataset has a `predictor_index` variable, one integer per time step.
 `stamp_parameter_indices` builds it from a list of times (nearest time step).
 `stamp_parameter_indices_from_mask` builds it from a 0/1 mask, matched by position.
-In multi-sigma mode, `optimize_pdf` currently needs `ds.attrs["sigma_bounds"]`, a dictionary `{predictor value: (minimum speed, maximum speed)}`.
-Only `stamp_parameter_indices_from_mask(..., sigma_bounds_dict=...)` sets it; without it, `optimize_pdf` stops with an error.
+In multi-sigma mode, `ds.attrs["sigma_bounds"]` can give one speed range per behaviour, as a dictionary `{predictor value: (minimum speed, maximum speed)}`.
+`stamp_parameter_indices_from_mask(..., sigma_bounds_dict=...)` sets it.
+Every predictor value present in the data needs an entry, or `optimize_pdf` raises a `ValueError`; entries for values absent from the data are ignored.
+Only the maximum speed is used.
+Without `sigma_bounds`, every behaviour uses the upper bound derived from `maximum_speed`.
 Sigma is searched in radians, from `1e-4` to `maximum_speed * time step * adjustment_factor / earth_radius`.
 By default `earth_radius` is the semi-major axis of the grid ellipsoid (6378.137 km for WGS84); it can be set with `earth_radius=`.
 In multi-sigma mode with `sigma_bounds`, each behaviour has its own upper bound, and the lower bound stays `1e-4`.

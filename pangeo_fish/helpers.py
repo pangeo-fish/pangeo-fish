@@ -2334,6 +2334,11 @@ def optimize_pdf(
         scipy.optimize.minimize on the whole sequence (one sigma per predictor
         value), and ignore single_behav. If False, use the per-segment or
         per-value sequential optimization selected by single_behav.
+        In multi-sigma mode, ``ds.attrs["sigma_bounds"]`` (set by
+        :py:func:`stamp_parameter_indices_from_mask`) gives a maximum speed per
+        predictor value; every predictor value in the data needs an entry.
+        Without it, every behaviour is searched between ``1e-4`` and the bound
+        derived from ``maximum_speed``.
      save_parameters : bool, default: False
          Whether to save the results under ``{target_root}/parameters.json``
      target_root : str, default: "."
@@ -2376,9 +2381,12 @@ def optimize_pdf(
     )
     if final:
         max_sigma = 0.01
+    sigma_bounds_dict = None
     if "predictor_index" in ds:
         speed_bounds_dict = ds.attrs.get("sigma_bounds", None)
         if speed_bounds_dict is None:
+            # no per-behaviour bounds: every behaviour uses (1e-4, max_sigma),
+            # derived from ``maximum_speed`` like the single-sigma case
             pass
         else:
             sigma_bounds_dict = {}
@@ -2390,8 +2398,6 @@ def optimize_pdf(
                 sigma_bounds_dict[i] = (1e-4, max_sigma_i)
             print(f"dictionnaire des vitesses:{speed_bounds_dict}")
             print(f"dictionnaire des sigma:{sigma_bounds_dict}")
-    else:
-        sigma_bounds_dict = None
 
     # The largest sigma the optimiser can try bounds the convolution kernel.
     largest_sigma = max(
@@ -3524,15 +3530,23 @@ def stamp_parameter_indices_from_mask(
         Binary values (0/1 or boolean), one per time step of ``pdf``, in the same order.
     index_key : str, optional
         Name of the variable to add. Default is ``"predictor_index"``.
-    sigma_bounds_dict : dict
-        dict with values for the two behavior (0, 1) {0: (min_speed1,max_speed) 1, 1: (min_speed2,max_speed_2)}
+    sigma_bounds_dict : dict, optional
+        Speed bounds per behaviour,
+        ``{predictor value: (minimum speed, maximum speed)}``, for example
+        ``{0: (0, max_speed_0), 1: (0, max_speed_1)}`` with ``pint`` speeds.
+        Stored as ``attrs["sigma_bounds"]`` (not set if omitted).
+        :py:func:`optimize_pdf` turns each maximum
+        speed into the upper bound of that behaviour's sigma; the minimum speed is not
+        used (the lower bound is always ``1e-4``). If omitted, every behaviour uses the
+        bound derived from ``maximum_speed``.
     Returns
     -------
     xarray.Dataset
         A new dataset (``pdf`` is not modified) identical to ``pdf`` with an additional
         variable ``index_key`` of dtype ``int32`` and dimension ``time``. Its value is 1
         where the mask is 1 (e.g. tide detected, so the tide likelihood applies) and 0
-        elsewhere. Add an attribute containing the bound seed for each behavior.
+        elsewhere. If ``sigma_bounds_dict`` is given, it is stored as
+        ``attrs["sigma_bounds"]``.
 
     Raises
     ------
@@ -3553,8 +3567,10 @@ def stamp_parameter_indices_from_mask(
             f"The mask (size {mask_arr.shape[0]}) does not match "
             f"the 'time' dimension of pdf (size {pdf.sizes['time']})."
         )
-    pdf.attrs["sigma_bounds"] = sigma_bounds_dict
-    return pdf.assign(**{index_key: ("time", mask_arr)})
+    stamped = pdf.assign(**{index_key: ("time", mask_arr)})
+    if sigma_bounds_dict is not None:
+        stamped = stamped.assign_attrs(sigma_bounds=sigma_bounds_dict)
+    return stamped
 
 
 def create_parameters(
