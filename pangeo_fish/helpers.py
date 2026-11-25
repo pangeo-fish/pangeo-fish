@@ -2336,9 +2336,9 @@ def optimize_pdf(
         per-value sequential optimization selected by single_behav.
         In multi-sigma mode, ``ds.attrs["sigma_bounds"]`` (set by
         :py:func:`stamp_parameter_indices_from_mask`) gives a maximum speed per
-        predictor value; it must have one entry per predictor value. Without it,
-        every behaviour is searched between ``1e-4`` and the bound derived from
-        ``maximum_speed``.
+        predictor value; every predictor value in the data needs an entry.
+        Without it, every behaviour is searched between ``1e-4`` and the bound
+        derived from ``maximum_speed``.
      save_parameters : bool, default: False
          Whether to save the results under ``{target_root}/parameters.json``
      target_root : str, default: "."
@@ -3534,7 +3534,8 @@ def stamp_parameter_indices_from_mask(
         Speed bounds per behaviour,
         ``{predictor value: (minimum speed, maximum speed)}``, for example
         ``{0: (0, max_speed_0), 1: (0, max_speed_1)}`` with ``pint`` speeds.
-        Stored as ``attrs["sigma_bounds"]`` (not set if omitted). :py:func:`optimize_pdf` turns each maximum
+        Stored as ``attrs["sigma_bounds"]`` (not set if omitted).
+        :py:func:`optimize_pdf` turns each maximum
         speed into the upper bound of that behaviour's sigma; the minimum speed is not
         used (the lower bound is always ``1e-4``). If omitted, every behaviour uses the
         bound derived from ``maximum_speed``.
@@ -3544,7 +3545,8 @@ def stamp_parameter_indices_from_mask(
         A new dataset (``pdf`` is not modified) identical to ``pdf`` with an additional
         variable ``index_key`` of dtype ``int32`` and dimension ``time``. Its value is 1
         where the mask is 1 (e.g. tide detected, so the tide likelihood applies) and 0
-        elsewhere. Add an attribute containing the bound seed for each behavior.
+        elsewhere. If ``sigma_bounds_dict`` is given, it is stored as
+        ``attrs["sigma_bounds"]``.
 
     Raises
     ------

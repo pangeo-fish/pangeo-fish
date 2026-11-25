@@ -161,17 +161,37 @@ def test_bounds_from_sigma_bounds(emission, captured_search):
         np.testing.assert_allclose(upper, _upper(speed), rtol=1e-6)
 
 
+FIT_MODES = [{"single_behav": True}, {"single_behav": False}, {"multivariate": True}]
+
+
+@pytest.mark.parametrize("kwargs", FIT_MODES)
 @pytest.mark.parametrize(
-    "kwargs", [{"single_behav": True}, {"single_behav": False}, {"multivariate": True}]
+    "keys", [[0], [5, 6]], ids=["missing-behaviour", "wrong-keys"]
 )
-def test_sigma_bounds_must_cover_every_behaviour(emission, kwargs):
+def test_sigma_bounds_must_cover_every_behaviour(emission, kwargs, keys):
     ds = stamp_parameter_indices_from_mask(
         pdf=emission,
         mask=MASK,
-        sigma_bounds_dict={0: (0, ureg.Quantity(60, "km / day"))},
+        sigma_bounds_dict={k: (0, ureg.Quantity(60, "km / day")) for k in keys},
     )
-    with pytest.raises(ValueError, match="same length"):
+    with pytest.raises(ValueError, match="no entry for the predictor value"):
         _optimize(ds, **kwargs)
+
+
+@pytest.mark.parametrize("kwargs", FIT_MODES[:2])
+def test_extra_sigma_bounds_entry_is_allowed(emission, kwargs):
+    """A tag without the second behaviour (all-zero mask, as in the demo when no
+    tide is detected) still runs with bounds given for both behaviours."""
+    ds = stamp_parameter_indices_from_mask(
+        pdf=emission,
+        mask=np.zeros(N_STEPS, dtype=int),
+        sigma_bounds_dict={
+            0: (0, ureg.Quantity(60, "km / day")),
+            1: (0, ureg.Quantity(30, "km / day")),
+        },
+    )
+    params, _ = _optimize(ds, **kwargs)
+    assert np.all(np.isfinite(np.atleast_1d(params["sigma"])))
 
 
 def test_stamp_without_sigma_bounds_sets_no_attribute(emission):

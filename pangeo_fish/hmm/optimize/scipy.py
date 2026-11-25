@@ -173,6 +173,20 @@ class EagerBoundsSearch:
         self.optimizer_kwargs = optimizer_kwargs or {}
         self.sigma_bounds = sigma_bounds  # {group_value: (lower, upper)}
 
+    def _check_sigma_bounds_cover(self, predictor_values):
+        """Raise if ``sigma_bounds`` lacks a bound for a predictor value present
+        in the data. Extra entries (behaviours absent from the data) are allowed."""
+        if self.sigma_bounds is None:
+            return
+        missing = sorted(
+            set(np.asarray(predictor_values).tolist()) - set(self.sigma_bounds)
+        )
+        if missing:
+            raise ValueError(
+                f"sigma_bounds has no entry for the predictor value(s) {missing}"
+                f" (it has {sorted(self.sigma_bounds)})."
+            )
+
     def _get_bounds_for_group(self, group_value):
         """Get optimization bounds for a specific predictor group.
 
@@ -285,12 +299,7 @@ class EagerBoundsSearch:
         sigma_indices = group_sigma_indices(predictor_indices, single_behav=True)
 
         unique_values = sorted(set(predictor_indices.tolist()))
-        if self.sigma_bounds is not None and len(self.sigma_bounds) != len(
-            unique_values
-        ):
-            raise ValueError(
-                f"The dict for behavior speed:{len(self.sigma_bounds)} should have the same length that the number predictor_indices:{len(unique_values)}."
-            )
+        self._check_sigma_bounds_cover(unique_values)
         bounds = [self._get_bounds_for_group(v) for v in unique_values]
         if x0 is None:
             x0 = [np.mean(b) for b in bounds]
@@ -377,12 +386,7 @@ class EagerBoundsSearch:
         # Detect continuous segments
         predictor_indices = X[group_name].values
         segments = detect_segments(predictor_indices)
-        if self.sigma_bounds is not None and len(self.sigma_bounds) != len(
-            set(predictor_indices)
-        ):
-            raise ValueError(
-                f"The dict for behavior speed:{len(self.sigma_bounds)} should have the same length that the number predictor_indices:{len(set(predictor_indices))}."
-            )
+        self._check_sigma_bounds_cover(predictor_indices)
         if not single_behav:
             # One sigma per continuous segment, each optimized independently
 

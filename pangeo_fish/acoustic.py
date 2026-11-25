@@ -80,18 +80,30 @@ def count_detections(detections, by):
     # flox compares the raw integer values of the times with the bin edges, so
     # times in another unit (pandas >= 3 reads CSV times as datetime64[us],
     # model times are usually datetime64[ns]) would silently fall in no bin.
+    # Bring both to the finer of the two units, so that nothing is truncated.
     bins_index = by.to_index() if isinstance(by, xr.DataArray) else by
-    if isinstance(bins_index, pd.IntervalIndex) and np.issubdtype(
-        bins_index.dtype.subtype, np.datetime64
+    time_dtype = detections["time"].dtype
+    if (
+        isinstance(bins_index, pd.IntervalIndex)
+        and np.issubdtype(bins_index.dtype.subtype, np.datetime64)
+        and np.issubdtype(time_dtype, np.datetime64)
+        and time_dtype != bins_index.dtype.subtype
     ):
-        bins_dtype = bins_index.dtype.subtype
-        if (
-            np.issubdtype(detections["time"].dtype, np.datetime64)
-            and detections["time"].dtype != bins_dtype
-        ):
+        common = np.promote_types(time_dtype, bins_index.dtype.subtype)
+        if time_dtype != common:
             detections = detections.assign_coords(
-                time=detections["time"].astype(bins_dtype)
+                time=detections["time"].astype(common)
             )
+        if bins_index.dtype.subtype != common:
+            bins_index = pd.IntervalIndex.from_arrays(
+                bins_index.left.astype(common),
+                bins_index.right.astype(common),
+                closed=bins_index.closed,
+            )
+            if isinstance(by, xr.DataArray):
+                by = by.copy(data=bins_index)
+            else:
+                by = bins_index
 
     count_on = (
         detections[["deployment_id"]]
