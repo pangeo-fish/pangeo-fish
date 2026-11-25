@@ -87,7 +87,7 @@ MASK = np.array([0, 0, 1, 1])
     ],
 )
 def test_multi_sigma_without_sigma_bounds(emission, kwargs):
-    """Without ``sigma_bounds`` every behaviour uses the ``maximum_speed`` bound."""
+    """Multi-sigma runs without ``sigma_bounds`` (it used to raise UnboundLocalError)."""
     ds = emission.assign(predictor_index=("time", MASK.astype(np.int32)))
     assert "sigma_bounds" not in ds.attrs
 
@@ -101,43 +101,84 @@ def test_multi_sigma_without_sigma_bounds(emission, kwargs):
     assert np.all((sigmas >= 1e-4 * (1 - 1e-6)) & (sigmas <= upper * (1 + 1e-6)))
 
 
-@pytest.mark.parametrize("as_strings", [False, True])
-def test_sigma_bounds_keys_after_json_round_trip(emission, monkeypatch, as_strings):
-    """``sigma_bounds`` keys read back from JSON (strings) still give the
-    per-behaviour bounds to the optimiser, keyed by the integer predictor value."""
+class _Stop(Exception):
+    pass
+
+
+@pytest.fixture
+def captured_search(monkeypatch):
+    """Replace the optimiser: record the bounds it is given, then stop."""
     from pangeo_fish import helpers
 
     captured = {}
 
-    class Stop(Exception):
-        pass
-
-    def fake_search(estimator, param_bounds, optimizer_kwargs=None, sigma_bounds=None):
+    def fake_search(
+        estimator, param_bounds, optimizer_kwargs=None, sigma_bounds=None
+    ):
+        captured["param_bounds"] = tuple(float(v) for v in param_bounds)
         captured["sigma_bounds"] = sigma_bounds
-        raise Stop
+        raise _Stop
 
     monkeypatch.setattr(helpers, "EagerBoundsSearch", fake_search)
+    return captured
 
+
+# speed over 1 day, times the adjustment factor 5, on the WGS84 semi-major axis
+def _upper(speed_km_per_day):
+    return 5 * speed_km_per_day / 6378.137
+
+
+def test_bounds_without_sigma_bounds(emission, captured_search):
+    """Without ``sigma_bounds`` the optimiser gets the ``maximum_speed`` bound
+    and no per-behaviour bounds."""
+    ds = emission.assign(predictor_index=("time", MASK.astype(np.int32)))
+
+    with pytest.raises(_Stop):
+        _optimize(ds, single_behav=True)
+
+    assert captured_search["sigma_bounds"] is None
+    lower, upper = captured_search["param_bounds"]
+    assert lower == 1e-4
+    np.testing.assert_allclose(upper, _upper(60.0), rtol=1e-6)
+
+
+def test_bounds_from_sigma_bounds(emission, captured_search):
+    """``sigma_bounds`` gives one upper bound per behaviour, keyed by predictor value."""
     bounds = {
         0: (0, ureg.Quantity(60, "km / day")),
         1: (0, ureg.Quantity(2, "km / day")),
     }
-    if as_strings:
-        bounds = {str(k): v for k, v in bounds.items()}
     ds = stamp_parameter_indices_from_mask(
         pdf=emission, mask=MASK, sigma_bounds_dict=bounds
     )
 
-    with pytest.raises(Stop):
+    with pytest.raises(_Stop):
         _optimize(ds, single_behav=True)
 
-    sigma_bounds = captured["sigma_bounds"]
+    sigma_bounds = captured_search["sigma_bounds"]
     assert set(sigma_bounds) == {0, 1}
-    # speed over 1 day, times the adjustment factor 5, on the WGS84 semi-major axis
     for key, speed in [(0, 60.0), (1, 2.0)]:
         lower, upper = sigma_bounds[key]
         assert lower == 1e-4
-        np.testing.assert_allclose(upper, 5 * speed / 6378.137, rtol=1e-6)
+        np.testing.assert_allclose(upper, _upper(speed), rtol=1e-6)
+
+
+@pytest.mark.parametrize(
+    "kwargs", [{"single_behav": True}, {"single_behav": False}, {"multivariate": True}]
+)
+def test_sigma_bounds_must_cover_every_behaviour(emission, kwargs):
+    ds = stamp_parameter_indices_from_mask(
+        pdf=emission,
+        mask=MASK,
+        sigma_bounds_dict={0: (0, ureg.Quantity(60, "km / day"))},
+    )
+    with pytest.raises(ValueError, match="same length"):
+        _optimize(ds, **kwargs)
+
+
+def test_stamp_without_sigma_bounds_sets_no_attribute(emission):
+    out = stamp_parameter_indices_from_mask(pdf=emission, mask=MASK)
+    assert "sigma_bounds" not in out.attrs
 
 
 def test_stamp_parameter_indices_from_mask_does_not_modify_input(emission):

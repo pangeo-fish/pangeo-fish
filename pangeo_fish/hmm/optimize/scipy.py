@@ -285,6 +285,12 @@ class EagerBoundsSearch:
         sigma_indices = group_sigma_indices(predictor_indices, single_behav=True)
 
         unique_values = sorted(set(predictor_indices.tolist()))
+        if self.sigma_bounds is not None and len(self.sigma_bounds) != len(
+            unique_values
+        ):
+            raise ValueError(
+                f"The dict for behavior speed:{len(self.sigma_bounds)} should have the same length that the number predictor_indices:{len(unique_values)}."
+            )
         bounds = [self._get_bounds_for_group(v) for v in unique_values]
         if x0 is None:
             x0 = [np.mean(b) for b in bounds]

@@ -86,6 +86,7 @@ In a time bin without any detection, `nondetections` decides:
 A receiver is active in a bin when the whole bin lies between its `deploy_time` and `recover_time`.
 A bin where the receiver was deployed or recovered only part of the time does not count, so its buffer is not removed there.
 A receiver that never covers a whole bin is left out of the mask (`create_masked_fill_map`), so its buffer is never removed.
+This includes a receiver whose `recover_time` is missing (`NaT`), for example one still in the water at the end of the study.
 
 ## 3. Bathymetry likelihood
 
@@ -186,6 +187,7 @@ Multi-sigma mode starts when the dataset has a `predictor_index` variable, one i
 `stamp_parameter_indices_from_mask` builds it from a 0/1 mask, matched by position.
 In multi-sigma mode, `ds.attrs["sigma_bounds"]` can give one speed range per behaviour, as a dictionary `{predictor value: (minimum speed, maximum speed)}`.
 `stamp_parameter_indices_from_mask(..., sigma_bounds_dict=...)` sets it.
+It must have one entry per predictor value, or `optimize_pdf` raises a `ValueError`.
 Only the maximum speed is used.
 Without `sigma_bounds`, every behaviour uses the upper bound derived from `maximum_speed`.
 Sigma is searched in radians, from `1e-4` to `maximum_speed * time step * adjustment_factor / earth_radius`.

@@ -2334,11 +2334,11 @@ def optimize_pdf(
         scipy.optimize.minimize on the whole sequence (one sigma per predictor
         value), and ignore single_behav. If False, use the per-segment or
         per-value sequential optimization selected by single_behav.
-
-    In multi-sigma mode, ``ds.attrs["sigma_bounds"]`` (set by
-    :py:func:`stamp_parameter_indices_from_mask`) gives a maximum speed per
-    predictor value. Without it, every behaviour is searched between ``1e-4``
-    and the bound derived from ``maximum_speed``.
+        In multi-sigma mode, ``ds.attrs["sigma_bounds"]`` (set by
+        :py:func:`stamp_parameter_indices_from_mask`) gives a maximum speed per
+        predictor value; it must have one entry per predictor value. Without it,
+        every behaviour is searched between ``1e-4`` and the bound derived from
+        ``maximum_speed``.
      save_parameters : bool, default: False
          Whether to save the results under ``{target_root}/parameters.json``
      target_root : str, default: "."
@@ -2392,9 +2392,6 @@ def optimize_pdf(
             sigma_bounds_dict = {}
             for i in speed_bounds_dict.keys():
                 maximum_speed_i = speed_bounds_dict[i][1]
-                # keys become strings when the attribute goes through JSON
-                # (e.g. a Zarr round trip); predictor values are integers
-                i = int(i)
                 max_sigma_i = _get_max_sigma(
                     ds, earth_radius, adjustment_factor, maximum_speed_i, as_radians
                 )
@@ -3537,7 +3534,7 @@ def stamp_parameter_indices_from_mask(
         Speed bounds per behaviour,
         ``{predictor value: (minimum speed, maximum speed)}``, for example
         ``{0: (0, max_speed_0), 1: (0, max_speed_1)}`` with ``pint`` speeds.
-        Stored as ``attrs["sigma_bounds"]``. :py:func:`optimize_pdf` turns each maximum
+        Stored as ``attrs["sigma_bounds"]`` (not set if omitted). :py:func:`optimize_pdf` turns each maximum
         speed into the upper bound of that behaviour's sigma; the minimum speed is not
         used (the lower bound is always ``1e-4``). If omitted, every behaviour uses the
         bound derived from ``maximum_speed``.
@@ -3568,9 +3565,10 @@ def stamp_parameter_indices_from_mask(
             f"The mask (size {mask_arr.shape[0]}) does not match "
             f"the 'time' dimension of pdf (size {pdf.sizes['time']})."
         )
-    return pdf.assign(**{index_key: ("time", mask_arr)}).assign_attrs(
-        sigma_bounds=sigma_bounds_dict
-    )
+    stamped = pdf.assign(**{index_key: ("time", mask_arr)})
+    if sigma_bounds_dict is not None:
+        stamped = stamped.assign_attrs(sigma_bounds=sigma_bounds_dict)
+    return stamped
 
 
 def create_parameters(
