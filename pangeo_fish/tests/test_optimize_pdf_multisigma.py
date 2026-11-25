@@ -112,9 +112,7 @@ def captured_search(monkeypatch):
 
     captured = {}
 
-    def fake_search(
-        estimator, param_bounds, optimizer_kwargs=None, sigma_bounds=None
-    ):
+    def fake_search(estimator, param_bounds, optimizer_kwargs=None, sigma_bounds=None):
         captured["param_bounds"] = tuple(float(v) for v in param_bounds)
         captured["sigma_bounds"] = sigma_bounds
         raise _Stop
