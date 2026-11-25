@@ -65,7 +65,7 @@ If the tag has no `acoustic` or no `stations`, `emission_probability` returns an
 
 1. Detections are counted per receiver (`deployment_id`) in each time bin of the emission grid (`count_detections`).
    A `deployment_id` that is missing from `stations` raises a `ValueError`.
-   The detection times are first converted to the time unit of the bins (for example `datetime64[us]` from pandas 3 to `datetime64[ns]`).
+   The detection times and the bins are first converted to `datetime64[ns]` (pandas 3 reads the CSV times as `datetime64[us]`).
 2. The centre of a receiver is `deploy_longitude`, `deploy_latitude`.
    The recover position is not used.
 3. The buffer of a receiver is the set of cells covered by a disc of radius `receiver_buffer` around that centre.
