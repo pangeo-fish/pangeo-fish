@@ -53,6 +53,20 @@ def dynamic_threshold(phase, base=60.0, amp=20.0):
     return base + amp * (phase / 100.0)
 
 
+def _event_window(df, t_event, window_h):
+    """Rows of ``df`` within ``window_h`` hours of ``t_event`` (both ends included)."""
+    t = _tz(t_event)
+    times = df["time"]
+    # Match the time zone of df["time"]: keep UTC if aware, drop it if naive
+    t_cmp = t if getattr(times.dtype, "tz", None) is not None else t.tz_convert(None)
+    half = pd.Timedelta(hours=window_h)
+    if times.is_monotonic_increasing:
+        start = times.searchsorted(t_cmp - half, side="left")
+        stop = times.searchsorted(t_cmp + half, side="right")
+        return df.iloc[start:stop]
+    return df[(times >= t_cmp - half) & (times <= t_cmp + half)]
+
+
 def twilight_quality(
     df,
     t_event,
@@ -62,69 +76,76 @@ def twilight_quality(
     marge_threshold=8.0,
     min_amplitude=40,
     min_samples=10,
+    direction=None,
 ):
-    """Evaluate the quality of a single twilight event (RISE or SET).
+    """Evaluate the quality of a single twilight event (rising or setting).
 
-    This is the calibrated version, tuned on ``nights_profile.csv``.
-    Four filters are applied in sequence:
+    Four filters are applied:
 
-    1. **Slope / direction**: morning events must have positive slope
-       > ``slope_threshold``; evening events must have negative slope
-       < ``-slope_threshold``.
+    1. **Direction**: the light must go up through a rising and down through
+       a setting: the mean of the last 10 records of the window minus the
+       mean of the first 10 must be above ``slope_threshold`` for a rising
+       and below ``-slope_threshold`` for a setting. ``slope_threshold=None``
+       turns this filter off.
     2. **Lunar margin**: ``light.max() - dyn_thresh.mean() > marge_threshold``.
     3. **Depth**: ``pressure.max() < max_depth``.
     4. **Amplitude**: ``light.max() - light.min() > min_amplitude``.
 
     Parameters
     ----------
-    df : pd.DataFrame
-        Tag data with columns ``time`` (UTC Timestamps), ``light`` (counts),
-        ``pressure`` (dbar), and ``dyn_thresh`` (dynamic light threshold).
+    df : pandas.DataFrame
+        Tag data with columns ``time`` (UTC), ``light``, ``pressure`` (dbar)
+        and ``dyn_thresh`` (light threshold per row).
     t_event : datetime-like
-        UTC timestamp of the twilight event (RISE or SET).
+        UTC time of the event.
     window_h : float, default 1.0
-        Half-width of the inspection window around ``t_event`` (hours).
+        Half-width of the window around ``t_event``, hours.
     max_depth : float, default 70
-        Maximum allowed pressure (dbar) during the event window.
-    slope_threshold : float, default 25
-        Minimum absolute slope (counts per window) for direction filter.
+        Largest allowed pressure in the window, dbar.
+    slope_threshold : float or None, default 25
+        Smallest light change across the window for the direction filter.
+        ``None`` turns the filter off.
     marge_threshold : float, default 8.0
-        Minimum margin above the dynamic threshold.
+        Smallest margin of the peak light above the threshold.
     min_amplitude : float, default 40
-        Minimum light range (max − min, counts) inside the window.
+        Smallest light range (max - min) in the window.
     min_samples : int, default 10
-        Minimum number of records required inside the window.
+        Smallest number of records in the window.
+    direction : {"rise", "set"}, optional
+        Kind of event. :func:`compute_quality_flags` always gives it. Without
+        it the event is taken as a rising when its UTC hour is before 12,
+        which is only right near the Greenwich meridian.
 
     Returns
     -------
     valid : bool
-        True if the event passes all four filters.
+        True if the event passes all filters.
     dl : float
-        Light amplitude inside the window (counts).
+        Light range in the window.
     p_max : float
-        Maximum pressure inside the window (dbar).
+        Largest pressure in the window, dbar.
     """
     t = _tz(t_event)
-    # Match timezone of df["time"]: keep UTC if tz-aware, strip if tz-naive
-    df_tz = getattr(df["time"].dtype, "tz", None)
-    t_cmp = t if df_tz is not None else t.tz_convert(None)
-    mask = (df["time"] >= t_cmp - pd.Timedelta(hours=window_h)) & (
-        df["time"] <= t_cmp + pd.Timedelta(hours=window_h)
-    )
-    sub = df[mask]
+    sub = _event_window(df, t, window_h)
 
     if len(sub) < min_samples:
         return False, 0.0, 9999.0
 
     # 1. Direction filter (slope)
-    v_start = sub["light"].head(10).mean()
-    v_end = sub["light"].tail(10).mean()
-    slope = v_end - v_start
-    is_morning = t.hour < 12
-    if is_morning:
-        direction_ok = slope > slope_threshold
+    if slope_threshold is None:
+        direction_ok = True
     else:
-        direction_ok = slope < -slope_threshold
+        if direction is None:
+            direction = "rise" if t.hour < 12 else "set"
+        if direction not in ("rise", "set"):
+            raise ValueError(f"direction must be 'rise' or 'set', got {direction!r}")
+        v_start = sub["light"].head(10).mean()
+        v_end = sub["light"].tail(10).mean()
+        slope = v_end - v_start
+        if direction == "rise":
+            direction_ok = slope > slope_threshold
+        else:
+            direction_ok = slope < -slope_threshold
 
     # 2. Lunar margin filter
     current_thresh = sub["dyn_thresh"].mean()
@@ -139,41 +160,66 @@ def twilight_quality(
     dl = sub["light"].max() - sub["light"].min()
     amplitude_ok = dl > min_amplitude
 
-    valid = direction_ok and marge_ok and depth_ok and amplitude_ok
+    valid = bool(direction_ok and marge_ok and depth_ok and amplitude_ok)
     return valid, float(dl), float(p_max)
 
 
-def compute_quality_flags(df, pairs, max_depth=80):
+def compute_quality_flags(
+    df,
+    pairs,
+    max_depth=80,
+    *,
+    window_h=1.0,
+    slope_threshold=25,
+    marge_threshold=8.0,
+    min_amplitude=40,
+    min_samples=10,
+):
     """Compute quality flags for each twilight pair.
 
     For each ``(t_rise, t_set)`` pair, calls :func:`twilight_quality` on
-    both events and assigns:
+    both events (with ``direction="rise"`` and ``direction="set"``) and
+    assigns:
 
-    * ``'good'`` — both events valid
-    * ``'partial'`` — exactly one event valid
-    * ``'bad'`` — neither event valid
+    * ``'good'`` -- both events valid
+    * ``'partial'`` -- exactly one event valid
+    * ``'bad'`` -- neither event valid
 
     Parameters
     ----------
-    df : pd.DataFrame
+    df : pandas.DataFrame
         Tag data with columns ``time``, ``light``, ``pressure``,
         ``dyn_thresh``.
-    pairs : list of (pd.Timestamp, pd.Timestamp)
-        Paired RISE / SET events, as returned by
+    pairs : list of (pandas.Timestamp, pandas.Timestamp)
+        ``(t_rise, t_set)`` pairs from
         :func:`~pangeo_fish.light.solar.detect_twilight_events`.
     max_depth : float, default 80
-        Maximum depth (dbar) passed to :func:`twilight_quality`.
+        Largest allowed pressure in the window, dbar.
+    window_h, slope_threshold, marge_threshold, min_amplitude, min_samples
+        Passed to :func:`twilight_quality`. ``slope_threshold=None`` turns the
+        direction filter off.
 
     Returns
     -------
-    pd.DataFrame
+    pandas.DataFrame
         Columns: ``night``, ``date``, ``flag``, ``valid_rise``,
         ``valid_set``, ``dl_rise``, ``dl_set``, ``dp_rise``, ``dp_set``.
+        ``date`` is the UTC date of the rising.
     """
+    if not df["time"].is_monotonic_increasing:
+        df = df.sort_values("time")
+    options = dict(
+        window_h=window_h,
+        max_depth=max_depth,
+        slope_threshold=slope_threshold,
+        marge_threshold=marge_threshold,
+        min_amplitude=min_amplitude,
+        min_samples=min_samples,
+    )
     records = []
     for i, (t_rise, t_set) in enumerate(pairs):
-        v_r, dl_r, dp_r = twilight_quality(df, t_rise, max_depth=max_depth)
-        v_s, dl_s, dp_s = twilight_quality(df, t_set, max_depth=max_depth)
+        v_r, dl_r, dp_r = twilight_quality(df, t_rise, direction="rise", **options)
+        v_s, dl_s, dp_s = twilight_quality(df, t_set, direction="set", **options)
 
         if v_r and v_s:
             flag = "good"
@@ -196,6 +242,8 @@ def compute_quality_flags(df, pairs, max_depth=80):
             }
         )
 
-    qdf = pd.DataFrame(records)
+    columns = ["night", "date", "flag", "valid_rise", "valid_set"]
+    columns += ["dl_rise", "dl_set", "dp_rise", "dp_set"]
+    qdf = pd.DataFrame(records, columns=columns)
     qdf["date"] = pd.to_datetime(qdf["date"])
     return qdf

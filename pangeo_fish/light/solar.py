@@ -1,124 +1,74 @@
-"""Solar threshold geolocation method (Part A of the light pipeline).
+"""Solar threshold geolocation: twilight detection, self-calibration, likelihood.
 
-Detects twilight events (RISE / SET) by threshold-crossing, self-calibrates
-the solar elevation threshold from the first nights of deployment, evaluates
-event quality, and computes per-night solar likelihood maps on a regular
-lat/lon grid.
+The pipeline is:
+
+1. :func:`detect_twilight_events` finds the times at which the light record
+   crosses a light threshold, keeps the crossing nearest to the predicted
+   rising and setting at the release position, and pairs them by local solar
+   day.
+2. :func:`~pangeo_fish.light.quality.compute_quality_flags` flags each event.
+3. :func:`self_calibrate_solar_threshold` finds the solar elevation at which
+   the tag sees the threshold, from the first nights at the release position.
+4. :func:`solar_likelihood_cells` evaluates, on every HEALPix cell, how well
+   the predicted crossing times at that cell match the observed ones.
+   :func:`align_light_to_time` puts the result on the time steps of the
+   emission, ready to be multiplied with the other terms.
+
+All solar geometry comes from :mod:`pangeo_fish.light.sun` (vectorised, no
+refraction, centre of the Sun). :func:`compute_solar_likelihood` keeps the
+older regular latitude/longitude grid output.
 """
 
 from typing import NamedTuple
 
-import ephem
 import numpy as np
 import pandas as pd
 import xarray as xr
 from scipy.ndimage import gaussian_filter
 
+from pangeo_fish.light import sun
 from pangeo_fish.light.quality import _tz
 
 # ---------------------------------------------------------------------------
-# Private helpers
+# Detection
 # ---------------------------------------------------------------------------
 
 
-def _get_astro_prediction(date, lon, lat, horizon_deg=-10.0):
-    """Return predicted astronomical RISE and SET for *date* at *(lon, lat)*.
+def _threshold_per_row(df, thresh_light, use_fixed_threshold):
+    if "dyn_thresh" in df.columns:
+        thresh = df["dyn_thresh"].to_numpy(dtype="float64")
+    elif "moon_phase" in df.columns:
+        from pangeo_fish.light.quality import dynamic_threshold
 
-    Parameters
-    ----------
-    date : pd.Timestamp or datetime.date
-        Calendar date.
-    lon : float
-        Observer longitude (degrees East).
-    lat : float
-        Observer latitude (degrees North).
-    horizon_deg : float, default -10.0
-        Solar elevation defining "rise" and "set" (degrees).
+        thresh = np.asarray(
+            dynamic_threshold(df["moon_phase"].to_numpy(dtype="float64")),
+            dtype="float64",
+        )
+    else:
+        thresh = np.full(len(df), float(thresh_light))
+    if use_fixed_threshold:
+        thresh = np.full(len(thresh), float(np.nanmax(thresh)))
+    return thresh
 
-    Returns
-    -------
-    rise : pd.Timestamp or None
-    sett : pd.Timestamp or None
-        UTC timestamps of the predicted rise and set.  Both are ``None``
-        if :mod:`ephem` cannot find a crossing (e.g., polar day/night).
+
+def _nearest_within(candidates, targets, window):
+    """For each target, the nearest candidate within ``window`` (else NaT).
+
+    ``candidates`` must be sorted.
     """
-    obs = ephem.Observer()
-    obs.lon = str(lon)
-    obs.lat = str(lat)
-    obs.pressure = 0
-    obs.horizon = str(horizon_deg)
-    sun = ephem.Sun()
-    try:
-        obs.date = f"{date.year}/{date.month:02d}/{date.day:02d} 00:00:00"
-        rise = pd.Timestamp(
-            ephem.Date(obs.next_rising(sun, use_center=True)).datetime()
-        ).tz_localize("UTC")
-        obs.date = f"{date.year}/{date.month:02d}/{date.day:02d} 10:00:00"
-        sett = pd.Timestamp(
-            ephem.Date(obs.next_setting(sun, use_center=True)).datetime()
-        ).tz_localize("UTC")
-        return rise, sett
-    except Exception:
-        return None, None
-
-
-def _get_crossing_fast(t_approx, lon, lat, horizon_deg, direction="up", window_h=6.0):
-    """Return the predicted solar crossing near *t_approx* for a grid pixel.
-
-    Parameters
-    ----------
-    t_approx : pd.Timestamp
-        Approximate observed crossing time (UTC).
-    lon : float
-        Observer longitude (degrees East).
-    lat : float
-        Observer latitude (degrees North).
-    horizon_deg : float
-        Solar elevation defining the crossing (degrees).
-    direction : {'up', 'down'}, default 'up'
-        ``'up'`` for RISE, ``'down'`` for SET.
-    window_h : float, default 6.0
-        Search half-window (hours).
-
-    Returns
-    -------
-    pd.Timestamp or None
-        Predicted crossing time (UTC), or ``None`` if not found within
-        ``window_h`` of ``t_approx``.
-
-    Notes
-    -----
-    **Why ``window_h=6.0`` (was 3.0):** at high-latitude grid pixels in
-    summer, the predicted crossing can shift by several hours relative to
-    the observed time at mid-latitudes.  The old 3-hour window caused
-    silent ``None`` returns → single-event fallback → ghost likelihood
-    peaks.  6 hours is wide enough to capture any real crossing while
-    remaining tighter than a full 12-hour day/night cycle.
-    """
-    obs = ephem.Observer()
-    obs.lon = str(lon)
-    obs.lat = str(lat)
-    obs.pressure = 0
-    obs.horizon = str(horizon_deg)
-    sun = ephem.Sun()
-    t_start = _tz(t_approx) - pd.Timedelta(hours=window_h)
-    obs.date = t_start.strftime("%Y/%m/%d %H:%M:%S")
-    try:
-        if direction == "up":
-            t_cross = obs.next_rising(sun, use_center=True)
-        else:
-            t_cross = obs.next_setting(sun, use_center=True)
-        t_result = pd.Timestamp(ephem.Date(t_cross).datetime()).tz_localize("UTC")
-        if abs((t_result - _tz(t_approx)).total_seconds()) < window_h * 3600:
-            return t_result
-    except Exception:
-        pass
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
+    out = np.full(targets.shape, np.datetime64("NaT"), dtype="datetime64[ns]")
+    if candidates.size == 0:
+        return out
+    valid = ~np.isnat(targets)
+    pos = np.searchsorted(candidates, targets[valid])
+    left = candidates[np.clip(pos - 1, 0, candidates.size - 1)]
+    right = candidates[np.clip(pos, 0, candidates.size - 1)]
+    d_left = np.abs(targets[valid] - left)
+    d_right = np.abs(targets[valid] - right)
+    best = np.where(d_left <= d_right, left, right)
+    best_d = np.minimum(d_left, d_right)
+    out[valid] = np.where(best_d < window, best, np.datetime64("NaT"))
+    return out
 
 
 def detect_twilight_events(
@@ -128,149 +78,103 @@ def detect_twilight_events(
     thresh_light=60,
     window_h=2.5,
     use_fixed_threshold=False,
+    detection_elevation=-10.0,
 ):
-    """Detect and pair RISE / SET twilight events in the tag light record.
+    """Detect and pair the rising and setting crossings of the light record.
 
     Parameters
     ----------
-    df : pd.DataFrame
-        Tag data resampled to 1-minute resolution with columns:
+    df : pandas.DataFrame
+        Light record with columns:
 
-        * ``time`` — UTC timestamps
-        * ``light`` — light counts
-        * ``dyn_thresh`` (optional) — pre-computed dynamic threshold from
-          :func:`~pangeo_fish.light.quality.dynamic_threshold`; if absent,
-          computed on-the-fly from ``moon_phase`` if that column exists,
-          otherwise falls back to the static ``thresh_light``.
-        * ``moon_phase`` (optional) — moon illuminated fraction (%).
-    release_lon : float
-        Release-site longitude (degrees East), used to compute
-        astronomical predictions.
-    release_lat : float
-        Release-site latitude (degrees North).
+        * ``time`` -- UTC timestamps (naive or time-zone aware), sorted
+        * ``light`` -- light values
+        * ``dyn_thresh`` (optional) -- light threshold per row, from
+          :func:`~pangeo_fish.light.quality.dynamic_threshold`. If absent it
+          is computed from ``moon_phase`` when that column exists, otherwise
+          ``thresh_light`` is used.
+        * ``moon_phase`` (optional) -- illuminated fraction of the Moon, %.
+    release_lon, release_lat : float
+        Release position, degrees East and North. The predicted crossings at
+        this position select which threshold crossings are kept.
     thresh_light : float, default 60
-        Static light threshold (counts), used only if ``df`` has neither
-        ``dyn_thresh`` nor ``moon_phase`` columns.
+        Constant light threshold, used only without ``dyn_thresh`` and
+        ``moon_phase``.
     window_h : float, default 2.5
-        Maximum allowed offset (hours) between a raw crossing and the
-        astronomical prediction at the release position.
+        Largest distance, in hours, between a threshold crossing and the
+        predicted crossing at the release position.
     use_fixed_threshold : bool, default False
-        If ``True``, replace the per-row dynamic threshold with a single
-        constant equal to its maximum observed value (i.e. the threshold
-        value at full moon).  This is more conservative — it avoids
-        misclassifying moonlit nights as daytime — at the cost of slightly
-        fewer detections on faint-moon nights.
+        If True, use one threshold for all rows, the largest value of the
+        per-row threshold (its full-moon value).
+    detection_elevation : float, default -10.0
+        Solar elevation, degrees, of the predicted crossings used to select the
+        threshold crossings. It only needs to be close to the true one:
+        ``window_h`` absorbs the difference.
 
     Returns
     -------
-    list of (pd.Timestamp, pd.Timestamp)
-        Paired (t_rise, t_set) tuples in UTC for each detected
-        astronomical night.
+    list of (pandas.Timestamp, pandas.Timestamp)
+        One ``(t_rise, t_set)`` pair (UTC) per local solar day on which both
+        crossings were found. The rising is the morning crossing of the same
+        local day as the setting, so east of about 90 degrees East it can fall
+        on the previous UTC date.
     """
-    light_arr = df["light"].values
-    times_arr = df["time"].values
+    times = sun._as_utc_ns(df["time"])
+    light = df["light"].to_numpy(dtype="float64")
+    thresh = _threshold_per_row(df, thresh_light, use_fixed_threshold)
 
-    # Resolve per-row threshold
-    if "dyn_thresh" in df.columns:
-        thresh_arr = df["dyn_thresh"].values
-    elif "moon_phase" in df.columns:
-        from pangeo_fish.light.quality import dynamic_threshold
+    prev, cur, th = light[:-1], light[1:], thresh[1:]
+    with np.errstate(invalid="ignore"):
+        going_up = (prev <= th) & (th < cur)
+        going_down = (prev > th) & (th >= cur)
+    rise_raw = np.sort(times[1:][going_up])
+    set_raw = np.sort(times[1:][going_down])
 
-        thresh_arr = dynamic_threshold(df["moon_phase"].values)
-    else:
-        thresh_arr = np.full(len(df), thresh_light, dtype=float)
-
-    # Option: collapse to the maximum value (full-moon level) for all rows.
-    # More conservative — prevents misclassifying moonlit nights as day —
-    # at the cost of slightly fewer detections on new-moon nights.
-    if use_fixed_threshold:
-        thresh_arr = np.full(len(thresh_arr), float(np.max(thresh_arr)))
-
-    # Raw threshold crossings
-    rise_raw, set_raw = [], []
-    for i in range(1, len(light_arr)):
-        if light_arr[i - 1] <= thresh_arr[i] < light_arr[i]:
-            rise_raw.append(pd.Timestamp(times_arr[i]))
-        elif light_arr[i - 1] > thresh_arr[i] >= light_arr[i]:
-            set_raw.append(pd.Timestamp(times_arr[i]))
-
-    # Keep only the crossing closest to the astronomical prediction
-    window = pd.Timedelta(hours=window_h)
-    all_dates = pd.date_range(
-        df["time"].min().date(), df["time"].max().date(), freq="D"
+    if times.size == 0:
+        return []
+    first = times.min().astype("datetime64[D]") - np.timedelta64(1, "D")
+    last = times.max().astype("datetime64[D]") + np.timedelta64(1, "D")
+    days = np.arange(first, last + np.timedelta64(1, "D"), np.timedelta64(1, "D"))
+    rise_pred, set_pred = sun.daily_crossings(
+        days, release_lon, release_lat, detection_elevation
     )
-    rise_events, set_events = [], []
 
-    for date in all_dates:
-        rise_pred, set_pred = _get_astro_prediction(date, release_lon, release_lat)
-        if rise_pred is None:
-            continue
-        cands_r = [
-            t
-            for t in rise_raw
-            if abs((_tz(t) - rise_pred).total_seconds()) < window.total_seconds()
-        ]
-        cands_s = [
-            t
-            for t in set_raw
-            if abs((_tz(t) - set_pred).total_seconds()) < window.total_seconds()
-        ]
-        if cands_r:
-            rise_events.append(
-                min(cands_r, key=lambda t: abs((_tz(t) - rise_pred).total_seconds()))
-            )
-        if cands_s:
-            set_events.append(
-                min(cands_s, key=lambda t: abs((_tz(t) - set_pred).total_seconds()))
-            )
+    window = np.timedelta64(int(round(window_h * 3600e9)), "ns")
+    rises = _nearest_within(rise_raw, rise_pred, window)
+    sets = _nearest_within(set_raw, set_pred, window)
 
-    # Pair each RISE with the nearest next SET (same astronomical night, < 24 h)
-    pairs = []
-    for t_rise in rise_events:
-        t_rise = _tz(t_rise)
-        next_sets = [
-            _tz(t)
-            for t in set_events
-            if _tz(t) > t_rise and (_tz(t) - t_rise).total_seconds() < 86400
-        ]
-        if next_sets:
-            # Prefer ~55 000 s ≈ 15 h gap (typical day length at mid-latitudes)
-            t_set = min(
-                next_sets,
-                key=lambda t: abs((t - t_rise).total_seconds() - 55000),
-            )
-            pairs.append((t_rise, t_set))
-
-    return pairs
+    keep = ~np.isnat(rises) & ~np.isnat(sets) & (sets > rises)
+    keep &= (sets - rises) < np.timedelta64(24, "h")
+    return [
+        (pd.Timestamp(r).tz_localize("UTC"), pd.Timestamp(s).tz_localize("UTC"))
+        for r, s in zip(rises[keep], sets[keep])
+    ]
 
 
 def pairs_from_lightloc(lightloc_df, max_depth_dbar=80):
     """Build twilight pairs and quality flags from a standardised LightLoc DataFrame.
 
-    Used when ``LIGHT_SOURCE = "lightloc"`` — i.e. when only WC satellite-
-    transmitted crossing times are available (non-recovered PSAT tags).
-    Replaces the :func:`detect_twilight_events` + :func:`compute_quality_flags`
-    pair used for raw-series tags.
+    Used when only the crossing times transmitted by a Wildlife Computers tag
+    are available (tags that were not recovered). Replaces
+    :func:`detect_twilight_events` and
+    :func:`~pangeo_fish.light.quality.compute_quality_flags`.
 
     Parameters
     ----------
-    lightloc_df : pd.DataFrame
-        Standardised LightLoc table as written by :func:`~pangeo_fish.light.ingest.ingest_lightloc`.
-        Required columns: ``time`` (UTC), ``type`` (``"rise"`` / ``"set"``),
+    lightloc_df : pandas.DataFrame
+        Table written by :func:`~pangeo_fish.light.ingest.ingest_lightloc`, with
+        columns ``time`` (UTC), ``type`` (``"rise"`` or ``"set"``) and
         ``max_depth``.
     max_depth_dbar : float, default 80
         Events with ``max_depth > max_depth_dbar`` are flagged invalid.
 
     Returns
     -------
-    pairs : list of (pd.Timestamp, pd.Timestamp)
-        Paired (t_rise, t_set) tuples, one per night, in the same format as
-        :func:`detect_twilight_events`.
-    qdf : pd.DataFrame
-        Quality DataFrame in the same format as
-        :func:`~pangeo_fish.light.quality.compute_quality_flags`:
-        columns ``night``, ``date``, ``flag``, ``valid_rise``, ``valid_set``,
-        ``dl_rise``, ``dl_set``, ``dp_rise``, ``dp_set``.
+    pairs : list of (pandas.Timestamp, pandas.Timestamp)
+        ``(t_rise, t_set)`` pairs, one per UTC date with both events.
+    qdf : pandas.DataFrame
+        Same columns as
+        :func:`~pangeo_fish.light.quality.compute_quality_flags`.
     """
     df = lightloc_df.copy()
     df["time"] = pd.to_datetime(df["time"], utc=True)
@@ -287,24 +191,17 @@ def pairs_from_lightloc(lightloc_df, max_depth_dbar=80):
     for date in all_dates:
         has_rise = date in rises.index
         has_set = date in sets.index
-
-        t_rise = _tz(rises.loc[date, "time"]) if has_rise else None
-        t_set = _tz(sets.loc[date, "time"]) if has_set else None
-        dp_rise = float(rises.loc[date, "max_depth"]) if has_rise else 9999.0
-        dp_set = float(sets.loc[date, "max_depth"]) if has_set else 9999.0
-
-        v_r = has_rise and dp_rise <= max_depth_dbar
-        v_s = has_set and dp_set <= max_depth_dbar
-
         if not (has_rise and has_set):
             continue
 
-        if v_r and v_s:
-            flag = "good"
-        elif v_r or v_s:
-            flag = "partial"
-        else:
-            flag = "bad"
+        t_rise = _tz(rises.loc[date, "time"])
+        t_set = _tz(sets.loc[date, "time"])
+        dp_rise = float(rises.loc[date, "max_depth"])
+        dp_set = float(sets.loc[date, "max_depth"])
+
+        v_r = dp_rise <= max_depth_dbar
+        v_s = dp_set <= max_depth_dbar
+        flag = "good" if (v_r and v_s) else ("partial" if (v_r or v_s) else "bad")
 
         pairs.append((t_rise, t_set))
         records.append(
@@ -322,8 +219,12 @@ def pairs_from_lightloc(lightloc_df, max_depth_dbar=80):
         )
         night_idx += 1
 
-    qdf = pd.DataFrame(records)
-    return pairs, qdf
+    return pairs, pd.DataFrame(records)
+
+
+# ---------------------------------------------------------------------------
+# Self-calibration
+# ---------------------------------------------------------------------------
 
 
 class CalibResult(NamedTuple):
@@ -332,23 +233,20 @@ class CalibResult(NamedTuple):
     Attributes
     ----------
     thresh_deg : float
-        Median solar elevation (degrees) at observed crossings — the
-        calibrated threshold to pass to :func:`compute_solar_likelihood`.
+        Median solar elevation, degrees, at the observed crossings of the
+        calibration nights: the elevation to pass to the likelihood.
     lon_self : float
-        Self-calibrated longitude (degrees East) derived from noon UTC.
-    elevations : np.ndarray
-        Per-event solar elevation at each RISE and SET used for
-        calibration (start period).
+        Longitude, degrees East, estimated from the timing of noon.
+    elevations : numpy.ndarray
+        Elevation at each rising, then each setting, of the calibration
+        nights.
     thresh_deg_end : float or None
-        Median solar elevation at the recapture location over the last
-        ``n_nights_end`` pairs.  ``None`` if no recapture position was
-        provided.
-    elevations_end : np.ndarray or None
-        Per-event elevations at recapture location (end period).
+        Same median over the last nights, at the recapture position.
+        ``None`` without a recapture position.
+    elevations_end : numpy.ndarray or None
+        Elevations of the end nights.
     delta_deg : float or None
-        ``thresh_deg_end − thresh_deg``.  Small |delta| (< 1–2°)
-        validates the calibration; large delta may indicate tag drift
-        or strong spatial variability.
+        ``thresh_deg_end - thresh_deg``.
     """
 
     thresh_deg: float
@@ -359,9 +257,24 @@ class CalibResult(NamedTuple):
     delta_deg: float | None = None
 
 
+def _pair_times(pairs):
+    rises = sun._as_utc_ns(pd.DatetimeIndex([_tz(r) for r, _ in pairs]))
+    sets = sun._as_utc_ns(pd.DatetimeIndex([_tz(s) for _, s in pairs]))
+    return rises, sets
+
+
+def _elevations_at(pairs, lon, lat):
+    if len(pairs) == 0:
+        return np.array([], dtype="float64")
+    rises, sets = _pair_times(pairs)
+    return np.concatenate(
+        [sun.solar_elevation(rises, lon, lat), sun.solar_elevation(sets, lon, lat)]
+    )
+
+
 def self_calibrate_solar_threshold(
     pairs,
-    df,
+    df=None,
     n_nights=20,
     release_lon=None,
     release_lat=None,
@@ -369,105 +282,70 @@ def self_calibrate_solar_threshold(
     recapture_lat=None,
     n_nights_end=None,
 ):
-    """Self-calibrate the solar elevation threshold from the first nights.
+    """Solar elevation at which the tag sees its light threshold.
 
-    Uses the first ``n_nights`` paired events to derive a longitude
-    estimate from local noon timing, then computes the actual solar
-    elevation at each RISE and SET event at that longitude.  The median
-    elevation is the calibrated threshold.
-
-    Optionally verifies the calibration against the last ``n_nights_end``
-    events evaluated at the known recapture position.  A small
-    ``|delta_deg|`` (< 1–2°) confirms that the calibration is consistent
-    across the deployment.
+    The solar elevation is computed at each crossing of the first
+    ``n_nights`` pairs, at the release position; the median is the
+    calibrated elevation. With a recapture position, the same is done on the
+    last ``n_nights_end`` pairs as a check; a small ``delta_deg`` (below
+    1--2 degrees) means the calibration holds over the deployment.
 
     Parameters
     ----------
-    pairs : list of (pd.Timestamp, pd.Timestamp)
-        Paired (t_rise, t_set) events, as returned by
-        :func:`detect_twilight_events`.
-    df : pd.DataFrame
-        Tag data (not used directly; kept for API symmetry).
+    pairs : list of (pandas.Timestamp, pandas.Timestamp)
+        ``(t_rise, t_set)`` pairs from :func:`detect_twilight_events`.
+    df : pandas.DataFrame, optional
+        Not used. Kept so that older calls still work.
     n_nights : int, default 20
-        Number of nights to use for calibration (from the start).
-    release_lon : float or None
-        Release-site longitude (degrees East).  If ``None``, the
-        self-calibrated longitude is used for computing elevations.
+        Number of pairs, from the start, used for the calibration.
+    release_lon : float, optional
+        Release longitude, degrees East. Without it the noon-timing longitude
+        ``lon_self`` is used.
     release_lat : float
-        Release-site latitude (degrees North).  Required.
-    recapture_lon : float or None, default None
-        Recapture longitude (degrees East).  If provided together with
-        ``recapture_lat``, enables end-period verification.
-    recapture_lat : float or None, default None
-        Recapture latitude (degrees North).
-    n_nights_end : int or None, default None
-        Number of nights before recapture to use for verification.
-        Defaults to ``n_nights`` if not provided.
+        Release latitude, degrees North.
+    recapture_lon, recapture_lat : float, optional
+        Recapture position, for the end-of-deployment check.
+    n_nights_end : int, optional
+        Number of pairs, from the end, for the check. Defaults to
+        ``n_nights``.
 
     Returns
     -------
     CalibResult
-        Named tuple with ``thresh_deg``, ``lon_self``, ``elevations``,
-        and (if recapture provided) ``thresh_deg_end``,
-        ``elevations_end``, ``delta_deg``.
 
     Notes
     -----
-    Self-calibrated longitude: ``(12 - noon_utc) * 15`` where
-    ``noon_utc`` is the UTC hour of the midpoint between t_rise and
-    t_set.
+    ``lon_self = (12 - noon_utc) * 15`` where ``noon_utc`` is the UTC hour of
+    the midpoint between rising and setting, averaged as a median over the
+    calibration nights.
     """
-    calib_pairs = pairs[:n_nights]
+    if release_lat is None:
+        raise ValueError("release_lat is required")
+    calib_pairs = list(pairs[:n_nights])
+    if not calib_pairs:
+        raise ValueError("no twilight pair to calibrate on")
 
-    # Step 1: estimate longitude from noon UTC
-    noon_lons = []
-    for t_rise, t_set in calib_pairs:
-        day_h = (_tz(t_set) - _tz(t_rise)).total_seconds() / 3600
-        noon_utc = _tz(t_rise).hour + _tz(t_rise).minute / 60 + day_h / 2
-        if noon_utc >= 24:
-            noon_utc -= 24
-        noon_lons.append((12 - noon_utc) * 15)
+    rises, sets = _pair_times(calib_pairs)
+    midpoints = rises + (sets - rises) // 2
+    noon_utc_hours = (midpoints - midpoints.astype("datetime64[D]")) / np.timedelta64(
+        1, "h"
+    )
+    lon_self = float(np.median((12.0 - noon_utc_hours) * 15.0))
 
-    lon_self = float(np.median(noon_lons))
-    lat_eval = release_lat
-
-    # Step 2: solar elevation at each crossing (start period)
-    # Use release_lon if provided — it is more reliable than lon_self for
-    # the first N nights when the fish is still near the release site.
-    # lon_self is derived from noon-UTC timing which is noisy; using it to
-    # compute elevations creates a circular dependency that can bias
-    # thresh_deg by several degrees relative to the true sensor threshold.
+    # The release longitude is more reliable than lon_self for the first
+    # nights, when the fish is still near the release site: lon_self comes
+    # from noisy noon timing and would make the threshold depend on itself.
     lon_eval = release_lon if release_lon is not None else lon_self
-
-    def _elevations_at(event_pairs, lon, lat):
-        elevs_r, elevs_s = [], []
-        for t_rise, t_set in event_pairs:
-            obs = ephem.Observer()
-            obs.lon = str(lon)
-            obs.lat = str(lat)
-            obs.pressure = 0
-            sun = ephem.Sun()
-            obs.date = _tz(t_rise).strftime("%Y/%m/%d %H:%M:%S")
-            sun.compute(obs)
-            elevs_r.append(np.degrees(float(sun.alt)))
-            obs.date = _tz(t_set).strftime("%Y/%m/%d %H:%M:%S")
-            sun.compute(obs)
-            elevs_s.append(np.degrees(float(sun.alt)))
-        return np.array(elevs_r + elevs_s)
-
-    elevations = _elevations_at(calib_pairs, lon_eval, lat_eval)
+    elevations = _elevations_at(calib_pairs, lon_eval, release_lat)
     thresh_deg = float(np.median(elevations))
 
-    # Step 3 (optional): end-period verification at recapture position
-    thresh_deg_end = None
-    elevations_end = None
-    delta_deg = None
-
+    thresh_deg_end = elevations_end = delta_deg = None
     if recapture_lon is not None and recapture_lat is not None:
         n_end = n_nights_end if n_nights_end is not None else n_nights
-        if len(pairs) > n_end:
-            end_pairs = pairs[-n_end:]
-            elevations_end = _elevations_at(end_pairs, recapture_lon, recapture_lat)
+        if n_end and len(pairs) > n_end:
+            elevations_end = _elevations_at(
+                list(pairs[-n_end:]), recapture_lon, recapture_lat
+            )
             thresh_deg_end = float(np.median(elevations_end))
             delta_deg = thresh_deg_end - thresh_deg
 
@@ -481,6 +359,299 @@ def self_calibrate_solar_threshold(
     )
 
 
+# ---------------------------------------------------------------------------
+# Likelihood
+# ---------------------------------------------------------------------------
+
+
+def _night_likelihood(
+    t_rise,
+    t_set,
+    valid_rise,
+    valid_set,
+    flag,
+    lon,
+    lat,
+    thresh_deg,
+    sigma,
+    window_h,
+    lh_floor,
+):
+    """Timing likelihood of one night at positions ``lon``, ``lat`` (1-D arrays).
+
+    - ``flag == "bad"``: 1 everywhere (no information).
+    - Each valid event contributes ``exp(-dt**2 / (2 sigma**2))``, ``dt`` in
+      minutes between the observed and the predicted crossing.
+    - A position where no valid event has a predicted crossing within
+      ``window_h`` gets ``lh_floor``. On a ``"good"`` night both predictions
+      are required: a position with only one of them gets ``lh_floor`` (a
+      single event would otherwise give ghost maxima near the poles).
+    - Non-finite values become ``lh_floor``. The result is divided by its
+      maximum.
+    """
+    shape = np.shape(lon)
+    if flag == "bad":
+        return np.ones(shape)
+
+    log_lh = np.zeros(shape)
+    found = {}
+    for valid, t_obs, direction in (
+        (valid_rise, t_rise, "rise"),
+        (valid_set, t_set, "set"),
+    ):
+        if not valid:
+            continue
+        t_obs = sun._as_utc_ns(_tz(t_obs))
+        predicted = sun.crossing_time(
+            t_obs, lon, lat, thresh_deg, direction, window_h=window_h
+        )
+        ok = ~np.isnat(predicted)
+        dt = (t_obs - predicted).astype("timedelta64[ns]").astype("int64") / 60e9
+        log_lh = log_lh + np.where(ok, -(dt**2) / (2.0 * sigma**2), 0.0)
+        found[direction] = ok
+
+    if not found:
+        lh = np.full(shape, lh_floor)
+    else:
+        lh = np.exp(log_lh)
+        any_found = np.logical_or.reduce(list(found.values()))
+        lh = np.where(any_found, lh, lh_floor)
+        if flag == "good":
+            both = found.get("rise", False) & found.get("set", False)
+            lh = np.where(both, lh, lh_floor)
+
+    lh = np.where(np.isfinite(lh), lh, lh_floor)
+    mx = lh.max() if lh.size else 0.0
+    if mx > 0:
+        lh = lh / mx
+    return lh
+
+
+def _night_rows(pairs, qdf):
+    if len(pairs) != len(qdf):
+        raise ValueError(
+            f"pairs ({len(pairs)}) and qdf ({len(qdf)}) must have the same length"
+        )
+    flags = qdf["flag"].to_numpy()
+    valid_rise = qdf["valid_rise"].to_numpy(dtype=bool)
+    valid_set = qdf["valid_set"].to_numpy(dtype=bool)
+    return zip(pairs, flags, valid_rise, valid_set)
+
+
+def solar_likelihood_cells(
+    pairs,
+    qdf,
+    cell_ids,
+    thresh_deg,
+    sigma_timing=10.0,
+    window_h=6.0,
+    lh_floor=1e-30,
+):
+    """Light likelihood of each night on the cells of a HEALPix grid.
+
+    For each night and each cell, the likelihood is
+
+    .. math::
+
+        L = \\prod_{e} \\exp\\left(-\\frac{\\Delta t_e^2}{2\\sigma^2}\\right)
+
+    over the valid events ``e`` (rising, setting) of the night, where
+    :math:`\\Delta t_e` is the difference, in minutes, between the observed
+    crossing and the crossing of ``thresh_deg`` predicted at the cell centre.
+    See :func:`_night_likelihood` for the special cases. Each night is
+    divided by its maximum, so a night is a relative weight over the cells.
+
+    Parameters
+    ----------
+    pairs : list of (pandas.Timestamp, pandas.Timestamp)
+        ``(t_rise, t_set)`` pairs, in the order of the rows of ``qdf``.
+    qdf : pandas.DataFrame
+        Quality flags from
+        :func:`~pangeo_fish.light.quality.compute_quality_flags`, with
+        columns ``flag``, ``valid_rise`` and ``valid_set``.
+    cell_ids : xarray.DataArray
+        Cell ids on the dimension ``cells``, with the attributes
+        ``grid_name``, ``level``, ``indexing_scheme`` and ``ellipsoid``, as
+        in the emission dataset (``emission["cell_ids"]``). The cell centres
+        are computed on that ellipsoid.
+    thresh_deg : float
+        Solar elevation of the crossings, degrees, from
+        :func:`self_calibrate_solar_threshold`.
+    sigma_timing : float, default 10.0
+        Timing uncertainty, minutes.
+    window_h : float, default 6.0
+        A predicted crossing more than ``window_h`` hours from the observed
+        one is treated as missing.
+    lh_floor : float, default 1e-30
+        Smallest value; it also replaces missing predictions.
+
+    Returns
+    -------
+    xarray.DataArray
+        ``pdf_light`` with dimensions ``("time", "cells")``. ``time`` is the
+        midpoint between rising and setting (local noon, UTC); the
+        coordinates ``rise_time`` and ``set_time`` hold the observed crossings
+        and ``flag`` the quality flag. ``cell_ids`` is copied from the input.
+    """
+    from pangeo_fish.tide_healpix import cell_centers
+
+    lon, lat = cell_centers(cell_ids)
+    sigma = float(sigma_timing)
+
+    rows = []
+    rise_times, set_times, flags = [], [], []
+    for (t_rise, t_set), flag, v_r, v_s in _night_rows(pairs, qdf):
+        rows.append(
+            _night_likelihood(
+                t_rise,
+                t_set,
+                v_r,
+                v_s,
+                flag,
+                lon,
+                lat,
+                thresh_deg,
+                sigma,
+                window_h,
+                lh_floor,
+            )
+        )
+        rise_times.append(_tz(t_rise))
+        set_times.append(_tz(t_set))
+        flags.append(flag)
+
+    rise_ns = (
+        sun._as_utc_ns(pd.DatetimeIndex(rise_times))
+        if rise_times
+        else np.array([], "datetime64[ns]")
+    )
+    set_ns = (
+        sun._as_utc_ns(pd.DatetimeIndex(set_times))
+        if set_times
+        else np.array([], "datetime64[ns]")
+    )
+    midpoint = rise_ns + (set_ns - rise_ns) // 2
+
+    data = np.stack(rows) if rows else np.empty((0, lon.size))
+    return xr.DataArray(
+        data,
+        dims=("time", "cells"),
+        coords={
+            "time": midpoint,
+            "rise_time": ("time", rise_ns),
+            "set_time": ("time", set_ns),
+            "flag": ("time", np.asarray(flags, dtype=object).astype(str)),
+            "cell_ids": (
+                cell_ids.variable
+                if hasattr(cell_ids, "variable")
+                else ("cells", np.asarray(cell_ids))
+            ),
+        },
+        name="pdf_light",
+        attrs={
+            "method": "solar_threshold",
+            "sigma_timing_min": sigma,
+            "thresh_deg": float(thresh_deg),
+            "window_h": float(window_h),
+        },
+    )
+
+
+def _time_bins(time):
+    """Bins of the time coordinate, built as in :func:`pangeo_fish.helpers.compute_diff`."""
+    import cf_xarray  # noqa: F401
+
+    from pangeo_fish.cf import bounds_to_bins
+
+    ds = xr.Dataset(coords={"time": ("time", np.asarray(time))})
+    ds["time"].attrs["standard_name"] = "time"
+    return (
+        ds.cf.add_bounds(["time"], output_dim="bounds")
+        .pipe(bounds_to_bins, bounds_dim="bounds")
+        .get("time_bins")
+    )
+
+
+def align_light_to_time(pdf_light, time, how="date", fill_value=1.0):
+    """Put the nightly light likelihood on the time steps of the emission.
+
+    Parameters
+    ----------
+    pdf_light : xarray.DataArray
+        Output of :func:`solar_likelihood_cells` (dimensions ``time``,
+        ``cells``).
+    time : array-like or xarray.DataArray
+        Time coordinate of the emission.
+    how : {"date", "rise_date", "bins"}, default "date"
+        ``"date"``: a night goes to the time step labelled 00:00 of the UTC
+        date of its midpoint (local noon). This is the local day, also in
+        Japan where the rising is on the previous UTC date. Use it for daily
+        emissions labelled at 00:00.
+        ``"rise_date"``: same with the UTC date of the rising, as in the
+        notebooks of pull request 267. West of about 90 degrees East it gives
+        the same result as ``"date"``.
+        ``"bins"``: a night goes to the time step whose bin contains its
+        midpoint, the bins being built from the bounds of ``time`` as in
+        :func:`pangeo_fish.helpers.compute_diff`. Use it for emissions with
+        steps shorter than a day. With daily steps labelled at 00:00 the bin
+        edges are at 12:00 UTC, close to local noon in Europe and Africa, so
+        consecutive nights can fall in the same step and leave the next one
+        empty.
+    fill_value : float, default 1.0
+        Value of the time steps without any night. Any constant is neutral:
+        the product of the terms is normalised over the cells.
+
+    Returns
+    -------
+    xarray.DataArray
+        ``pdf_light`` on ``("time", "cells")`` with the given time coordinate.
+        Nights that fall in the same time step are multiplied. Nights outside
+        every time step are dropped. ``n_nights`` counts the nights of each
+        time step.
+    """
+    time = np.asarray(getattr(time, "values", time), dtype="datetime64[ns]")
+    if how == "bins":
+        bins = pd.IntervalIndex(_time_bins(time).values)
+        index = bins.get_indexer(pdf_light["time"].values)
+    elif how in ("date", "rise_date"):
+        source = "time" if how == "date" else "rise_time"
+        labels = (
+            pdf_light[source].values.astype("datetime64[D]").astype("datetime64[ns]")
+        )
+        index = pd.Index(time).get_indexer(labels)
+    else:
+        raise ValueError(f"how must be 'date', 'rise_date' or 'bins', got {how!r}")
+
+    n_cells = pdf_light.sizes["cells"]
+    product = np.ones((time.size, n_cells))
+    counts = np.zeros(time.size, dtype="int64")
+    values = pdf_light.values
+    for row, target in enumerate(index):
+        if target < 0:
+            continue
+        product[target] *= values[row]
+        counts[target] += 1
+
+    out = np.where(counts[:, None] > 0, product, fill_value)
+    # several nights in one step: divide by the maximum again
+    for step in np.flatnonzero(counts > 1):
+        mx = out[step].max()
+        if mx > 0:
+            out[step] /= mx
+
+    return xr.DataArray(
+        out,
+        dims=("time", "cells"),
+        coords={
+            "time": time,
+            "cell_ids": pdf_light["cell_ids"].variable,
+            "n_nights": ("time", counts),
+        },
+        name="pdf_light",
+        attrs=dict(pdf_light.attrs, alignment=how),
+    )
+
+
 def compute_solar_likelihood(
     pairs,
     qdf,
@@ -490,139 +661,75 @@ def compute_solar_likelihood(
     sigma_timing=18,
     smooth_sigma=1.0,
     lh_floor=1e-30,
+    window_h=6.0,
 ):
-    """Compute per-night solar likelihood maps on a regular lat/lon grid.
+    """Light likelihood of each night on a regular latitude/longitude grid.
 
-    For each night and each grid pixel, the likelihood is the product of
-    Gaussian terms in timing residual:
-
-        L_k = ∏_{e in valid events}  exp(−Δt_e² / (2 σ_timing²))
-
-    where Δt_e is the difference (minutes) between the observed crossing
-    time and the astronomically predicted crossing at pixel k.
+    Same likelihood as :func:`solar_likelihood_cells`, evaluated at the nodes
+    of a regular grid, then smoothed with a Gaussian filter of
+    ``smooth_sigma`` grid steps and divided by its maximum. This is the output
+    used by the notebooks of pull request 267, which then regrid it to
+    HEALPix; new code should use :func:`solar_likelihood_cells`, which needs
+    neither the intermediate grid nor the regridding.
 
     Parameters
     ----------
-    pairs : list of (pd.Timestamp, pd.Timestamp)
-        Paired (t_rise, t_set) events, aligned with rows of ``qdf``.
-    qdf : pd.DataFrame
-        Quality flags as returned by
-        :func:`~pangeo_fish.light.quality.compute_quality_flags`.
-        Must have columns ``flag``, ``valid_rise``, ``valid_set``.
-    lons : array-like
-        1-D longitude axis of the output grid (degrees East).
-    lats : array-like
-        1-D latitude axis of the output grid (degrees North).
+    pairs : list of (pandas.Timestamp, pandas.Timestamp)
+        ``(t_rise, t_set)`` pairs, in the order of the rows of ``qdf``.
+    qdf : pandas.DataFrame
+        Quality flags with columns ``flag``, ``valid_rise``, ``valid_set``.
+    lons, lats : array-like
+        1-D grid axes, degrees East and North.
     thresh_deg : float
-        Solar elevation threshold (degrees) defining RISE and SET.
-        Typically the output of :func:`self_calibrate_solar_threshold`.
+        Solar elevation of the crossings, degrees.
     sigma_timing : float, default 18
-        Timing uncertainty (minutes).
+        Timing uncertainty, minutes.
     smooth_sigma : float, default 1.0
-        Standard deviation (pixels) of the Gaussian spatial smoother
-        applied to each night's raw likelihood map.
+        Standard deviation, in grid steps, of the spatial Gaussian filter.
     lh_floor : float, default 1e-30
-        Minimum likelihood value; replaces non-finite values and guards
-        against log(0).
+        Smallest value.
+    window_h : float, default 6.0
+        A predicted crossing more than ``window_h`` hours from the observed
+        one is treated as missing.
 
     Returns
     -------
-    xr.DataArray
-        Dims ``('time', 'latitude', 'longitude')``.  ``time`` is the
-        date of each night (``t_rise.date()``) as UTC ``datetime64``.
-        Attributes: ``method='solar_threshold'``,
-        ``sigma_timing_min=sigma_timing``.
-
-    Notes
-    -----
-    **Bug fix — ``window_h=6.0``:** :func:`_get_crossing_fast` is called
-    with ``window_h=6.0`` (was 3.0).  See that function's docstring for
-    the rationale.
-
-    **Bug fix — ``need_both`` guard:** for nights flagged ``'good'``, a
-    pixel where either crossing prediction is unavailable (e.g., polar
-    regions where :mod:`ephem` cannot find a rising) is forced to
-    ``lh_floor`` instead of falling back to single-event mode.  Without
-    this guard, "good" nights produce ghost likelihood peaks at high
-    latitudes.
+    xarray.DataArray
+        ``pdf_light`` with dimensions ``("time", "latitude", "longitude")``.
+        ``time`` is the UTC date of the rising.
     """
-    lons = np.asarray(lons)
-    lats = np.asarray(lats)
-    grid_shape = (len(lats), len(lons))
-    lon_flat, lat_flat = np.meshgrid(lons, lats)
-    lon_flat = lon_flat.ravel()
-    lat_flat = lat_flat.ravel()
-    n_pix = len(lon_flat)
+    lons = np.asarray(lons, dtype="float64")
+    lats = np.asarray(lats, dtype="float64")
+    lon2d, lat2d = np.meshgrid(lons, lats)
+    shape = lon2d.shape
 
-    try:
-        from tqdm.notebook import tqdm
-    except ImportError:
-        from tqdm import tqdm
-
-    n_nights = len(pairs)
-    lh_smooth = np.zeros((n_nights, len(lats), len(lons)))
+    maps = []
     night_times = []
+    for (t_rise, t_set), flag, v_r, v_s in _night_rows(pairs, qdf):
+        night_times.append(pd.Timestamp(_tz(t_rise).date()))
+        lh = _night_likelihood(
+            t_rise,
+            t_set,
+            v_r,
+            v_s,
+            flag,
+            lon2d.ravel(),
+            lat2d.ravel(),
+            thresh_deg,
+            float(sigma_timing),
+            window_h,
+            lh_floor,
+        ).reshape(shape)
+        if flag != "bad":
+            lh = gaussian_filter(lh, sigma=smooth_sigma)
+            mx = lh.max()
+            if mx > 0:
+                lh = lh / mx
+        maps.append(lh)
 
-    for i, (t_rise, t_set) in enumerate(
-        tqdm(pairs, desc="Solar likelihood", unit="night")
-    ):
-        night_times.append(pd.Timestamp(t_rise.date()))
-        flag = qdf.iloc[i]["flag"]
-        v_r = qdf.iloc[i]["valid_rise"]
-        v_s = qdf.iloc[i]["valid_set"]
-
-        # Bad night → uniform likelihood (no information)
-        if flag == "bad":
-            lh_smooth[i] = np.ones(grid_shape)
-            continue
-
-        # Good or partial night → compute from valid events
-        # KEY FIX: for 'good' nights, BOTH predictions must exist.
-        # If one is missing (ephem can't find it at a polar pixel),
-        # we refuse single-event fallback to avoid ghost peaks.
-        need_both = flag == "good"
-
-        lh = np.full(n_pix, lh_floor)
-        for k in range(n_pix):
-            parts = []
-            got_rise = False
-            got_set = False
-
-            if v_s:
-                tp_s = _get_crossing_fast(
-                    t_set, lon_flat[k], lat_flat[k], thresh_deg, "down"
-                )
-                if tp_s is not None:
-                    dt = (_tz(t_set) - tp_s).total_seconds() / 60.0
-                    parts.append(np.exp(-(dt**2) / (2.0 * sigma_timing**2)))
-                    got_set = True
-
-            if v_r:
-                tp_r = _get_crossing_fast(
-                    t_rise, lon_flat[k], lat_flat[k], thresh_deg, "up"
-                )
-                if tp_r is not None:
-                    dt = (_tz(t_rise) - tp_r).total_seconds() / 60.0
-                    parts.append(np.exp(-(dt**2) / (2.0 * sigma_timing**2)))
-                    got_rise = True
-
-            # need_both guard: refuse single-event fallback for 'good' nights
-            if need_both and not (got_rise and got_set):
-                lh[k] = lh_floor
-            elif parts:
-                lh[k] = np.prod(parts)
-
-        # Replace non-finite values before smoothing
-        lh[~np.isfinite(lh)] = lh_floor
-
-        lh_map = gaussian_filter(lh.reshape(grid_shape), sigma=smooth_sigma)
-        mx = lh_map.max()
-        if mx > 0:
-            lh_map /= mx  # normalize so max = 1 (NOT sum = 1)
-        lh_smooth[i] = lh_map
-
-    da = xr.DataArray(
-        lh_smooth,
+    data = np.stack(maps) if maps else np.empty((0, *shape))
+    return xr.DataArray(
+        data,
         dims=("time", "latitude", "longitude"),
         coords={
             "time": np.array(night_times, dtype="datetime64[ns]"),
@@ -630,9 +737,5 @@ def compute_solar_likelihood(
             "longitude": lons,
         },
         name="pdf_light",
-        attrs={
-            "method": "solar_threshold",
-            "sigma_timing_min": sigma_timing,
-        },
+        attrs={"method": "solar_threshold", "sigma_timing_min": sigma_timing},
     )
-    return da
