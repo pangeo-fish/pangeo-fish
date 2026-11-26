@@ -66,6 +66,8 @@ dependencies = [
   "imageio[ffmpeg]",
   "ipywidgets",
   "pyproj>=3.7,<3.8",
+  # light-based geolocation
+  "ephem",
   # CLI / progress
   "rich",
   "rich-click",
