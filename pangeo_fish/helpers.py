@@ -61,7 +61,12 @@ from pangeo_fish.io import (
 )
 from pangeo_fish.pdf import combine_emission_pdf, normal
 from pangeo_fish.storage import _with_dggs_attrs
-from pangeo_fish.tags import adapt_model_time, reshape_by_bins, to_time_slice
+from pangeo_fish.tags import (
+    adapt_model_time,
+    reshape_by_bins,
+    select_end_event,
+    to_time_slice,
+)
 from pangeo_fish.utils import haversine_distance, temporal_resolution
 from pangeo_fish.visualization import filter_by_states, plot_map, render_frame
 
@@ -1581,14 +1586,18 @@ def compute_emission_pdf(
     diff_ds : xarray.Dataset
         A dataset that must have the variables ``diff`` and ``ocean_mask``
     events_ds : xarray.Dataset
-        The tagging events. It must have the coordinate ``event_name`` and values ``release`` and ``fish_death``.
+        The tagging events. It must have the coordinate ``event_name`` with the value ``release`` and an end event,
+        ``fish_death`` or ``recapture``. The end position is read from ``fish_death``; without a ``fish_death`` event
+        it is read from ``recapture``. When both are present, ``fish_death`` is used and ``recapture`` is ignored
+        (see :py:func:`pangeo_fish.tags.select_end_event`). If latitude and longitude of the end event are both
+        missing, no final distribution is computed.
         Hint: given a tag model, it corresponds to ``tag["tagging_events"].ds``
     differences_std : float
         Standard deviation that is applied to the data (passed to ``scipy.stats.norm.pdf``). It'd express the estimated certainty of the field of difference
     initial_std: float
         Covariance for the initial event. It should reflect the certainty of the initial release area
     recapture_std : float
-        Covariance for the recapture event. It should reflect the certainty of the final recapture area
+        Covariance for the end event (``fish_death`` or ``recapture``). It should reflect the certainty of the final recapture area
     dims : list of str, default: ["cells"]
         The list of the dimensions. Either ``["x", "y"]`` or ``["cells"]``.
     chunk_time : int, default: 24
@@ -1628,7 +1637,7 @@ def compute_emission_pdf(
 
     grid = diff_ds[["latitude", "longitude"]].compute()
     initial_position = events_ds.sel(event_name="release")
-    final_position = events_ds.sel(event_name="fish_death")
+    final_position = select_end_event(events_ds)
 
     initial_probability = distrib.healpix.normal_at(
         grid, pos=initial_position, sigma=initial_std

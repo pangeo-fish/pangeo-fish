@@ -49,8 +49,9 @@ Sea cells are chosen with `mask_threshold` (default `0.5`), and land cells get `
 - `initial` is a Gaussian around the `release` position.
   Its width is `initial_std`, in radians.
   It is a function of the angular distance between each cell centre and the centre of the cell that holds the position.
-- `final` is the same for the `fish_death` position, with width `recapture_std`.
-  It is left out when the latitude and longitude of `fish_death` are both `NA`.
+- `final` is the same for the end position, with width `recapture_std`.
+  The end position is the `fish_death` row of the tagging events, or the `recapture` row when there is no `fish_death` row (`fish_death` wins when both are present).
+  It is left out when the latitude and longitude of that row are both `NA`.
 - `mask` is the ocean mask.
 - With `check_positions=True`, a warning is raised when `initial` or `final` has almost no mass on ocean cells.
 

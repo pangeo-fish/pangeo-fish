@@ -82,21 +82,22 @@ The lifetime data describes the start and end of the natural behavior of the fis
 
 It must have four columns: `event_name`, `time`, `latitude`, and `longitude`.
 
-The valid values for `event_name` are: `release`, `recapture` and `fish_death` (more are possible). Only `release` and `fish_death` are used as positions, but every row with a time takes part in the row-order rule below.
+The valid values for `event_name` are: `release`, `recapture` and `fish_death` (more are possible). Only `release` and the end event (`fish_death` or `recapture`) are used as positions, but every row with a time takes part in the row-order rule below.
 
-The file must contain two entries: `release` and `fish_death`.
-The temperature step (`compute_emission_pdf`) reads the end position from the `fish_death` row only.
-A `recapture` row is not used as a position constraint.
-If the fish was recaptured at a known place, store that time and position in a `fish_death` row.
-If the end position is unknown, set `latitude` and `longitude` of `fish_death` to `NA`: no final constraint is applied.
+The file must contain two entries: `release` and an end event, either `fish_death` or `recapture`.
+The temperature step (`compute_emission_pdf`) reads the end position from the `fish_death` row.
+If there is no `fish_death` row, it reads the end position from the `recapture` row.
+If both rows are present, `fish_death` is used and the `recapture` position is ignored, even when the `fish_death` position is `NA`.
+If there is neither, `compute_emission_pdf` raises a `ValueError`.
+If the end position is unknown, set `latitude` and `longitude` of the end event to `NA`: no final constraint is applied.
 
-Put `release` in the first row and `fish_death` in the second row.
+Put `release` in the first row and the end event in the second row.
 The time window of the analysis (`to_time_slice`) is taken from the first two rows that have a time, by position and not by name.
 A `recapture` row with a time placed before `fish_death` would therefore end the analysis at the recapture time, while the end position still comes from `fish_death`.
 
 `latitude` and `longitude` are fixed-point representations of the position in degree, with a `.` as separator.
 `latitude` must be in a range of `-90°` to `90°`, while `longitude` may be given in either `0°` to `360°` or `-180°` to `180°`.
-If the `fish_death` position is unknown, both `latitude` and `longitude` must be set to `NA`. The `release` position must be known.
+If the position of the end event is unknown, both `latitude` and `longitude` must be set to `NA`. The `release` position must be known.
 
 For example:
 
@@ -106,7 +107,15 @@ release,2023-07-13T13:21:57Z,48.21842,-4.08578
 fish_death,2023-09-17T05:21:07Z,47.37423,-3.87582
 ```
 
-or
+or, with `recapture` as the end event,
+
+```
+event_name,time,latitude,longitude
+release,2023-07-13T13:21:57Z,48.21842,-4.08578
+recapture,2023-09-17T05:21:07Z,47.37423,-3.87582
+```
+
+or, with an unknown end position,
 
 ```
 event_name,time,latitude,longitude

@@ -7,7 +7,12 @@ from pangeo_fish.diff import diff_z
 from pangeo_fish.distributions import create_covariances, normal_at
 from pangeo_fish.grid import center_longitude
 from pangeo_fish.pdf import normal
-from pangeo_fish.tags import adapt_model_time, reshape_by_bins, to_time_slice
+from pangeo_fish.tags import (
+    adapt_model_time,
+    reshape_by_bins,
+    select_end_event,
+    to_time_slice,
+)
 from pangeo_fish.utils import temporal_resolution
 
 
@@ -123,7 +128,7 @@ def temperature_emission_matrices(ds, tag, parameters):
         ),
         "final": position_pdf(
             grid,
-            tag["tagging_events"].ds.sel(event_name="fish_death"),
+            select_end_event(tag["tagging_events"].ds),
             sigma=parameters["recapture_std"],
         ),
         "mask": ds["mask"],

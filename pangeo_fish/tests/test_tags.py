@@ -5,7 +5,7 @@ import pytest
 import xarray as xr
 
 from pangeo_fish.cf import bounds_to_bins
-from pangeo_fish.tags import reshape_by_bins, to_time_slice
+from pangeo_fish.tags import reshape_by_bins, select_end_event, to_time_slice
 
 
 @pytest.mark.parametrize("end", [1, 2])
@@ -33,6 +33,44 @@ def test_to_time_slice(start, stop, end):
 
     expected = slice(start, stop)
     assert actual == expected
+
+
+def _events(names):
+    return xr.Dataset(
+        {"latitude": ("event_name", np.arange(len(names), dtype=float))},
+        coords={"event_name": names},
+    )
+
+
+@pytest.mark.parametrize(
+    ["names", "expected"],
+    (
+        (["release", "fish_death"], "fish_death"),
+        (["release", "recapture"], "recapture"),
+        (["release", "recapture", "fish_death"], "fish_death"),
+        (["fish_death", "recapture", "release"], "fish_death"),
+        (["release", "tag_found", "recapture"], "recapture"),
+    ),
+)
+def test_select_end_event(names, expected):
+    events = _events(names)
+
+    actual = select_end_event(events)
+
+    assert actual["event_name"].item() == expected
+    assert "event_name" not in actual.dims
+    assert actual["latitude"].item() == names.index(expected)
+    # also on a single variable
+    assert select_end_event(events["latitude"]).item() == names.index(expected)
+
+
+@pytest.mark.parametrize("names", (["release"], ["release", "tag_found"]))
+def test_select_end_event_without_end_event(names):
+    with pytest.raises(ValueError, match="no end event") as error:
+        select_end_event(_events(names))
+
+    assert "'fish_death' or 'recapture'" in str(error.value)
+    assert str(names) in str(error.value)
 
 
 @pytest.mark.parametrize(
