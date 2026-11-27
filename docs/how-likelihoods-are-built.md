@@ -235,13 +235,13 @@ East of about 90 degrees East the rising is on the previous UTC date (about 21:0
 
 Each event is checked in a window of `window_h` hours (default 1 h) around it:
 
-| Filter    | Condition                                                                                                       | Parameter                                                  |
-| --------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Filter    | Condition                                                                                                            | Parameter                                           |
+| --------- | -------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
 | Direction | mean of the last 10 records minus mean of the first 10 is above the value for a rising, below minus it for a setting | `slope_threshold` (default 25, `None` turns it off) |
-| Margin    | peak light minus the mean threshold is above the value                                                          | `marge_threshold` (default 8)                              |
-| Depth     | largest pressure is below the value, in dbar                                                                    | `max_depth` (default 80)                                   |
-| Amplitude | light range (max - min) is above the value                                                                      | `min_amplitude` (default 40)                               |
-| Samples   | number of records in the window is at least the value                                                           | `min_samples` (default 10)                                 |
+| Margin    | peak light minus the mean threshold is above the value                                                               | `marge_threshold` (default 8)                       |
+| Depth     | largest pressure is below the value, in dbar                                                                         | `max_depth` (default 80)                            |
+| Amplitude | light range (max - min) is above the value                                                                           | `min_amplitude` (default 40)                        |
+| Samples   | number of records in the window is at least the value                                                                | `min_samples` (default 10)                          |
 
 A night is `good` when both events pass, `partial` when one passes and `bad` when none passes.
 The direction filter is told which event is a rising.
@@ -253,10 +253,10 @@ The thresholds depend on how the tag records light.
 The tag says what it is in `metadata.json` (`tag_type`, the names of `load_tag_csv`), and `light_settings(tag.attrs)` returns the light transform, the arguments of `dynamic_threshold` (`settings.threshold`) and those of `compute_quality_flags` (`settings.quality`).
 A `"light"` mapping in the metadata, or keyword arguments, override single values.
 
-| `tag_type`    | Light               | Threshold base / amp | Quality (`window_h`, `slope_threshold`, `marge_threshold`, `min_amplitude`, `min_samples`) | Taken from |
-| ------------- | ------------------- | -------------------- | ------------------------------------------------------------------------------------------- | ---------- |
-| `wc_archival` | raw counts          | 60 / 20              | 1 h, 25, 8, 40, 10                                                                          | bluefin tuna 18P0430 and 20P0204 |
-| `logglaw_c6`  | `log1p` of counts   | 3 / 0.3              | 1.5 h, off, 0.3, 0.5, 10                                                                    | six-logger null test at Maizuru |
+| `tag_type`    | Light             | Threshold base / amp | Quality (`window_h`, `slope_threshold`, `marge_threshold`, `min_amplitude`, `min_samples`) | Taken from                       |
+| ------------- | ----------------- | -------------------- | ------------------------------------------------------------------------------------------ | -------------------------------- |
+| `wc_archival` | raw counts        | 60 / 20              | 1 h, 25, 8, 40, 10                                                                         | bluefin tuna 18P0430 and 20P0204 |
+| `logglaw_c6`  | `log1p` of counts | 3 / 0.3              | 1.5 h, off, 0.3, 0.5, 10                                                                   | six-logger null test at Maizuru  |
 
 Any other type raises: its values have to be chosen and added to `LIGHT_SETTINGS`.
 `max_depth` is a property of the animal or of the deployment, not of the sensor, and is not part of the settings.
@@ -289,10 +289,10 @@ The smoothing of those notebooks was 0.5 step of 0.5 degree for the tuna (about 
 `align_light_to_time(events, emission["time"])` gives `pdf_light` on the time steps of the emission.
 Where the animal was is not known, so neither is its local day: a map goes to a step by the time of the observation only, as the temperature and pressure records do.
 
-| `how`                  | A map goes to                                                                                     |
-| ---------------------- | ------------------------------------------------------------------------------------------------- |
-| `"interval"` (default) | step `i`, covering `[time[i], time[i+1])`: the UTC day of the observation for daily steps at 00:00 |
-| `"bins"`               | the step whose bin, built as in `compute_diff` (centred on the labels), contains the observation  |
+| `how`                   | A map goes to                                                                                         |
+| ----------------------- | ----------------------------------------------------------------------------------------------------- |
+| `"interval"` (default)  | step `i`, covering `[time[i], time[i+1])`: the UTC day of the observation for daily steps at 00:00    |
+| `"bins"`                | the step whose bin, built as in `compute_diff` (centred on the labels), contains the observation      |
 | `"date"`, `"rise_date"` | (nightly maps only) the step of the UTC date of the midpoint or of the rising, as in pull request 267 |
 
 `"interval"` matches the daily notebooks, which floor the tag log to the day before binning it.
