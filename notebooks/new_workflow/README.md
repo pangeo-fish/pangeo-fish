@@ -115,10 +115,10 @@ Configure the tag at the top of the notebook (chapter 1):
 
 The light settings (light transform, dynamic threshold, quality filter) are chosen from `tag_type` in `metadata.json` by `pangeo_fish.light.light_settings`.
 
-| `tag_type`    | Settings                                                             |
-| ------------- | -------------------------------------------------------------------- |
-| `wc_archival` | Wildlife Computers archive record, raw counts (bluefin tuna values)  |
-| `logglaw_c6`  | LoggLaw C6, `log1p` of the counts (Maizuru null-test values)         |
+| `tag_type`    | Settings                                                                                    |
+| ------------- | ------------------------------------------------------------------------------------------- |
+| `wc_archival` | Wildlife Computers archive record, raw counts (bluefin tuna values)                         |
+| `logglaw_c6`  | LoggLaw C6, `log1p` of the counts (Maizuru null-test values)                                |
 | other         | every value must be given in `LIGHT_OVERRIDES` or in the `"light"` entry of `metadata.json` |
 
 The previous version of the notebook (light on a 0.5 degree latitude/longitude grid regridded with xhealpixify, lunar chapter) is in `OLD/`.
