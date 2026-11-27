@@ -401,6 +401,15 @@ def test_light_settings():
         light_settings({"pit_tag_id": "x"})
     with pytest.raises(KeyError, match="no light settings"):
         light_settings("lotek")
+    # an unlisted type works when every value is given
+    full = {
+        k: v
+        for k, v in vars(LIGHT_SETTINGS["wc_archival"]).items()
+        if k not in ("tag_type", "description")
+    }
+    lotek = light_settings({"tag_type": "lotek", "light": full})
+    assert lotek.tag_type == "lotek"
+    assert lotek.quality == wc.quality
     with pytest.raises(TypeError, match="unknown light settings"):
         light_settings("wc_archival", min_amp=3)
 

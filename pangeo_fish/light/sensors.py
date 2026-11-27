@@ -17,8 +17,10 @@ metadata overrides single values, for example
 ``{"tag_type": "wc_archival", "light": {"min_amplitude": 30}}``.
 
 Only the types whose values have been used and checked on real records are
-listed in :data:`LIGHT_SETTINGS`. For any other type :func:`light_settings`
-raises, so that the values are chosen on purpose and added here.
+listed in :data:`LIGHT_SETTINGS`. For any other type every value has to be
+given (in the ``"light"`` entry of the metadata or as arguments), otherwise
+:func:`light_settings` raises: the values are then chosen on purpose, and can
+be added here once they are checked.
 
 The largest depth allowed during a twilight (``max_depth`` of
 :func:`~pangeo_fish.light.quality.compute_quality_flags`) is a property of
@@ -158,16 +160,22 @@ def light_settings(metadata, **overrides):
             f"(one of {sorted(LIGHT_SETTINGS)}) or pass the light values by hand"
         )
     key = str(tag_type).lower()
-    if key not in LIGHT_SETTINGS:
-        raise KeyError(
-            f"no light settings for tag_type {tag_type!r}; known types: "
-            f"{sorted(LIGHT_SETTINGS)}. Choose the values for this tag and add "
-            "them to pangeo_fish.light.sensors.LIGHT_SETTINGS"
-        )
     custom = dict(metadata.get("light") or {})
     custom.update(overrides)
     known = {f.name for f in fields(LightSettings)} - {"tag_type"}
     unknown = set(custom) - known
     if unknown:
         raise TypeError(f"unknown light settings: {sorted(unknown)}")
-    return replace(LIGHT_SETTINGS[key], **custom)
+    if key in LIGHT_SETTINGS:
+        return replace(LIGHT_SETTINGS[key], **custom)
+
+    required = {f.name for f in fields(LightSettings)} - {"tag_type", "description"}
+    missing = sorted(required - set(custom))
+    if missing:
+        raise KeyError(
+            f"no light settings for tag_type {tag_type!r}; known types: "
+            f"{sorted(LIGHT_SETTINGS)}. Give all of {missing} (in the metadata "
+            "'light' entry or as arguments), or add the type to "
+            "pangeo_fish.light.sensors.LIGHT_SETTINGS once its values are checked"
+        )
+    return LightSettings(tag_type=key, **custom)

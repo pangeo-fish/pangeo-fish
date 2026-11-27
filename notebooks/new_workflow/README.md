@@ -38,7 +38,7 @@ Two rows — release and end of deployment:
 
 ### `metadata.json`
 
-Free JSON dict, stored as tag attributes. Minimum useful fields: `tag_name`, `tag_type`.
+Free JSON dict, stored as tag attributes. Minimum useful fields: `tag_name`, `tag_type`. `tag_type` selects the light settings of the main notebook (see Step 3). Tags formatted by hand (18P0430, 20P0204) do not have it yet: the notebook then uses `TAG_TYPE`.
 
 ---
 
@@ -53,7 +53,7 @@ Free JSON dict, stored as tag attributes. Minimum useful fields: `tag_name`, `ta
 
 **Wildlife Computers PSAT (`wc_psat`):** the `-Series.csv` file from Wildlife Computers only records depth and temperature at 10-minute intervals — no raw light counts. Set `HAS_LIGHT = False` to skip the solar and lunar chapters.
 
-**WC tags with light (e.g. 18P0430, 20P0204):** these are pre-formatted manually. The light column may be named `Light Level` or `light` depending on how the CSV was exported. Ch6 of the notebook loads the column explicitly (`tag["/dst"].ds[["Light Level", ...]]`) and renames it to `light` for the solar pipeline. Set `HAS_LIGHT = True`.
+**WC tags with light (e.g. 18P0430, 20P0204):** these are pre-formatted manually. The light column may be named `Light Level` or `light` depending on how the CSV was exported. Set `LIGHT_COLUMN` in the notebook to the column to use, and `HAS_LIGHT = True`.
 
 ---
 
@@ -102,15 +102,26 @@ Supported `tag_type`: `"lotek"`, `"wc_psat"`, `"dst"`.
 **Notebook:** `pangeo_fish_with_light.ipynb`
 **Run:** as many times as needed
 **Requires:** Steps 1 and 2 completed
-**Output:** emission PDFs, HMM trajectory, plots — all saved to `{target_root}/` on S3
+**Output:** `diff.zarr`, `emission.zarr`, and for each run (`with_light`, `no_light`) the fitted parameters, states and trajectories, all in `{target_root}/`
 
-Configure the tag at the top of the notebook (Chapter 1):
+Configure the tag at the top of the notebook (chapter 1):
 
-- `tag_name` — tag identifier
-- `TAG_ROOT` — root folder or S3 path containing the formatted tag folder
-- `HAS_LIGHT` — `True` if the tag has usable raw light counts (enables Ch6 solar + Ch7 lunar PDFs)
-- `bbox` — spatial bounding box
-- `scratch_root` / `storage_options` — S3 destination
+- `tag_name`, `tag_root`: the formatted tag folder
+- `scratch_root`, `storage_options`: where the results go
+- `bbox`, `refinement_level`, `ellipsoid`: the HEALPix grid
+- `HAS_LIGHT`: `True` if the tag has a usable light record
+- `LIGHT_COLUMN`: the light column of `dst.csv`
+- `SIGMA_TIMING`, `SMOOTH_KM`: the timing uncertainty (minutes) and the smoothing of the light maps (km)
+
+The light settings (light transform, dynamic threshold, quality filter) are chosen from `tag_type` in `metadata.json` by `pangeo_fish.light.light_settings`.
+
+| `tag_type`    | Settings                                                             |
+| ------------- | -------------------------------------------------------------------- |
+| `wc_archival` | Wildlife Computers archive record, raw counts (bluefin tuna values)  |
+| `logglaw_c6`  | LoggLaw C6, `log1p` of the counts (Maizuru null-test values)         |
+| other         | every value must be given in `LIGHT_OVERRIDES` or in the `"light"` entry of `metadata.json` |
+
+The previous version of the notebook (light on a 0.5 degree latitude/longitude grid regridded with xhealpixify, lunar chapter) is in `OLD/`.
 
 ---
 
