@@ -164,13 +164,15 @@ def _diff_ds(ds):
     ).assign_coords(time=time)
 
 
-def _events(release, recapture):
+def _events(release, end, end_name="fish_death", **others):
+    """Tagging events: release, the end event and any other named positions."""
+    positions = {"release": release, end_name: end} | others
     return xr.Dataset(
         {
-            "latitude": ("event_name", [release[0], recapture[0]]),
-            "longitude": ("event_name", [release[1], recapture[1]]),
+            "latitude": ("event_name", [pos[0] for pos in positions.values()]),
+            "longitude": ("event_name", [pos[1] for pos in positions.values()]),
         },
-        coords={"event_name": ["release", "fish_death"]},
+        coords={"event_name": list(positions)},
     )
 
 
@@ -231,3 +233,69 @@ class TestComputeEmissionPdf:
                 diff_ds=_diff_ds(ds), events_ds=events, **self.kwargs
             )
         assert not [w for w in record if "probability" in str(w.message)]
+
+    def _final(self, ds, events):
+        emission, _ = helpers.compute_emission_pdf(
+            diff_ds=_diff_ds(ds),
+            events_ds=events,
+            check_positions=False,
+            **self.kwargs,
+        )
+        return emission.get("final")
+
+    def test_recapture_ends_the_track_without_fish_death(self):
+        ds = _grid()
+        release = _latlon(_ocean_point(ds))
+        end = _latlon(_land_point(ds))
+
+        expected = self._final(ds, _events(release, end))
+        actual = self._final(ds, _events(release, end, end_name="recapture"))
+
+        assert expected is not None and float(expected.sum()) > 0
+        np.testing.assert_allclose(actual.to_numpy(), expected.to_numpy())
+
+    def test_recapture_with_unknown_position_gives_no_final(self):
+        ds = _grid()
+        release = _latlon(_ocean_point(ds))
+        events = _events(release, (np.nan, np.nan), end_name="recapture")
+
+        assert self._final(ds, events) is None
+
+    def test_fish_death_wins_over_recapture(self):
+        ds = _grid()
+        release = _latlon(_ocean_point(ds))
+        death = _latlon(_ocean_point(ds))
+        recapture = _latlon(_land_point(ds))
+
+        expected = self._final(ds, _events(release, death))
+        # the order of the rows does not matter
+        for events in (
+            _events(release, death, recapture=recapture),
+            _events(release, recapture, end_name="recapture", fish_death=death),
+        ):
+            actual = self._final(ds, events)
+            np.testing.assert_allclose(actual.to_numpy(), expected.to_numpy())
+
+        # an unknown fish_death position is not replaced by the recapture one
+        events = _events(release, (np.nan, np.nan), recapture=recapture)
+        assert self._final(ds, events) is None
+
+    def test_recapture_position_is_checked(self):
+        ds = _grid()
+        ocean = _latlon(_ocean_point(ds))
+        land = _latlon(_land_point(ds))
+
+        with pytest.warns(UserWarning, match="recapture probability"):
+            helpers.compute_emission_pdf(
+                diff_ds=_diff_ds(ds),
+                events_ds=_events(ocean, land, end_name="recapture"),
+                **self.kwargs,
+            )
+
+    def test_missing_end_event_raises(self):
+        ds = _grid()
+        ocean = _latlon(_ocean_point(ds))
+        events = _events(ocean, ocean, end_name="tag_found")
+
+        with pytest.raises(ValueError, match="no end event.*'fish_death'"):
+            self._final(ds, events)

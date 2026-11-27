@@ -156,6 +156,7 @@ Tag/time Operations
    :toctree: generated
 
    tags.to_time_slice
+   tags.select_end_event
    tags.adapt_model_time
    tags.reshape_by_bins
    cf.bounds_to_bins
