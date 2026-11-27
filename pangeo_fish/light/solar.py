@@ -56,7 +56,7 @@ def _nearest_within(candidates, targets, window):
 
     ``candidates`` must be sorted.
     """
-    out = np.full(targets.shape, np.datetime64("NaT"), dtype="datetime64[ns]")
+    out = np.full(targets.shape, np.datetime64("NaT", "ns"), dtype="datetime64[ns]")
     if candidates.size == 0:
         return out
     valid = ~np.isnat(targets)
@@ -67,7 +67,7 @@ def _nearest_within(candidates, targets, window):
     d_right = np.abs(targets[valid] - right)
     best = np.where(d_left <= d_right, left, right)
     best_d = np.minimum(d_left, d_right)
-    out[valid] = np.where(best_d < window, best, np.datetime64("NaT"))
+    out[valid] = np.where(best_d < window, best, np.datetime64("NaT", "ns"))
     return out
 
 

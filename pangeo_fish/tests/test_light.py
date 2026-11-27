@@ -327,7 +327,7 @@ def test_solar_likelihood_cells_by_event(biscay_nights):
     # stamped with the observed crossings, sorted
     observed = sorted(pd.Timestamp(t).tz_convert(None) for pair in pairs for t in pair)
     assert set(pd.DatetimeIndex(events["time"].values)) <= set(observed)
-    assert (np.diff(events["time"].values) > np.timedelta64(0)).all()
+    assert (np.diff(events["time"].values) > np.timedelta64(0, "ns")).all()
     np.testing.assert_allclose(events.max("cells"), 1.0)
 
     # rise and set of one night multiplied again give the nightly map

@@ -58,7 +58,7 @@ def _minutes_since_epoch(times_ns):
 def _from_minutes_since_epoch(minutes):
     """Inverse of :func:`_minutes_since_epoch`; NaN gives ``NaT``."""
     minutes = np.asarray(minutes, dtype="float64")
-    out = np.full(minutes.shape, np.datetime64("NaT"), dtype="datetime64[ns]")
+    out = np.full(minutes.shape, np.datetime64("NaT", "ns"), dtype="datetime64[ns]")
     ok = np.isfinite(minutes)
     out[ok] = (
         np.round(minutes[ok] * _NS_PER_MINUTE).astype("int64").view("datetime64[ns]")
@@ -283,6 +283,6 @@ def daily_crossings(dates, lon, lat, elevation_deg):
     sett = crossing_time(noon + np.timedelta64(6, "h"), lon, lat, elevation_deg, "set")
     # a crossing found more than 12 h from noon belongs to another day
     half_day = np.timedelta64(12, "h")
-    rise = np.where(np.abs(rise - noon) < half_day, rise, np.datetime64("NaT"))
-    sett = np.where(np.abs(sett - noon) < half_day, sett, np.datetime64("NaT"))
+    rise = np.where(np.abs(rise - noon) < half_day, rise, np.datetime64("NaT", "ns"))
+    sett = np.where(np.abs(sett - noon) < half_day, sett, np.datetime64("NaT", "ns"))
     return rise, sett
