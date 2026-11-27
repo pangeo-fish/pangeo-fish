@@ -203,7 +203,7 @@ def test_solar_likelihood_cells_peaks_at_the_tag(biscay_nights):
     from pangeo_fish.tide_healpix import cell_centers
 
     pairs, qdf, cell_ids = biscay_nights
-    nightly = solar_likelihood_cells(pairs, qdf, cell_ids, TRUE_ELEVATION)
+    nightly = solar_likelihood_cells(pairs, qdf, cell_ids, TRUE_ELEVATION, by="night")
 
     assert nightly.dims == ("time", "cells")
     assert nightly.sizes["time"] == len(pairs)
@@ -225,12 +225,20 @@ def test_solar_likelihood_cells_flags(biscay_nights):
     pairs, _, cell_ids = biscay_nights
     pairs = pairs[:2]
 
-    bad = solar_likelihood_cells(pairs, _flags(2, "bad", False, False), cell_ids, -6.0)
+    bad = solar_likelihood_cells(
+        pairs, _flags(2, "bad", False, False), cell_ids, -6.0, by="night"
+    )
     np.testing.assert_array_equal(bad.values, 1.0)
+    assert (
+        solar_likelihood_cells(
+            pairs, _flags(2, "bad", False, False), cell_ids, -6.0
+        ).sizes["time"]
+        == 0
+    )
 
-    good = solar_likelihood_cells(pairs, _flags(2), cell_ids, -6.0)
+    good = solar_likelihood_cells(pairs, _flags(2), cell_ids, -6.0, by="night")
     rise_only = solar_likelihood_cells(
-        pairs, _flags(2, "partial", True, False), cell_ids, -6.0
+        pairs, _flags(2, "partial", True, False), cell_ids, -6.0, by="night"
     )
     # one event constrains less than two: more cells keep a high value
     assert (rise_only.values > 0.5).sum() > (good.values > 0.5).sum()
@@ -249,7 +257,9 @@ def test_solar_likelihood_cells_good_night_needs_both_predictions():
         )
     ]
     cell_ids = healpix_cells((-10, 10), (40, 85), level=4, step=0.5)
-    nightly = solar_likelihood_cells(pairs, _flags(1), cell_ids, -6.0, lh_floor=1e-30)
+    nightly = solar_likelihood_cells(
+        pairs, _flags(1), cell_ids, -6.0, lh_floor=1e-30, by="night"
+    )
 
     from pangeo_fish.tide_healpix import cell_centers
 
@@ -277,24 +287,122 @@ def test_align_light_to_time():
     )
     days = pd.date_range("2021-12-31", periods=5, freq="D").values
 
-    by_date = align_light_to_time(nightly, days)
+    by_date = align_light_to_time(nightly, days, how="date")
     assert by_date.dims == ("time", "cells")
-    np.testing.assert_array_equal(by_date["n_nights"], [0, 1, 1, 1, 0])
+    np.testing.assert_array_equal(by_date["n_light"], [0, 1, 1, 1, 0])
     np.testing.assert_array_equal(by_date.values[0], 1.0)  # no night: neutral
     np.testing.assert_array_equal(by_date.values[1], nightly.values[0])
 
     by_rise = align_light_to_time(nightly, days, how="rise_date")
-    np.testing.assert_array_equal(by_rise["n_nights"], [1, 1, 1, 0, 0])
+    np.testing.assert_array_equal(by_rise["n_light"], [1, 1, 1, 0, 0])
 
     # with bins centred on 00:00, a noon after 12:00 goes to the next day:
     # nights 1 and 2 share 2 January, multiplied and divided by the maximum
     by_bins = align_light_to_time(nightly, days, how="bins")
-    np.testing.assert_array_equal(by_bins["n_nights"], [0, 0, 2, 0, 1])
+    np.testing.assert_array_equal(by_bins["n_light"], [0, 0, 2, 0, 1])
     product = nightly.values[0] * nightly.values[1]
     np.testing.assert_allclose(by_bins.values[2], product / product.max())
 
+    # step i covers [day i, day i + 1): each noon stays on its own UTC date
+    by_interval = align_light_to_time(nightly, days)
+    np.testing.assert_array_equal(by_interval["n_light"], [0, 1, 1, 1, 0])
+
     with pytest.raises(ValueError, match="how must be"):
         align_light_to_time(nightly, days, how="nearest")
+    with pytest.raises(ValueError, match="needs the nightly maps"):
+        align_light_to_time(nightly.drop_vars("rise_time"), days, how="rise_date")
+
+
+def test_solar_likelihood_cells_by_event(biscay_nights):
+    from pangeo_fish.tide_healpix import cell_centers
+
+    pairs, qdf, cell_ids = biscay_nights
+    events = solar_likelihood_cells(pairs, qdf, cell_ids, TRUE_ELEVATION)
+    nightly = solar_likelihood_cells(pairs, qdf, cell_ids, TRUE_ELEVATION, by="night")
+
+    valid = qdf[qdf.flag != "bad"]
+    assert events.sizes["time"] == valid.valid_rise.sum() + valid.valid_set.sum()
+    assert events.attrs["by"] == "event"
+    assert set(events["direction"].values) == {"rise", "set"}
+    # stamped with the observed crossings, sorted
+    observed = sorted(pd.Timestamp(t).tz_convert(None) for pair in pairs for t in pair)
+    assert set(pd.DatetimeIndex(events["time"].values)) <= set(observed)
+    assert (np.diff(events["time"].values) > np.timedelta64(0)).all()
+    np.testing.assert_allclose(events.max("cells"), 1.0)
+
+    # rise and set of one night multiplied again give the nightly map
+    for night in range(len(pairs)):
+        rows = events.where(events.night == night, drop=True)
+        if rows.sizes["time"] != 2:
+            continue
+        product = rows.values.prod(axis=0)
+        np.testing.assert_allclose(product / product.max(), nightly.values[night])
+
+    # aligned by observation time on UTC days: every step peaks near the tag
+    days = pd.date_range("2022-04-30", "2022-05-10", freq="D").values
+    aligned = align_light_to_time(events, days)
+    lon, lat = cell_centers(cell_ids)
+    used = aligned.n_light.values > 0
+    peak = aligned.values[used].argmax(axis=1)
+    assert used.sum() >= len(pairs)
+    # a single crossing is a curve, so only steps with both crossings locate
+    both = aligned.n_light.values[used] == 2
+    assert (distance_km(lon[peak[both]], lat[peak[both]], *BISCAY) < 150).all()
+
+
+def test_solar_likelihood_cells_smoothing(biscay_nights):
+    pairs, qdf, cell_ids = biscay_nights
+    sharp = solar_likelihood_cells(pairs, qdf, cell_ids, TRUE_ELEVATION, by="night")
+    smooth = solar_likelihood_cells(
+        pairs, qdf, cell_ids, TRUE_ELEVATION, by="night", smooth_sigma_km=300
+    )
+    assert smooth.attrs["smooth_sigma_km"] == 300
+    np.testing.assert_allclose(smooth.max("cells"), 1.0)
+    # smoothing spreads the weight: more cells above one half
+    assert (smooth.values > 0.5).sum() > (sharp.values > 0.5).sum()
+    # and keeps the peak where it was (level 6 cells are about 100 km wide)
+    from pangeo_fish.tide_healpix import cell_centers
+
+    lon, lat = cell_centers(cell_ids)
+    peak = smooth.values.argmax(axis=1)
+    assert (distance_km(lon[peak], lat[peak], *BISCAY) < 250).all()
+
+
+def test_light_settings():
+    from pangeo_fish.light import LIGHT_SETTINGS, light_settings
+
+    wc = light_settings({"tag_type": "wc_archival", "pit_tag_id": "x"})
+    assert (
+        wc is not LIGHT_SETTINGS["wc_archival"] or wc == LIGHT_SETTINGS["wc_archival"]
+    )
+    assert wc.quality == dict(
+        window_h=1.0,
+        slope_threshold=25.0,
+        marge_threshold=8.0,
+        min_amplitude=40.0,
+        min_samples=10,
+    )
+    assert wc.threshold == {"base": 60.0, "amp": 20.0}
+    np.testing.assert_array_equal(wc.transform_light(np.array([0.0, 9.0])), [0, 9])
+
+    c6 = light_settings("LoggLaw_C6")
+    assert c6.slope_threshold is None
+    np.testing.assert_allclose(
+        c6.transform_light(np.array([0.0, 9.0])), np.log1p([0, 9])
+    )
+
+    custom = light_settings(
+        {"tag_type": "wc_archival", "light": {"min_amplitude": 30}}, window_h=2.0
+    )
+    assert custom.min_amplitude == 30
+    assert custom.window_h == 2.0
+
+    with pytest.raises(KeyError, match="no 'tag_type'"):
+        light_settings({"pit_tag_id": "x"})
+    with pytest.raises(KeyError, match="no light settings"):
+        light_settings("lotek")
+    with pytest.raises(TypeError, match="unknown light settings"):
+        light_settings("wc_archival", min_amp=3)
 
 
 def test_compute_solar_likelihood_regular_grid():

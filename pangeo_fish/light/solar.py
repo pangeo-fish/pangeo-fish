@@ -364,6 +364,30 @@ def self_calibrate_solar_threshold(
 # ---------------------------------------------------------------------------
 
 
+def _event_log_likelihood(t_obs, direction, lon, lat, thresh_deg, sigma, window_h):
+    """Log-likelihood of one observed crossing at positions ``lon``, ``lat``.
+
+    Returns ``(log_lh, ok)``: ``-dt**2 / (2 sigma**2)`` with ``dt`` in minutes
+    between the observed crossing and the one predicted at each position, and
+    ``ok`` where a prediction exists within ``window_h`` hours.
+    """
+    t_obs = sun._as_utc_ns(_tz(t_obs))
+    predicted = sun.crossing_time(
+        t_obs, lon, lat, thresh_deg, direction, window_h=window_h
+    )
+    ok = ~np.isnat(predicted)
+    dt = (t_obs - predicted).astype("timedelta64[ns]").astype("int64") / 60e9
+    return np.where(ok, -(dt**2) / (2.0 * sigma**2), 0.0), ok
+
+
+def _finish(lh, lh_floor):
+    lh = np.where(np.isfinite(lh), lh, lh_floor)
+    mx = lh.max() if lh.size else 0.0
+    if mx > 0:
+        lh = lh / mx
+    return lh
+
+
 def _night_likelihood(
     t_rise,
     t_set,
@@ -401,13 +425,10 @@ def _night_likelihood(
     ):
         if not valid:
             continue
-        t_obs = sun._as_utc_ns(_tz(t_obs))
-        predicted = sun.crossing_time(
-            t_obs, lon, lat, thresh_deg, direction, window_h=window_h
+        event_log_lh, ok = _event_log_likelihood(
+            t_obs, direction, lon, lat, thresh_deg, sigma, window_h
         )
-        ok = ~np.isnat(predicted)
-        dt = (t_obs - predicted).astype("timedelta64[ns]").astype("int64") / 60e9
-        log_lh = log_lh + np.where(ok, -(dt**2) / (2.0 * sigma**2), 0.0)
+        log_lh = log_lh + event_log_lh
         found[direction] = ok
 
     if not found:
@@ -419,12 +440,17 @@ def _night_likelihood(
         if flag == "good":
             both = found.get("rise", False) & found.get("set", False)
             lh = np.where(both, lh, lh_floor)
+    return _finish(lh, lh_floor)
 
-    lh = np.where(np.isfinite(lh), lh, lh_floor)
-    mx = lh.max() if lh.size else 0.0
-    if mx > 0:
-        lh = lh / mx
-    return lh
+
+def _event_likelihood(
+    t_obs, direction, lon, lat, thresh_deg, sigma, window_h, lh_floor
+):
+    """Timing likelihood of one crossing; ``lh_floor`` where it is not predicted."""
+    log_lh, ok = _event_log_likelihood(
+        t_obs, direction, lon, lat, thresh_deg, sigma, window_h
+    )
+    return _finish(np.where(ok, np.exp(log_lh), lh_floor), lh_floor)
 
 
 def _night_rows(pairs, qdf):
@@ -438,6 +464,54 @@ def _night_rows(pairs, qdf):
     return zip(pairs, flags, valid_rise, valid_set)
 
 
+def _as_ns(times):
+    if not times:
+        return np.array([], "datetime64[ns]")
+    return sun._as_utc_ns(pd.DatetimeIndex([_tz(t) for t in times]))
+
+
+def light_smoothing_operator(cell_ids, sigma_km, truncate=4.0):
+    """Gaussian smoothing operator on the cells of a HEALPix grid.
+
+    Built with :func:`healpix_analyse.gaussian_filter_operator`
+    (``normalization="present"``, ``width_rule="matched"``): a constant
+    field stays constant, also at the edge of the domain, and the width of
+    the response is ``sigma_km`` even below one cell. Distances are measured
+    on WGS84, whatever the ellipsoid of the grid; at the scale of the
+    smoothing (tens of kilometres) the difference is negligible.
+
+    Parameters
+    ----------
+    cell_ids : xarray.DataArray
+        Nested HEALPix cell ids with the attribute ``level``.
+    sigma_km : float
+        Standard deviation of the Gaussian, kilometres.
+    truncate : float, default 4.0
+        Support radius in units of ``sigma_km``.
+
+    Returns
+    -------
+    tuple
+        The operator, for :func:`healpix_analyse.apply_filter_operator`.
+    """
+    from healpix_analyse import gaussian_filter_operator
+
+    attrs = getattr(cell_ids, "attrs", {})
+    if attrs.get("indexing_scheme", "nested") != "nested":
+        raise ValueError("light smoothing needs nested HEALPix cell ids")
+    if "level" not in attrs:
+        raise ValueError("cell_ids must carry the HEALPix level in its attributes")
+    return gaussian_filter_operator(
+        np.asarray(cell_ids),
+        int(attrs["level"]),
+        sigma_m=float(sigma_km) * 1000.0,
+        truncate=float(truncate),
+        normalization="present",
+        width_rule="matched",
+        ellipsoid="WGS84",
+    )
+
+
 def solar_likelihood_cells(
     pairs,
     qdf,
@@ -446,20 +520,38 @@ def solar_likelihood_cells(
     sigma_timing=10.0,
     window_h=6.0,
     lh_floor=1e-30,
+    by="event",
+    smooth_sigma_km=None,
+    smooth_truncate=4.0,
 ):
-    """Light likelihood of each night on the cells of a HEALPix grid.
+    """Light likelihood on the cells of a HEALPix grid, per crossing or per night.
 
-    For each night and each cell, the likelihood is
+    For an observed crossing ``e`` (rising or setting) and a cell, the
+    likelihood is
 
     .. math::
 
-        L = \\prod_{e} \\exp\\left(-\\frac{\\Delta t_e^2}{2\\sigma^2}\\right)
+        L_e = \\exp\\left(-\\frac{\\Delta t_e^2}{2\\sigma^2}\\right)
 
-    over the valid events ``e`` (rising, setting) of the night, where
-    :math:`\\Delta t_e` is the difference, in minutes, between the observed
-    crossing and the crossing of ``thresh_deg`` predicted at the cell centre.
-    See :func:`_night_likelihood` for the special cases. Each night is
-    divided by its maximum, so a night is a relative weight over the cells.
+    where :math:`\\Delta t_e` is the difference, in minutes, between the
+    observed crossing and the crossing of ``thresh_deg`` predicted at the
+    cell centre. A cell where no crossing is predicted within ``window_h``
+    hours (polar day or night, far away) gets ``lh_floor``.
+
+    With ``by="event"`` (default) every valid crossing is a map of its own,
+    stamped with the observed time of the crossing. No position is needed to
+    decide to which time step a map belongs: :func:`align_light_to_time` puts
+    it in the step that contains the observation, as for the temperature and
+    pressure records. A rising and a setting that fall in the same step are
+    multiplied there, which gives the nightly likelihood.
+
+    With ``by="night"`` the valid crossings of a night are multiplied into one
+    map stamped with the midpoint between rising and setting; see
+    :func:`_night_likelihood` for the special cases.
+
+    Nights flagged ``"bad"`` give no map with ``by="event"`` and a map of ones
+    with ``by="night"``. Every map is divided by its maximum, so it is a
+    relative weight over the cells.
 
     Parameters
     ----------
@@ -484,63 +576,123 @@ def solar_likelihood_cells(
         one is treated as missing.
     lh_floor : float, default 1e-30
         Smallest value; it also replaces missing predictions.
+    by : {"event", "night"}, default "event"
+        One map per valid crossing, or one map per night.
+    smooth_sigma_km : float, optional
+        If given, every map is smoothed with a Gaussian of this standard
+        deviation (kilometres) on the HEALPix grid
+        (:func:`light_smoothing_operator`), then divided by its maximum
+        again.
+    smooth_truncate : float, default 4.0
+        Support radius of the smoothing, in units of ``smooth_sigma_km``.
 
     Returns
     -------
     xarray.DataArray
-        ``pdf_light`` with dimensions ``("time", "cells")``. ``time`` is the
-        midpoint between rising and setting (local noon, UTC); the
-        coordinates ``rise_time`` and ``set_time`` hold the observed crossings
-        and ``flag`` the quality flag. ``cell_ids`` is copied from the input.
+        ``pdf_light`` with dimensions ``("time", "cells")``.
+
+        - ``by="event"``: ``time`` is the observed crossing, with the
+          coordinates ``direction`` (``"rise"`` or ``"set"``), ``night``
+          (row of ``qdf``) and ``flag`` (flag of the night).
+        - ``by="night"``: ``time`` is the midpoint between rising and setting
+          (local noon, UTC), with the coordinates ``rise_time``, ``set_time``
+          and ``flag``.
+
+        ``cell_ids`` is copied from the input.
     """
     from pangeo_fish.tide_healpix import cell_centers
+
+    if by not in ("event", "night"):
+        raise ValueError(f"by must be 'event' or 'night', got {by!r}")
 
     lon, lat = cell_centers(cell_ids)
     sigma = float(sigma_timing)
 
     rows = []
-    rise_times, set_times, flags = [], [], []
-    for (t_rise, t_set), flag, v_r, v_s in _night_rows(pairs, qdf):
-        rows.append(
-            _night_likelihood(
-                t_rise,
-                t_set,
-                v_r,
-                v_s,
-                flag,
-                lon,
-                lat,
-                thresh_deg,
-                sigma,
-                window_h,
-                lh_floor,
+    coords = {}
+    if by == "night":
+        rise_times, set_times, flags = [], [], []
+        for (t_rise, t_set), flag, v_r, v_s in _night_rows(pairs, qdf):
+            rows.append(
+                _night_likelihood(
+                    t_rise,
+                    t_set,
+                    v_r,
+                    v_s,
+                    flag,
+                    lon,
+                    lat,
+                    thresh_deg,
+                    sigma,
+                    window_h,
+                    lh_floor,
+                )
             )
-        )
-        rise_times.append(_tz(t_rise))
-        set_times.append(_tz(t_set))
-        flags.append(flag)
-
-    rise_ns = (
-        sun._as_utc_ns(pd.DatetimeIndex(rise_times))
-        if rise_times
-        else np.array([], "datetime64[ns]")
-    )
-    set_ns = (
-        sun._as_utc_ns(pd.DatetimeIndex(set_times))
-        if set_times
-        else np.array([], "datetime64[ns]")
-    )
-    midpoint = rise_ns + (set_ns - rise_ns) // 2
+            rise_times.append(t_rise)
+            set_times.append(t_set)
+            flags.append(flag)
+        rise_ns, set_ns = _as_ns(rise_times), _as_ns(set_times)
+        time = rise_ns + (set_ns - rise_ns) // 2
+        coords = {
+            "rise_time": ("time", rise_ns),
+            "set_time": ("time", set_ns),
+            "flag": ("time", np.asarray(flags, dtype=object).astype(str)),
+        }
+    else:
+        times, directions, nights, flags = [], [], [], []
+        for night, ((t_rise, t_set), flag, v_r, v_s) in enumerate(
+            _night_rows(pairs, qdf)
+        ):
+            if flag == "bad":
+                continue
+            for valid, t_obs, direction in ((v_r, t_rise, "rise"), (v_s, t_set, "set")):
+                if not valid:
+                    continue
+                rows.append(
+                    _event_likelihood(
+                        t_obs,
+                        direction,
+                        lon,
+                        lat,
+                        thresh_deg,
+                        sigma,
+                        window_h,
+                        lh_floor,
+                    )
+                )
+                times.append(t_obs)
+                directions.append(direction)
+                nights.append(night)
+                flags.append(flag)
+        time = _as_ns(times)
+        order = np.argsort(time, kind="stable")
+        time = time[order]
+        rows = [rows[i] for i in order]
+        coords = {
+            "direction": (
+                "time",
+                np.asarray(directions, dtype=object)[order].astype(str),
+            ),
+            "night": ("time", np.asarray(nights, dtype="int64")[order]),
+            "flag": ("time", np.asarray(flags, dtype=object)[order].astype(str)),
+        }
 
     data = np.stack(rows) if rows else np.empty((0, lon.size))
+    if smooth_sigma_km is not None and data.shape[0] > 0:
+        from healpix_analyse import apply_filter_operator
+
+        operator = light_smoothing_operator(cell_ids, smooth_sigma_km, smooth_truncate)
+        data = np.stack(
+            [_finish(row, lh_floor) for row in apply_filter_operator(data, *operator)]
+        )
+        data = np.maximum(data, lh_floor)
+
     return xr.DataArray(
         data,
         dims=("time", "cells"),
         coords={
-            "time": midpoint,
-            "rise_time": ("time", rise_ns),
-            "set_time": ("time", set_ns),
-            "flag": ("time", np.asarray(flags, dtype=object).astype(str)),
+            "time": time,
+            **coords,
             "cell_ids": (
                 cell_ids.variable
                 if hasattr(cell_ids, "variable")
@@ -550,9 +702,13 @@ def solar_likelihood_cells(
         name="pdf_light",
         attrs={
             "method": "solar_threshold",
+            "by": by,
             "sigma_timing_min": sigma,
             "thresh_deg": float(thresh_deg),
             "window_h": float(window_h),
+            "smooth_sigma_km": (
+                float(smooth_sigma_km) if smooth_sigma_km is not None else "none"
+            ),
         },
     )
 
@@ -572,8 +728,21 @@ def _time_bins(time):
     )
 
 
-def align_light_to_time(pdf_light, time, how="date", fill_value=1.0):
-    """Put the nightly light likelihood on the time steps of the emission.
+def _interval_index(time, values):
+    """Step ``i`` covers ``[time[i], time[i+1])``; the last one has the length of the one before."""
+    if time.size == 0:
+        return np.full(values.shape, -1)
+    if time.size > 1:
+        end = time[-1] + (time[-1] - time[-2])
+    else:
+        end = time[-1] + np.timedelta64(1, "D")
+    index = np.searchsorted(time, values, side="right") - 1
+    outside = (values < time[0]) | (values >= end) | np.isnat(values)
+    return np.where(outside, -1, index)
+
+
+def align_light_to_time(pdf_light, time, how="interval", fill_value=1.0):
+    """Put the light likelihood on the time steps of the emission.
 
     Parameters
     ----------
@@ -581,46 +750,53 @@ def align_light_to_time(pdf_light, time, how="date", fill_value=1.0):
         Output of :func:`solar_likelihood_cells` (dimensions ``time``,
         ``cells``).
     time : array-like or xarray.DataArray
-        Time coordinate of the emission.
-    how : {"date", "rise_date", "bins"}, default "date"
-        ``"date"``: a night goes to the time step labelled 00:00 of the UTC
-        date of its midpoint (local noon). This is the local day, also in
-        Japan where the rising is on the previous UTC date. Use it for daily
-        emissions labelled at 00:00.
-        ``"rise_date"``: same with the UTC date of the rising, as in the
-        notebooks of pull request 267. West of about 90 degrees East it gives
-        the same result as ``"date"``.
-        ``"bins"``: a night goes to the time step whose bin contains its
-        midpoint, the bins being built from the bounds of ``time`` as in
-        :func:`pangeo_fish.helpers.compute_diff`. Use it for emissions with
-        steps shorter than a day. With daily steps labelled at 00:00 the bin
-        edges are at 12:00 UTC, close to local noon in Europe and Africa, so
-        consecutive nights can fall in the same step and leave the next one
-        empty.
+        Time coordinate of the emission (sorted).
+    how : {"interval", "bins", "date", "rise_date"}, default "interval"
+        How a map finds its time step, from its ``time`` (the observed
+        crossing with ``by="event"``).
+
+        - ``"interval"``: step ``i`` covers ``[time[i], time[i+1])``. This is
+          the step that holds the records of the same period when the tag log
+          is floored to the step before it is binned, as in the daily
+          notebooks (``tag_log["time"].dt.floor("D")``).
+        - ``"bins"``: the bins built from the bounds of ``time`` as in
+          :func:`pangeo_fish.helpers.compute_diff`, centred on the labels.
+          Use it when the tag log is binned without flooring.
+        - ``"date"`` and ``"rise_date"`` (for ``by="night"`` maps only): the
+          step labelled 00:00 of the UTC date of the midpoint, or of the
+          rising. Both depend on where the night was observed (the local
+          noon), unlike the two options above.
     fill_value : float, default 1.0
-        Value of the time steps without any night. Any constant is neutral:
+        Value of the time steps without any map. Any constant is neutral:
         the product of the terms is normalised over the cells.
 
     Returns
     -------
     xarray.DataArray
         ``pdf_light`` on ``("time", "cells")`` with the given time coordinate.
-        Nights that fall in the same time step are multiplied. Nights outside
-        every time step are dropped. ``n_nights`` counts the nights of each
-        time step.
+        Maps that fall in the same time step are multiplied, then divided by
+        the maximum. Maps outside every time step are dropped. ``n_light``
+        counts the maps of each time step.
     """
     time = np.asarray(getattr(time, "values", time), dtype="datetime64[ns]")
-    if how == "bins":
+    stamps = pdf_light["time"].values.astype("datetime64[ns]")
+    if how == "interval":
+        index = _interval_index(time, stamps)
+    elif how == "bins":
         bins = pd.IntervalIndex(_time_bins(time).values)
-        index = bins.get_indexer(pdf_light["time"].values)
+        index = bins.get_indexer(stamps)
     elif how in ("date", "rise_date"):
+        if "rise_time" not in pdf_light.coords:
+            raise ValueError(f"how={how!r} needs the nightly maps of by='night'")
         source = "time" if how == "date" else "rise_time"
         labels = (
             pdf_light[source].values.astype("datetime64[D]").astype("datetime64[ns]")
         )
         index = pd.Index(time).get_indexer(labels)
     else:
-        raise ValueError(f"how must be 'date', 'rise_date' or 'bins', got {how!r}")
+        raise ValueError(
+            f"how must be 'interval', 'bins', 'date' or 'rise_date', got {how!r}"
+        )
 
     n_cells = pdf_light.sizes["cells"]
     product = np.ones((time.size, n_cells))
@@ -633,7 +809,7 @@ def align_light_to_time(pdf_light, time, how="date", fill_value=1.0):
         counts[target] += 1
 
     out = np.where(counts[:, None] > 0, product, fill_value)
-    # several nights in one step: divide by the maximum again
+    # several maps in one step: divide by the maximum again
     for step in np.flatnonzero(counts > 1):
         mx = out[step].max()
         if mx > 0:
@@ -645,7 +821,7 @@ def align_light_to_time(pdf_light, time, how="date", fill_value=1.0):
         coords={
             "time": time,
             "cell_ids": pdf_light["cell_ids"].variable,
-            "n_nights": ("time", counts),
+            "n_light": ("time", counts),
         },
         name="pdf_light",
         attrs=dict(pdf_light.attrs, alignment=how),

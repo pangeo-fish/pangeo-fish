@@ -246,7 +246,20 @@ Each event is checked in a window of `window_h` hours (default 1 h) around it:
 A night is `good` when both events pass, `partial` when one passes and `bad` when none passes.
 The direction filter is told which event is a rising.
 `twilight_quality` called alone without `direction` still guesses it from the UTC hour (before 12:00 is a rising), which is wrong far from the Greenwich meridian.
-The defaults are for raw light counts; a log-transformed sensor needs other values.
+
+### Settings per type of tag: `light_settings`
+
+The thresholds depend on how the tag records light.
+The tag says what it is in `metadata.json` (`tag_type`, the names of `load_tag_csv`), and `light_settings(tag.attrs)` returns the light transform, the arguments of `dynamic_threshold` (`settings.threshold`) and those of `compute_quality_flags` (`settings.quality`).
+A `"light"` mapping in the metadata, or keyword arguments, override single values.
+
+| `tag_type`    | Light               | Threshold base / amp | Quality (`window_h`, `slope_threshold`, `marge_threshold`, `min_amplitude`, `min_samples`) | Taken from |
+| ------------- | ------------------- | -------------------- | ------------------------------------------------------------------------------------------- | ---------- |
+| `wc_archival` | raw counts          | 60 / 20              | 1 h, 25, 8, 40, 10                                                                          | bluefin tuna 18P0430 and 20P0204 |
+| `logglaw_c6`  | `log1p` of counts   | 3 / 0.3              | 1.5 h, off, 0.3, 0.5, 10                                                                    | six-logger null test at Maizuru |
+
+Any other type raises: its values have to be chosen and added to `LIGHT_SETTINGS`.
+`max_depth` is a property of the animal or of the deployment, not of the sensor, and is not part of the settings.
 
 ### Self-calibration: `self_calibrate_solar_threshold`
 
@@ -256,36 +269,36 @@ With a recapture position, the same median over the last `n_nights_end` pairs gi
 
 ### Likelihood: `solar_likelihood_cells`
 
-For each night and each HEALPix cell:
+For each observed crossing and each HEALPix cell:
 
-1. The crossings of `thresh_deg` are predicted at the cell centre, on the ellipsoid of `cell_ids`.
+1. The crossing of `thresh_deg` is predicted at the cell centre, on the ellipsoid of `cell_ids`.
    A prediction more than `window_h` (default 6 h) from the observed crossing counts as missing, and so does one that does not exist (polar day or night).
-2. Each valid event of the night gives `exp(-dt**2 / (2 * sigma_timing**2))`, with `dt` in minutes.
-   The likelihood is the product.
-3. A `bad` night gives 1 in every cell.
-4. A cell without any valid prediction gets `lh_floor` (default `1e-30`).
-   On a `good` night both predictions are needed: a cell with only one gets `lh_floor`.
-5. Each night is divided by its maximum.
+2. The crossing gives `exp(-dt**2 / (2 * sigma_timing**2))`, with `dt` in minutes, and `lh_floor` (default `1e-30`) where the prediction is missing.
+3. With `smooth_sigma_km`, the map is smoothed by a Gaussian of that width on the HEALPix grid (`healpix_analyse.gaussian_filter_operator`, `normalization="present"`, `width_rule="matched"`, distances on WGS84).
+4. Each map is divided by its maximum.
 
-The time of a night is its midpoint (local noon, UTC).
-There is no spatial smoothing: the likelihood is evaluated at the cell centres, not on an intermediate latitude/longitude grid.
+With `by="event"` (default) every valid crossing of a night that is not `bad` is a map of its own, stamped with the observed time of the crossing.
+With `by="night"` the valid crossings of a night are multiplied into one map stamped with the midpoint between rising and setting; a `bad` night gives 1 everywhere, and on a `good` night a cell where only one crossing is predicted gets `lh_floor`.
 
-`compute_solar_likelihood` gives the same likelihood on a regular latitude/longitude grid, smoothed with a Gaussian filter of `smooth_sigma` grid steps.
+`compute_solar_likelihood` gives the nightly likelihood on a regular latitude/longitude grid, smoothed with a Gaussian filter of `smooth_sigma` grid steps.
 It is the output of the notebooks of pull request 267, which then regridded it to HEALPix.
+The smoothing of those notebooks was 0.5 step of 0.5 degree for the tuna (about 28 km) and 0.4 step of 0.1 degree for the C6 loggers (about 4.4 km).
 
 ### Time steps: `align_light_to_time`
 
-`align_light_to_time(nightly, emission["time"])` gives `pdf_light` on the time steps of the emission.
+`align_light_to_time(events, emission["time"])` gives `pdf_light` on the time steps of the emission.
+Where the animal was is not known, so neither is its local day: a map goes to a step by the time of the observation only, as the temperature and pressure records do.
 
-| `how`                | A night goes to                                                         |
-| -------------------- | ----------------------------------------------------------------------- |
-| `"date"` (default)   | the step labelled 00:00 of the UTC date of its midpoint (the local day) |
-| `"rise_date"`        | the step labelled 00:00 of the UTC date of its rising, as in pull request 267 |
-| `"bins"`             | the step whose bin, built as in `compute_diff`, contains its midpoint   |
+| `how`                  | A map goes to                                                                                     |
+| ---------------------- | ------------------------------------------------------------------------------------------------- |
+| `"interval"` (default) | step `i`, covering `[time[i], time[i+1])`: the UTC day of the observation for daily steps at 00:00 |
+| `"bins"`               | the step whose bin, built as in `compute_diff` (centred on the labels), contains the observation  |
+| `"date"`, `"rise_date"` | (nightly maps only) the step of the UTC date of the midpoint or of the rising, as in pull request 267 |
 
-Use `"date"` for daily steps labelled at 00:00 and `"bins"` for steps shorter than a day.
-With daily steps, `"bins"` puts the bin edges at 12:00 UTC, near local noon in Europe and Africa, so two nights can share a step and leave the next one empty.
-A step without any night gets `fill_value` (default 1), which is neutral.
-Nights in the same step are multiplied and divided by the maximum again.
-`n_nights` counts the nights of each step.
-
+`"interval"` matches the daily notebooks, which floor the tag log to the day before binning it.
+Use `"bins"` when the tag log is binned without flooring.
+A rising and a setting in the same step are multiplied there, which is the nightly likelihood.
+When they fall in different steps (in Japan the rising is near 21:00 UTC of the day before), each step gets the constraint of its own crossing, and the movement model links the two.
+A step without any map gets `fill_value` (default 1), which is neutral.
+Maps in the same step are multiplied and divided by the maximum again.
+`n_light` counts the maps of each step.
