@@ -140,7 +140,7 @@ Fallbacks and guards:
 The demos use it.
 
 1. Every data variable except `initial`, `final` and `mask` (and except those in `excluded_pdf`) is a term.
-   Typical terms are `pdf`, `acoustic`, `pdf_bathy` and `pdf_tide`.
+   Typical terms are `pdf`, `acoustic`, `pdf_bathy`, `pdf_tide` and `pdf_light`.
 2. The terms are multiplied with `skipna=False`.
    A `NaN` in one term makes the product `NaN` in that cell and time step.
 3. `final` is multiplied into the last time step.
@@ -208,3 +208,97 @@ In multi-sigma mode with `sigma_bounds`, each behaviour has its own upper bound,
 `detect_tide` resamples the pressure to 10 minutes; a coarser time step raises a `NotImplementedError`.
 `tide_sigma_m` is read only by `tide_method = "healpix"`.
 See {doc}`tide` for what the two tide methods assume.
+
+## 6. Light likelihood
+
+The light term uses the times at which the light record crosses a light threshold at dawn and dusk.
+The functions are in `pangeo_fish.light`.
+The solar geometry is in `pangeo_fish.light.sun`.
+It is computed for many positions at once, without a loop over cells.
+It is the low-precision solar position of the NOAA calculator: elevation of the centre of the Sun, without refraction.
+Over 1995--2026 it agrees with `ephem` to 0.02 degree of elevation and 0.4 minute of crossing time.
+
+### Detection: `detect_twilight_events`
+
+1. A rising is a record where the light goes from at most the threshold to above it.
+   A setting is the reverse.
+   The threshold is `dyn_thresh` per row, or the moon-phase threshold of `dynamic_threshold`, or `thresh_light`.
+   With `use_fixed_threshold=True` it is the largest value of the per-row threshold.
+2. For each local solar day, the rising and the setting at the release position are predicted for the elevation `detection_elevation` (default -10 degrees).
+3. The threshold crossing nearest to each prediction is kept if it is less than `window_h` (default 2.5 h) away.
+4. A day gives a pair `(t_rise, t_set)` only if both crossings are kept.
+
+The day is the local solar day, centred on the solar noon at the release longitude.
+East of about 90 degrees East the rising is on the previous UTC date (about 21:00 UTC for a sunrise in Japan).
+
+### Quality: `compute_quality_flags`
+
+Each event is checked in a window of `window_h` hours (default 1 h) around it:
+
+| Filter    | Condition                                                                                                            | Parameter                                           |
+| --------- | -------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| Direction | mean of the last 10 records minus mean of the first 10 is above the value for a rising, below minus it for a setting | `slope_threshold` (default 25, `None` turns it off) |
+| Margin    | peak light minus the mean threshold is above the value                                                               | `marge_threshold` (default 8)                       |
+| Depth     | largest pressure is below the value, in dbar                                                                         | `max_depth` (default 80)                            |
+| Amplitude | light range (max - min) is above the value                                                                           | `min_amplitude` (default 40)                        |
+| Samples   | number of records in the window is at least the value                                                                | `min_samples` (default 10)                          |
+
+A night is `good` when both events pass, `partial` when one passes and `bad` when none passes.
+The direction filter is told which event is a rising.
+`twilight_quality` called alone without `direction` still guesses it from the UTC hour (before 12:00 is a rising), which is wrong far from the Greenwich meridian.
+
+### Settings per type of tag: `light_settings`
+
+The thresholds depend on how the tag records light.
+The tag says what it is in `metadata.json` (`tag_type`, the names of `load_tag_csv`), and `light_settings(tag.attrs)` returns the light transform, the arguments of `dynamic_threshold` (`settings.threshold`) and those of `compute_quality_flags` (`settings.quality`).
+A `"light"` mapping in the metadata, or keyword arguments, override single values.
+
+| `tag_type`    | Light             | Threshold base / amp | Quality (`window_h`, `slope_threshold`, `marge_threshold`, `min_amplitude`, `min_samples`) | Taken from                       |
+| ------------- | ----------------- | -------------------- | ------------------------------------------------------------------------------------------ | -------------------------------- |
+| `wc_archival` | raw counts        | 60 / 20              | 1 h, 25, 8, 40, 10                                                                         | bluefin tuna 18P0430 and 20P0204 |
+| `logglaw_c6`  | `log1p` of counts | 3 / 0.3              | 1.5 h, off, 0.3, 0.5, 10                                                                   | six-logger null test at Maizuru  |
+
+Any other type raises: its values have to be chosen and added to `LIGHT_SETTINGS`.
+`max_depth` is a property of the animal or of the deployment, not of the sensor, and is not part of the settings.
+
+### Self-calibration: `self_calibrate_solar_threshold`
+
+The solar elevation is computed at each crossing of the first `n_nights` pairs, at the release position.
+The median is `thresh_deg`, the elevation at which the tag sees its threshold.
+With a recapture position, the same median over the last `n_nights_end` pairs gives `thresh_deg_end`, as a check.
+
+### Likelihood: `solar_likelihood_cells`
+
+For each observed crossing and each HEALPix cell:
+
+1. The crossing of `thresh_deg` is predicted at the cell centre, on the ellipsoid of `cell_ids`.
+   A prediction more than `window_h` (default 6 h) from the observed crossing counts as missing, and so does one that does not exist (polar day or night).
+2. The crossing gives `exp(-dt**2 / (2 * sigma_timing**2))`, with `dt` in minutes, and `lh_floor` (default `1e-30`) where the prediction is missing.
+3. With `smooth_sigma_km`, the map is smoothed by a Gaussian of that width on the HEALPix grid (`healpix_analyse.gaussian_filter_operator`, `normalization="present"`, `width_rule="matched"`, distances on WGS84).
+4. Each map is divided by its maximum.
+
+With `by="event"` (default) every valid crossing of a night that is not `bad` is a map of its own, stamped with the observed time of the crossing.
+With `by="night"` the valid crossings of a night are multiplied into one map stamped with the midpoint between rising and setting; a `bad` night gives 1 everywhere, and on a `good` night a cell where only one crossing is predicted gets `lh_floor`.
+
+`compute_solar_likelihood` gives the nightly likelihood on a regular latitude/longitude grid, smoothed with a Gaussian filter of `smooth_sigma` grid steps.
+It is the output of the notebooks of pull request 267, which then regridded it to HEALPix.
+The smoothing of those notebooks was 0.5 step of 0.5 degree for the tuna (about 28 km) and 0.4 step of 0.1 degree for the C6 loggers (about 4.4 km).
+
+### Time steps: `align_light_to_time`
+
+`align_light_to_time(events, emission["time"])` gives `pdf_light` on the time steps of the emission.
+Where the animal was is not known, so neither is its local day: a map goes to a step by the time of the observation only, as the temperature and pressure records do.
+
+| `how`                   | A map goes to                                                                                         |
+| ----------------------- | ----------------------------------------------------------------------------------------------------- |
+| `"interval"` (default)  | step `i`, covering `[time[i], time[i+1])`: the UTC day of the observation for daily steps at 00:00    |
+| `"bins"`                | the step whose bin, built as in `compute_diff` (centred on the labels), contains the observation      |
+| `"date"`, `"rise_date"` | (nightly maps only) the step of the UTC date of the midpoint or of the rising, as in pull request 267 |
+
+`"interval"` matches the daily notebooks, which floor the tag log to the day before binning it.
+Use `"bins"` when the tag log is binned without flooring.
+A rising and a setting in the same step are multiplied there, which is the nightly likelihood.
+When they fall in different steps (in Japan the rising is near 21:00 UTC of the day before), each step gets the constraint of its own crossing, and the movement model links the two.
+A step without any map gets `fill_value` (default 1), which is neutral.
+Maps in the same step are multiplied and divided by the maximum again.
+`n_light` counts the maps of each step.
