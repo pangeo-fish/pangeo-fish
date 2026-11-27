@@ -82,8 +82,8 @@ def test_sun_matches_ephem():
     rng = np.random.default_rng(1)
     for _ in range(40):
         lon, lat = rng.uniform(-180, 180), rng.uniform(-60, 60)
-        day = pd.Timestamp("2000-01-01") + pd.Timedelta(
-            days=float(rng.uniform(0, 365 * 30))
+        day = pd.Timestamp("2000-01-01") + np.timedelta64(
+            int(rng.uniform(0, 365 * 30) * 86400), "s"
         )
         obs = ephem.Observer()
         obs.lon, obs.lat, obs.pressure = str(lon), str(lat), 0
@@ -99,9 +99,9 @@ def test_sun_matches_ephem():
             ephem.Date(obs.next_rising(ephem.Sun(), use_center=True)).datetime()
         )
         found = sun.crossing_time(
-            (expected + pd.Timedelta(hours=3)).to_datetime64(), lon, lat, -6.0, "rise"
+            (expected + np.timedelta64(3, "h")).to_datetime64(), lon, lat, -6.0, "rise"
         )
-        assert abs(pd.Timestamp(found.item()) - expected) < pd.Timedelta(minutes=1)
+        assert abs(pd.Timestamp(found.item()) - expected) < np.timedelta64(1, "m")
 
 
 def test_crossing_time_polar_day_is_nat():
@@ -140,7 +140,7 @@ def test_detection_quality_calibration(position):
     pairs = detect_twilight_events(df, lon, lat)
     assert 13 <= len(pairs) <= 15
     for t_rise, t_set in pairs:
-        assert t_rise < t_set < t_rise + pd.Timedelta(hours=24)
+        assert t_rise < t_set < t_rise + np.timedelta64(24, "h")
 
     qdf = compute_quality_flags(df, pairs)
     # the direction filter knows which event is a rising: also right in Japan
@@ -280,7 +280,7 @@ def test_align_light_to_time():
         coords={
             "time": noon.values,
             # the first rising is on the previous UTC date, as in Japan
-            "rise_time": ("time", (noon - pd.Timedelta(hours=14)).values),
+            "rise_time": ("time", (noon - np.timedelta64(14, "h")).values),
             "cell_ids": cell_ids,
         },
         name="pdf_light",
@@ -419,7 +419,7 @@ def test_compute_solar_likelihood_regular_grid():
     lats = np.arange(30, 51, 5.0)
     t0 = pd.Timestamp("2020-06-01 04:00:00", tz="UTC")
     pairs = [
-        (t0 + pd.Timedelta(days=i), t0 + pd.Timedelta(days=i, hours=15))
+        (t0 + np.timedelta64(i, "D"), t0 + np.timedelta64(24 * i + 15, "h"))
         for i in range(5)
     ]
     da = compute_solar_likelihood(

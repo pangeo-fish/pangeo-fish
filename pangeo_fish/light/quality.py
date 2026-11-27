@@ -1,5 +1,6 @@
 """Twilight quality flagging shared between the solar and lunar pipelines."""
 
+import numpy as np
 import pandas as pd
 
 
@@ -59,7 +60,8 @@ def _event_window(df, t_event, window_h):
     times = df["time"]
     # Match the time zone of df["time"]: keep UTC if aware, drop it if naive
     t_cmp = t if getattr(times.dtype, "tz", None) is not None else t.tz_convert(None)
-    half = pd.Timedelta(hours=window_h)
+    # an explicit unit: keyword Timedelta construction warns with numpy >= 2.5
+    half = np.timedelta64(int(round(window_h * 3_600_000_000_000)), "ns")
     if times.is_monotonic_increasing:
         start = times.searchsorted(t_cmp - half, side="left")
         stop = times.searchsorted(t_cmp + half, side="right")
